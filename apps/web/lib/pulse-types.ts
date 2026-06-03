@@ -1,0 +1,181 @@
+export type MonitorStatus = "success" | "failed" | "timeout" | "error" | "skipped"
+
+export type StepType = "http" | "preRequest" | "delay"
+
+export type TriggeredBy = "manual" | "schedule"
+
+export type ScheduleMode =
+  | "manual"
+  | "every-1m"
+  | "every-5m"
+  | "every-10m"
+  | "every-15m"
+  | "every-30m"
+  | "hourly"
+  | "custom-cron"
+
+export type SecretProvider = "encrypted-db" | "vault"
+
+export type AssertionType =
+  | "statusCode"
+  | "responseTime"
+  | "jsonPath"
+  | "header"
+  | "bodyContains"
+  | "regex"
+
+export type ExtractorType =
+  | "jsonPath"
+  | "header"
+  | "cookie"
+  | "regex"
+  | "statusCode"
+  | "responseTime"
+
+export type PreRequestActionType =
+  | "setVariable"
+  | "generateUUID"
+  | "generateTimestamp"
+  | "base64Encode"
+  | "base64Decode"
+  | "urlEncode"
+  | "urlDecode"
+  | "sha256"
+  | "hmacSha256"
+  | "generateJWT"
+  | "setHeader"
+  | "setBody"
+  | "readStepOutput"
+
+export type FailureCategory =
+  | "DNS_FAILURE"
+  | "CONNECTION_FAILURE"
+  | "TLS_FAILURE"
+  | "TIMEOUT"
+  | "HTTP_ERROR"
+  | "ASSERTION_FAILURE"
+  | "AUTH_FAILURE"
+  | "SECRET_FETCH_FAILURE"
+  | "VARIABLE_RESOLUTION_FAILURE"
+  | "PRE_REQUEST_FAILURE"
+  | "UNKNOWN_ERROR"
+
+export interface PulseAssertion {
+  id: string
+  type: AssertionType
+  label: string
+  target: string
+  operator: string
+  expected: string
+  actual?: string
+  sensitive?: boolean
+}
+
+export interface PulseExtractor {
+  id: string
+  name: string
+  type: ExtractorType
+  source: string
+  sensitive?: boolean
+  optional?: boolean
+}
+
+export interface PreRequestAction {
+  id: string
+  type: PreRequestActionType
+  label: string
+  output: string
+  configPreview: string
+}
+
+export interface MonitorStep {
+  id: string
+  order: number
+  name: string
+  type: StepType
+  method?: string
+  url?: string
+  timeoutMs: number
+  retryCount: number
+  continueOnFailure: boolean
+  actions?: PreRequestAction[]
+  assertions: PulseAssertion[]
+  extractors: PulseExtractor[]
+  preRequestScript?: string
+  config?: Record<string, any>
+}
+
+export interface SecretReference {
+  id: string
+  name: string
+  alias: string
+  provider: SecretProvider
+  description: string
+  status?: "active" | "inactive"
+  isActive?: boolean
+  lastTestedAt: string
+  path?: string
+  key?: string
+  value?: string
+}
+
+export interface AlertPolicy {
+  enabled: boolean
+  threshold: number
+  responseTimeMs: number
+  email: boolean
+  slackWebhook: boolean
+  cooldownMinutes: number
+}
+
+export interface Monitor {
+  id: string
+  name: string
+  description: string
+  scheduleMode: ScheduleMode
+  scheduleLabel: string
+  cron: string
+  timezone: string
+  timeoutMs: number
+  retryCount: number
+  failureThreshold: number
+  responseBodyLimitKb: number
+  isActive: boolean
+  variables: Record<string, string>
+  secretAliases: string[]
+  steps: MonitorStep[]
+  alertPolicy: AlertPolicy
+  status: MonitorStatus
+  lastRunAt: string
+  lastDurationMs: number
+  successRate24h: number
+}
+
+export interface StepRun {
+  id: string
+  stepId: string
+  stepName: string
+  type: StepType
+  status: MonitorStatus
+  latencyMs: number
+  requestSummary: string
+  responseSummary: string
+  assertions: PulseAssertion[]
+  extractors: PulseExtractor[]
+  errorMessage?: string
+  consoleOutput?: string[]
+}
+
+export interface MonitorRun {
+  id: string
+  monitorId: string
+  monitorName: string
+  status: MonitorStatus
+  triggeredBy: TriggeredBy
+  startedAt: string
+  endedAt: string
+  durationMs: number
+  failureCategory?: FailureCategory
+  failureReason?: string
+  steps: StepRun[]
+}

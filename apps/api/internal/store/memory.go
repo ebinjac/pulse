@@ -1,0 +1,348 @@
+package store
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/ensemble-pulse/pulse/apps/api/internal/domain"
+)
+
+var ErrNotFound = errors.New("not found")
+
+type MemoryStore struct {
+	mu       sync.RWMutex
+	monitors map[string]domain.Monitor
+	runs     map[string]domain.MonitorRun
+	secrets  map[string]domain.SecretReference
+}
+
+func NewMemoryStore() *MemoryStore {
+	now := time.Now().UTC()
+	monitor := domain.Monitor{
+		ID:                  "mon-protected-api",
+		Name:                "Protected API Synthetic Check",
+		Description:         "Generates JWT, fetches a token, and validates protected API health.",
+		ScheduleMode:        "every-5m",
+		ScheduleLabel:       "Every 5 minutes",
+		Cron:                "*/5 * * * *",
+		ScheduleCron:        "*/5 * * * *",
+		Timezone:            "Asia/Kolkata",
+		TimeoutMS:           30000,
+		RetryCount:          1,
+		FailureThreshold:    3,
+		ResponseBodyLimitKB: 32,
+		IsActive:            true,
+		AlertEnabled:        true,
+		Variables: map[string]string{
+			"tokenUrl": "https://auth.example.com/oauth/token",
+			"baseUrl":  "https://api.example.com",
+			"audience": "protected-api",
+		},
+		SecretAliases:  []string{"clientId", "privateKey", "slackWebhook"},
+		Status:         domain.StatusFailed,
+		LastDurationMS: 1842,
+		SuccessRate24H: 96.4,
+		AlertPolicy: domain.AlertPolicy{
+			Enabled:         true,
+			Threshold:       3,
+			ResponseTimeMS:  2000,
+			Email:           true,
+			SlackWebhook:    true,
+			CooldownMinutes: 30,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	monitor.Steps = []domain.MonitorStep{
+		{
+			ID:        "step-jwt",
+			MonitorID: monitor.ID,
+			Order:     1,
+			Name:      "Generate JWT",
+			Type:      "preRequest",
+			TimeoutMS: 5000,
+			Actions: []domain.Action{
+				{
+					ID:            "action-jwt",
+					Type:          "generateJWT",
+					Label:         "Generate RS256 client assertion",
+					Output:        "jwt",
+					ConfigPreview: "iss/sub={{secrets.clientId}}, aud={{variables.audience}}, exp={{timestamp.epochSecondsPlus300}}",
+				},
+			},
+			Assertions: []domain.Assertion{},
+			Extractors: []domain.Extractor{},
+		},
+		{
+			ID:         "step-token",
+			MonitorID:  monitor.ID,
+			Order:      2,
+			Name:       "Get Token",
+			Type:       "http",
+			Method:     "POST",
+			URL:        "{{variables.tokenUrl}}",
+			TimeoutMS:  15000,
+			RetryCount: 1,
+			Assertions: []domain.Assertion{
+				{ID: "assert-token-status", Type: "statusCode", Label: "Token endpoint returns 200", Target: "status", Operator: "equals", Expected: "200", Actual: "200"},
+				{ID: "assert-token-json", Type: "jsonPath", Label: "Access token exists", Target: "$.access_token", Operator: "exists", Expected: "present", Actual: "********", Sensitive: true},
+			},
+			Extractors: []domain.Extractor{
+				{ID: "extract-access-token", Name: "accessToken", Type: "jsonPath", Source: "$.access_token", Sensitive: true},
+			},
+		},
+		{
+			ID:         "step-health",
+			MonitorID:  monitor.ID,
+			Order:      3,
+			Name:       "Call Protected API",
+			Type:       "http",
+			Method:     "GET",
+			URL:        "{{variables.baseUrl}}/health",
+			TimeoutMS:  10000,
+			RetryCount: 1,
+			Assertions: []domain.Assertion{
+				{ID: "assert-health-status", Type: "statusCode", Label: "Protected API returns 200", Target: "status", Operator: "equals", Expected: "200", Actual: "503"},
+				{ID: "assert-health-latency", Type: "responseTime", Label: "Responds under threshold", Target: "latency", Operator: "lessThan", Expected: "2000ms", Actual: "1842ms"},
+			},
+			Extractors: []domain.Extractor{},
+		},
+	}
+
+	return &MemoryStore{
+		monitors: map[string]domain.Monitor{monitor.ID: monitor},
+		runs:     map[string]domain.MonitorRun{},
+		secrets: map[string]domain.SecretReference{
+			"sec-client-id": {
+				ID: "sec-client-id", Name: "Demo Client ID", Alias: "clientId", Provider: "encrypted-db",
+				Description: "OAuth client identifier used by the JWT prerequisite step.", MaskedValue: "********", IsActive: true, LastTestedAt: now, RawValue: "demo-client-id",
+			},
+			"sec-private-key": {
+				ID: "sec-private-key", Name: "Demo Private Key", Alias: "privateKey", Provider: "encrypted-db",
+				Description: "RS256 signing key. Stored encrypted and masked everywhere.", MaskedValue: "********", IsActive: true, LastTestedAt: now, RawValue: "demo-private-key",
+			},
+			"sec-slack": {
+				ID: "sec-slack", Name: "Synthetic Alerts Slack Webhook", Alias: "slackWebhook", Provider: "encrypted-db",
+				Description: "Webhook for failure threshold and auto-resolve notifications.", MaskedValue: "********", IsActive: true, LastTestedAt: now, RawValue: "https://hooks.slack.example/demo",
+			},
+		},
+	}
+}
+
+func (s *MemoryStore) ListMonitors() []domain.Monitor {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	monitors := make([]domain.Monitor, 0, len(s.monitors))
+	for _, monitor := range s.monitors {
+		monitors = append(monitors, monitor)
+	}
+
+	return monitors
+}
+
+func (s *MemoryStore) GetMonitor(id string) (domain.Monitor, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	monitor, ok := s.monitors[id]
+	return monitor, ok
+}
+
+func (s *MemoryStore) UpsertMonitor(monitor domain.Monitor) domain.Monitor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	monitor = NormalizeMonitor(monitor)
+	if monitor.ID == "" {
+		monitor.ID = "mon-" + randomID()
+		monitor.CreatedAt = now
+	}
+	if monitor.CreatedAt.IsZero() {
+		monitor.CreatedAt = now
+	}
+	monitor.UpdatedAt = now
+	for index := range monitor.Steps {
+		monitor.Steps[index].MonitorID = monitor.ID
+		if monitor.Steps[index].ID == "" {
+			monitor.Steps[index].ID = "step-" + randomID()
+		}
+		if monitor.Steps[index].Order == 0 {
+			monitor.Steps[index].Order = index + 1
+		}
+	}
+
+	s.monitors[monitor.ID] = monitor
+	return monitor
+}
+
+func NormalizeMonitor(monitor domain.Monitor) domain.Monitor {
+	if monitor.ScheduleCron == "" {
+		monitor.ScheduleCron = monitor.Cron
+	}
+	if monitor.Cron == "" {
+		monitor.Cron = monitor.ScheduleCron
+	}
+	if monitor.ScheduleLabel == "" && monitor.Cron != "" {
+		monitor.ScheduleLabel = "Custom cron"
+	}
+	if monitor.ScheduleMode == "" && monitor.Cron != "" {
+		monitor.ScheduleMode = "custom-cron"
+	}
+	if monitor.Timezone == "" {
+		monitor.Timezone = "UTC"
+	}
+	if monitor.TimeoutMS == 0 {
+		monitor.TimeoutMS = 30000
+	}
+	if monitor.FailureThreshold == 0 {
+		monitor.FailureThreshold = 3
+	}
+	if monitor.ResponseBodyLimitKB == 0 {
+		monitor.ResponseBodyLimitKB = 32
+	}
+	if monitor.Status == "" {
+		monitor.Status = domain.StatusSkipped
+	}
+	if monitor.Variables == nil {
+		monitor.Variables = map[string]string{}
+	}
+	if monitor.Steps == nil {
+		monitor.Steps = []domain.MonitorStep{}
+	}
+	if monitor.AlertPolicy.Threshold == 0 {
+		monitor.AlertPolicy.Threshold = monitor.FailureThreshold
+	}
+
+	return monitor
+}
+
+func (s *MemoryStore) DeleteMonitor(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.monitors[id]; !ok {
+		return false
+	}
+
+	delete(s.monitors, id)
+	for runID, run := range s.runs {
+		if run.MonitorID == id {
+			delete(s.runs, runID)
+		}
+	}
+
+	return true
+}
+
+func (s *MemoryStore) SaveRun(run domain.MonitorRun) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.runs[run.ID] = run
+	monitor, ok := s.monitors[run.MonitorID]
+	if ok {
+		monitor.Status = run.Status
+		monitor.LastRunAt = &run.EndedAt
+		monitor.LastDurationMS = run.DurationMS
+		monitor.UpdatedAt = time.Now().UTC()
+		s.monitors[monitor.ID] = monitor
+	}
+}
+
+func (s *MemoryStore) ListRuns(monitorID string) []domain.MonitorRun {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	runs := make([]domain.MonitorRun, 0, len(s.runs))
+	for _, run := range s.runs {
+		if monitorID == "" || run.MonitorID == monitorID {
+			runs = append(runs, run)
+		}
+	}
+
+	return runs
+}
+
+func (s *MemoryStore) GetRun(id string) (domain.MonitorRun, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	run, ok := s.runs[id]
+	return run, ok
+}
+
+func (s *MemoryStore) ListSecrets() []domain.SecretReference {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	secrets := make([]domain.SecretReference, 0, len(s.secrets))
+	for _, secret := range s.secrets {
+		secret.RawValue = ""
+		secrets = append(secrets, secret)
+	}
+
+	return secrets
+}
+
+func (s *MemoryStore) GetSecret(id string) (domain.SecretReference, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	secret, ok := s.secrets[id]
+	secret.RawValue = ""
+	return secret, ok
+}
+
+func (s *MemoryStore) UpsertSecret(secret domain.SecretReference) (domain.SecretReference, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	if secret.ID == "" {
+		secret.ID = "sec-" + randomID()
+	}
+	if secret.Provider == "" {
+		secret.Provider = "encrypted-db"
+	}
+	if secret.RawValue == "" {
+		if existing, ok := s.secrets[secret.ID]; ok {
+			secret.RawValue = existing.RawValue
+		}
+	}
+	if secret.MaskedValue == "" {
+		secret.MaskedValue = "********"
+	}
+	if secret.LastTestedAt.IsZero() {
+		secret.LastTestedAt = now
+	}
+
+	s.secrets[secret.ID] = secret
+	secret.RawValue = ""
+	return secret, nil
+}
+
+func (s *MemoryStore) GetRawSecretValue(alias string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, secret := range s.secrets {
+		if secret.Alias == alias && secret.IsActive {
+			return secret.RawValue, true
+		}
+	}
+	return "", false
+}
+
+func randomID() string {
+	bytes := make([]byte, 8)
+	if _, err := rand.Read(bytes); err != nil {
+		return hex.EncodeToString([]byte(time.Now().Format("150405.000000000")))
+	}
+
+	return hex.EncodeToString(bytes)
+}

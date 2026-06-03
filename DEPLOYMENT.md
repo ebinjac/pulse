@@ -1,0 +1,157 @@
+# Pulse Deployment Guide
+
+This MVP is designed as two application services:
+
+- **Web**: Next.js app in `apps/web`
+- **API**: Go service in `apps/api`
+
+The API owns monitor execution, scheduling, persistence, and encrypted secret storage. The web service serves the UI and proxies `/api/**` requests to the Go API through `PULSE_API_BASE_URL`.
+
+## Runtime Dependencies
+
+Provision these before deploying the API:
+
+- PostgreSQL 16+
+- Redis 7+
+- A stable secret encryption key for `PULSE_SECRET_ENCRYPTION_KEY`
+
+Generate a production encryption key:
+
+```bash
+openssl rand -base64 32
+```
+
+Keep this value stable. Existing encrypted secrets cannot be decrypted if the key changes.
+
+## API Service
+
+Required environment variables:
+
+```bash
+PULSE_API_ADDR=:8080
+DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require
+REDIS_URL=redis://HOST:6379/0
+PULSE_SECRET_ENCRYPTION_KEY=replace-with-base64-32-byte-key
+```
+
+For local development, `apps/api/.env` is already created with localhost values.
+
+### Build And Run With Go
+
+```bash
+cd apps/api
+set -a; source .env; set +a
+go test ./...
+go build -o pulse-api ./cmd/api
+./pulse-api
+```
+
+The API health check is:
+
+```bash
+curl http://localhost:8080/healthz
+```
+
+### Build And Run With Docker
+
+From the repository root:
+
+```bash
+docker build -f apps/api/Dockerfile -t ensemble-pulse-api .
+docker run --rm -p 8080:8080 \
+  -e PULSE_API_ADDR=:8080 \
+  -e DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require' \
+  -e REDIS_URL='redis://HOST:6379/0' \
+  -e PULSE_SECRET_ENCRYPTION_KEY='replace-with-base64-32-byte-key' \
+  ensemble-pulse-api
+```
+
+If PostgreSQL or Redis are running outside the container, do not use `localhost` from inside the API container. Use the service DNS name, private network hostname, or managed database hostname.
+
+## Web Service
+
+Required environment variables:
+
+```bash
+PULSE_API_BASE_URL=https://your-api-service.example.com
+```
+
+For local development, `apps/web/.env.local` is already created with `http://localhost:8080`.
+
+`PULSE_API_BASE_URL` is intentionally not prefixed with `NEXT_PUBLIC_`. It is read by Next.js Route Handlers on the server and is not exposed to browser JavaScript.
+
+### Build And Run
+
+From the repository root:
+
+```bash
+npm ci
+npm run build --workspace web
+npm run start --workspace web
+```
+
+By default, Next.js serves on port `3000`. Set the port outside `.env` when starting the server:
+
+```bash
+PORT=3000 npm run start --workspace web
+```
+
+## Separate Service Topology
+
+Recommended production topology:
+
+```text
+Browser
+  |
+  v
+Web service, Next.js, port 3000
+  |
+  | server-side proxy using PULSE_API_BASE_URL
+  v
+API service, Go, port 8080
+  |
+  +--> PostgreSQL
+  |
+  +--> Redis
+```
+
+Expose the web service publicly. Keep the API private if your host supports private networking, then set `PULSE_API_BASE_URL` to the API private URL from the web service. If the API must be public for the MVP, put it behind HTTPS and restrict access at the platform/firewall level where possible.
+
+## Platform Checklist
+
+1. Create PostgreSQL and Redis services.
+2. Run the API service with `DATABASE_URL`, `REDIS_URL`, and `PULSE_SECRET_ENCRYPTION_KEY`.
+3. Confirm `GET /healthz` returns healthy.
+4. Run the web service with `PULSE_API_BASE_URL` pointing to the API base URL.
+5. Open the web URL and create a secret from `/secrets`.
+6. Verify the secret test succeeds and monitor creation/manual runs work.
+
+## Local Two-Service Development
+
+Start infrastructure and API:
+
+```bash
+docker compose up -d postgres redis api
+```
+
+Start the web service separately:
+
+```bash
+npm run dev --workspace web
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+The web app will proxy API route calls to `http://localhost:8080` through `apps/web/.env.local`.
+
+## Notes
+
+- Do not commit `.env` files with real secrets.
+- Rotate `PULSE_SECRET_ENCRYPTION_KEY` only with a planned re-encryption migration.
+- Use HTTPS for both public web traffic and any public API traffic.
+- If you scale the API to multiple instances, all API instances must use the same `PULSE_SECRET_ENCRYPTION_KEY`.
+- If you scale the web service to multiple Next.js instances and later add Server Actions, set a shared `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`.
