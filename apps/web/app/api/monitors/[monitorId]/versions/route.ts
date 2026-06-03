@@ -1,3 +1,4 @@
+import { pulseMonitorApiPath } from "@/lib/pulse-api-paths"
 import { proxyToPulseApi } from "@/lib/pulse-upstream"
 
 export async function GET(
@@ -5,5 +6,5 @@ export async function GET(
   context: { params: Promise<{ monitorId: string }> }
 ) {
   const { monitorId } = await context.params
-  return proxyToPulseApi(request, `/api/monitors/${monitorId}/versions`)
+  return proxyToPulseApi(request, pulseMonitorApiPath(monitorId, "versions"))
 }

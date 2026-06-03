@@ -210,7 +210,10 @@ func (s *MemoryStore) GetMonitorPublishedSnapshot(id string, config domain.Monit
 func (s *MemoryStore) recordVersion(monitor domain.Monitor, changeNote string, createdBy string, source string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.recordVersionLocked(monitor, changeNote, createdBy, source)
+}
 
+func (s *MemoryStore) recordVersionLocked(monitor domain.Monitor, changeNote string, createdBy string, source string) {
 	versionNumber := monitor.PublishedVersion + 1
 	if len(s.versions[monitor.ID]) > 0 {
 		last := s.versions[monitor.ID][len(s.versions[monitor.ID])-1]

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ type MemoryStore struct {
 	runs         map[string]domain.MonitorRun
 	secrets      map[string]domain.SecretReference
 	alerts       map[string]domain.AlertEvent
+	maintenance  map[string]domain.MaintenanceWindow
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -152,7 +154,8 @@ func NewMemoryStore() *MemoryStore {
 			}},
 		},
 		runs:   map[string]domain.MonitorRun{},
-		alerts: map[string]domain.AlertEvent{},
+		alerts:      map[string]domain.AlertEvent{},
+		maintenance: map[string]domain.MaintenanceWindow{},
 		secrets: map[string]domain.SecretReference{
 			"sec-client-id": {
 				ID: "sec-client-id", Name: "Demo Client ID", Alias: "clientId", Provider: "encrypted-db",
@@ -294,7 +297,7 @@ func (s *MemoryStore) UpsertMonitor(monitor domain.Monitor) domain.Monitor {
 		s.drafts[monitor.ID] = memoryDraftRecord{config: cloneMonitorConfig(monitor), updatedAt: now}
 	}
 	if len(s.versions[monitor.ID]) == 0 {
-		s.recordVersion(monitor, "Initial published version", "", "initial")
+		s.recordVersionLocked(monitor, "Initial published version", "", "initial")
 	}
 	return monitor
 }
@@ -407,6 +410,13 @@ func (s *MemoryStore) ListAlerts() []domain.AlertEvent {
 	return alerts
 }
 
+func (s *MemoryStore) GetAlert(id string) (domain.AlertEvent, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	alert, ok := s.alerts[id]
+	return alert, ok
+}
+
 func (s *MemoryStore) GetOpenAlert(monitorID string) (domain.AlertEvent, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -414,7 +424,7 @@ func (s *MemoryStore) GetOpenAlert(monitorID string) (domain.AlertEvent, bool) {
 	var newest domain.AlertEvent
 	found := false
 	for _, alert := range s.alerts {
-		if alert.MonitorID != monitorID || alert.Status != domain.AlertStatusOpen {
+		if alert.MonitorID != monitorID || alert.Status == domain.AlertStatusResolved {
 			continue
 		}
 		if !found || alert.LastTriggeredAt.After(newest.LastTriggeredAt) {
@@ -424,6 +434,37 @@ func (s *MemoryStore) GetOpenAlert(monitorID string) (domain.AlertEvent, bool) {
 	}
 
 	return newest, found
+}
+
+func (s *MemoryStore) AcknowledgeAlert(id string, acknowledgedBy string) (domain.AlertEvent, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	alert, ok := s.alerts[id]
+	if !ok || alert.Status == domain.AlertStatusResolved {
+		return domain.AlertEvent{}, false
+	}
+	now := time.Now().UTC()
+	alert.Status = domain.AlertStatusAcknowledged
+	alert.AcknowledgedBy = acknowledgedBy
+	alert.AcknowledgedAt = &now
+	alert.UpdatedAt = now
+	s.alerts[id] = alert
+	return alert, true
+}
+
+func (s *MemoryStore) SnoozeAlert(id string, until time.Time, reason string) (domain.AlertEvent, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	alert, ok := s.alerts[id]
+	if !ok || alert.Status == domain.AlertStatusResolved {
+		return domain.AlertEvent{}, false
+	}
+	alert.Status = domain.AlertStatusSuppressed
+	alert.SnoozedUntil = &until
+	alert.SuppressionReason = reason
+	alert.UpdatedAt = time.Now().UTC()
+	s.alerts[id] = alert
+	return alert, true
 }
 
 func (s *MemoryStore) SaveAlert(alert domain.AlertEvent) {
@@ -447,7 +488,7 @@ func (s *MemoryStore) ResolveOpenAlerts(monitorID string, resolvedAt time.Time) 
 
 	count := 0
 	for id, alert := range s.alerts {
-		if alert.MonitorID != monitorID || alert.Status != domain.AlertStatusOpen {
+		if alert.MonitorID != monitorID || alert.Status == domain.AlertStatusResolved {
 			continue
 		}
 		alert.Status = domain.AlertStatusResolved
@@ -513,6 +554,12 @@ func (s *MemoryStore) UpsertSecret(secret domain.SecretReference) (domain.Secret
 		secret.LastTestedAt = now
 	}
 
+	for id, existing := range s.secrets {
+		if existing.Alias == secret.Alias && id != secret.ID {
+			delete(s.secrets, id)
+		}
+	}
+
 	s.secrets[secret.ID] = secret
 	secret.RawValue = ""
 	return secret, nil
@@ -539,6 +586,74 @@ func (s *MemoryStore) DeleteSecret(id string) bool {
 	}
 	delete(s.secrets, id)
 	return true
+}
+
+func (s *MemoryStore) ListMaintenanceWindows(activeOnly bool) []domain.MaintenanceWindow {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	now := time.Now().UTC()
+	windows := make([]domain.MaintenanceWindow, 0, len(s.maintenance))
+	for _, window := range s.maintenance {
+		if activeOnly && (now.Before(window.StartsAt) || !now.Before(window.EndsAt)) {
+			continue
+		}
+		windows = append(windows, window)
+	}
+	sort.Slice(windows, func(i, j int) bool {
+		return windows[i].EndsAt.After(windows[j].EndsAt)
+	})
+	return windows
+}
+
+func (s *MemoryStore) CreateMaintenanceWindow(window domain.MaintenanceWindow) domain.MaintenanceWindow {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	if window.ID == "" {
+		window.ID = "maint-" + randomID()
+	}
+	if window.CreatedAt.IsZero() {
+		window.CreatedAt = now
+	}
+	if window.StartsAt.IsZero() {
+		window.StartsAt = now
+	}
+	s.maintenance[window.ID] = window
+	return window
+}
+
+func (s *MemoryStore) DeleteMaintenanceWindow(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.maintenance[id]; !ok {
+		return false
+	}
+	delete(s.maintenance, id)
+	return true
+}
+
+func (s *MemoryStore) IsUnderMaintenance(monitorID, applicationID string, at time.Time) (string, bool) {
+	for _, window := range s.ListMaintenanceWindows(true) {
+		if at.Before(window.StartsAt) || !at.Before(window.EndsAt) {
+			continue
+		}
+		switch strings.ToLower(window.ScopeType) {
+		case "global":
+			return windowReason(window), true
+		case "application":
+			if window.ScopeID == applicationID && applicationID != "" {
+				return windowReason(window), true
+			}
+		case "monitor":
+			if window.ScopeID == monitorID {
+				return windowReason(window), true
+			}
+		}
+	}
+	return "", false
 }
 
 func randomID() string {

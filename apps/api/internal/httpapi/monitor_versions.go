@@ -19,6 +19,38 @@ type rollbackMonitorRequest struct {
 	CreatedBy  string `json:"createdBy"`
 }
 
+func (s *Server) registerMonitorVersionRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/monitors/{monitorID}/versions", func(w http.ResponseWriter, r *http.Request) {
+		s.handleMonitorVersionRoutes(w, r, r.PathValue("monitorID"), nil)
+	})
+	mux.HandleFunc("GET /api/monitors/{monitorID}/versions/{versionNumber}", func(w http.ResponseWriter, r *http.Request) {
+		s.handleMonitorVersionRoutes(w, r, r.PathValue("monitorID"), []string{r.PathValue("versionNumber")})
+	})
+	mux.HandleFunc("GET /api/monitors/{monitorID}/versions/{versionNumber}/diff", func(w http.ResponseWriter, r *http.Request) {
+		versionNumber, err := strconv.Atoi(r.PathValue("versionNumber"))
+		if err != nil || versionNumber <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid version number")
+			return
+		}
+		s.diffMonitorVersion(w, r, r.PathValue("monitorID"), versionNumber)
+	})
+	mux.HandleFunc("POST /api/monitors/{monitorID}/versions/{versionNumber}/rollback", func(w http.ResponseWriter, r *http.Request) {
+		versionNumber, err := strconv.Atoi(r.PathValue("versionNumber"))
+		if err != nil || versionNumber <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid version number")
+			return
+		}
+		var body rollbackMonitorRequest
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		monitor, err := s.store.RollbackMonitorVersion(r.PathValue("monitorID"), versionNumber, body.ChangeNote, body.CreatedBy)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"monitor": monitor})
+	})
+}
+
 func (s *Server) handleMonitorSubRoute(w http.ResponseWriter, r *http.Request, monitorID string, parts []string) bool {
 	if len(parts) == 0 {
 		return false

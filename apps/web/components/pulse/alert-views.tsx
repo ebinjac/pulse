@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AlertStatusPill, channelIcon, DeliveryStatusPill, Field, formatDate, Metric, PageShell, Section } from "./console-shared"
 import { RunTimeline } from "./run-views"
 
-export type AlertStatusFilter = "all" | "open" | "resolved" | "suppressed"
+export type AlertStatusFilter = "all" | "open" | "acknowledged" | "resolved" | "suppressed"
 export type AlertDeliveryFilter = "all" | "sent" | "failed" | "skipped" | "suppressed"
 
 export function AlertsHistory({
@@ -93,6 +93,7 @@ export function AlertsHistory({
                 <NativeSelect size="sm" value={statusFilter} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setStatusFilter(event.target.value as AlertStatusFilter)}>
                   <NativeSelectOption value="all">All states</NativeSelectOption>
                   <NativeSelectOption value="open">Open</NativeSelectOption>
+                  <NativeSelectOption value="acknowledged">Acknowledged</NativeSelectOption>
                   <NativeSelectOption value="resolved">Resolved</NativeSelectOption>
                   <NativeSelectOption value="suppressed">Suppressed</NativeSelectOption>
                 </NativeSelect>
@@ -219,14 +220,98 @@ export function AlertsHistory({
   )
 }
 
+function AlertOpsBar({
+  alert,
+  onUpdated,
+}: {
+  alert: AlertEvent
+  onUpdated?: () => void | Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const [ackBy, setAckBy] = useState("on-call")
+
+  async function acknowledge() {
+    setBusy(true)
+    setError("")
+    try {
+      const res = await fetch(`/api/alerts/${alert.id}/acknowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ acknowledgedBy: ackBy }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      await onUpdated?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Acknowledge failed.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function snooze(minutes: number) {
+    setBusy(true)
+    setError("")
+    try {
+      const res = await fetch(`/api/alerts/${alert.id}/snooze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ durationMinutes: minutes, reason: `Snoozed ${minutes}m` }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      await onUpdated?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Snooze failed.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (alert.status === "resolved") return null
+
+  return (
+    <Card>
+      <CardHeader className="border-b pb-3">
+        <CardTitle className="text-sm font-semibold">On-call actions</CardTitle>
+        <CardDescription>Acknowledge to stop pages, or snooze to mute delivery for a period.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 pt-4">
+        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+        {alert.acknowledgedBy ? (
+          <p className="text-xs text-muted-foreground">
+            Acknowledged by <span className="font-semibold text-foreground">{alert.acknowledgedBy}</span>
+            {alert.acknowledgedAt ? ` · ${formatDate(alert.acknowledgedAt)}` : ""}
+          </p>
+        ) : null}
+        {alert.snoozedUntil ? (
+          <p className="text-xs text-muted-foreground">
+            Snoozed until <span className="font-semibold text-foreground">{formatDate(alert.snoozedUntil)}</span>
+            {alert.suppressionReason ? ` · ${alert.suppressionReason}` : ""}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Input className="h-8 w-36 text-xs" value={ackBy} onChange={(e) => setAckBy(e.target.value)} placeholder="Your name" />
+          <Button size="sm" variant="outline" disabled={busy || alert.status === "acknowledged"} onClick={() => void acknowledge()}>
+            Acknowledge
+          </Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void snooze(120)}>Snooze 2h</Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void snooze(480)}>Snooze 8h</Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function AlertDetail({
   alert,
   monitor,
   run,
+  onAlertUpdated,
 }: {
   alert: AlertEvent
   monitor?: Monitor
   run?: MonitorRun
+  onAlertUpdated?: () => void | Promise<void>
 }) {
   const failedStep = run?.steps?.find((step) => step.status === "failed" || String(step.status).toLowerCase() === "failed")
   const failureText = run?.failureReason || failedStep?.errorMessage || alert.description || "Monitor run did not complete successfully."
@@ -335,6 +420,7 @@ export function AlertDetail({
         </div>
 
         <div className="space-y-4">
+          <AlertOpsBar alert={alert} onUpdated={onAlertUpdated} />
           <Section title="Alert state" icon={Bell}>
             <div className="space-y-2">
               <Field label="Severity" value={alert.severity || "warning"} />

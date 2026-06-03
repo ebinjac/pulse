@@ -76,7 +76,9 @@ export function AlertStatusPill({ status }: { status: AlertEvent["status"] }) {
         ? "border-rose-500/20 bg-rose-500/5 text-rose-600 dark:text-rose-300"
         : norm === "resolved"
           ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-300"
-          : "border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300"
+          : norm === "acknowledged"
+            ? "border-blue-500/20 bg-blue-500/5 text-blue-700 dark:text-blue-300"
+            : "border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300"
     )}>
       {norm === "resolved" ? <CheckCircle2 className="size-3" /> : norm === "open" ? <AlertTriangle className="size-3" /> : <Clock className="size-3" />}
       {norm}

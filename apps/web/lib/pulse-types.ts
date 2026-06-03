@@ -119,6 +119,20 @@ export interface SecretReference {
   value?: string
 }
 
+export interface AlertRouting {
+  enabled?: boolean
+  severity?: string
+  threshold?: number
+  responseTimeMs?: number
+  cooldownMinutes?: number
+  email?: boolean
+  slackWebhook?: boolean
+  emailTo?: string[]
+  onCallTargets?: string[]
+  slackWebhookSecret?: string
+  inheritFromApplication?: boolean
+}
+
 export interface AlertPolicy {
   enabled: boolean
   threshold: number
@@ -126,6 +140,11 @@ export interface AlertPolicy {
   email: boolean
   slackWebhook: boolean
   cooldownMinutes: number
+  severity?: string
+  emailTo?: string[]
+  onCallTargets?: string[]
+  slackWebhookSecret?: string
+  inheritFromApplication?: boolean
 }
 
 export interface Monitor {
@@ -189,6 +208,7 @@ export interface Application {
   owner?: string
   environment?: string
   tags?: string[]
+  alertRouting?: AlertRouting
   createdAt?: string
   updatedAt?: string
 }
@@ -256,7 +276,7 @@ export interface AlertEvent {
   id: string
   monitorId: string
   runId?: string
-  status: "open" | "suppressed" | "resolved" | string
+  status: "open" | "acknowledged" | "suppressed" | "resolved" | string
   severity: "critical" | "warning" | string
   title: string
   description: string
@@ -267,6 +287,21 @@ export interface AlertEvent {
   lastTriggeredAt: string
   lastDeliveredAt?: string
   resolvedAt?: string
+  acknowledgedBy?: string
+  acknowledgedAt?: string
+  snoozedUntil?: string
+  suppressionReason?: string
+}
+
+export interface MaintenanceWindow {
+  id: string
+  scopeType: "global" | "application" | "monitor" | string
+  scopeId?: string
+  startsAt: string
+  endsAt: string
+  reason?: string
+  createdBy?: string
+  createdAt?: string
 }
 
 export interface NotificationSettings {

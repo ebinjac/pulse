@@ -112,15 +112,16 @@ type MonitorDetail struct {
 }
 
 type Application struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	CarID       string    `json:"carId"`
-	Description string    `json:"description,omitempty"`
-	Owner       string    `json:"owner,omitempty"`
-	Environment string    `json:"environment,omitempty"`
-	Tags        []string  `json:"tags,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	CarID        string       `json:"carId"`
+	Description  string       `json:"description,omitempty"`
+	Owner        string       `json:"owner,omitempty"`
+	Environment  string       `json:"environment,omitempty"`
+	Tags         []string     `json:"tags,omitempty"`
+	AlertRouting AlertRouting `json:"alertRouting,omitempty"`
+	CreatedAt    time.Time    `json:"createdAt"`
+	UpdatedAt    time.Time    `json:"updatedAt"`
 }
 
 type ApplicationRunSummary struct {
@@ -130,6 +131,20 @@ type ApplicationRunSummary struct {
 	MonitorIDs    []string `json:"monitorIds"`
 }
 
+type AlertRouting struct {
+	Enabled              bool     `json:"enabled"`
+	Severity             string   `json:"severity,omitempty"`
+	Threshold            int      `json:"threshold,omitempty"`
+	ResponseTimeMS       int      `json:"responseTimeMs,omitempty"`
+	CooldownMinutes      int      `json:"cooldownMinutes,omitempty"`
+	Email                bool     `json:"email"`
+	SlackWebhook         bool     `json:"slackWebhook"`
+	EmailTo              []string `json:"emailTo,omitempty"`
+	OnCallTargets        []string `json:"onCallTargets,omitempty"`
+	SlackWebhookSecret   string   `json:"slackWebhookSecret,omitempty"`
+	InheritFromApplication bool   `json:"inheritFromApplication,omitempty"`
+}
+
 type AlertPolicy struct {
 	Enabled         bool `json:"enabled"`
 	Threshold       int  `json:"threshold"`
@@ -137,6 +152,11 @@ type AlertPolicy struct {
 	Email           bool `json:"email"`
 	SlackWebhook    bool `json:"slackWebhook"`
 	CooldownMinutes int  `json:"cooldownMinutes"`
+	Severity             string   `json:"severity,omitempty"`
+	EmailTo              []string `json:"emailTo,omitempty"`
+	OnCallTargets        []string `json:"onCallTargets,omitempty"`
+	SlackWebhookSecret   string   `json:"slackWebhookSecret,omitempty"`
+	InheritFromApplication bool   `json:"inheritFromApplication,omitempty"`
 }
 
 type MonitorStep struct {
@@ -202,9 +222,10 @@ type MonitorRun struct {
 type AlertStatus string
 
 const (
-	AlertStatusOpen       AlertStatus = "open"
-	AlertStatusSuppressed AlertStatus = "suppressed"
-	AlertStatusResolved   AlertStatus = "resolved"
+	AlertStatusOpen         AlertStatus = "open"
+	AlertStatusAcknowledged AlertStatus = "acknowledged"
+	AlertStatusSuppressed   AlertStatus = "suppressed"
+	AlertStatusResolved     AlertStatus = "resolved"
 )
 
 type AlertDelivery struct {
@@ -215,22 +236,37 @@ type AlertDelivery struct {
 }
 
 type AlertEvent struct {
-	ID               string          `json:"id"`
-	MonitorID        string          `json:"monitorId"`
-	RunID            string          `json:"runId,omitempty"`
-	Status           AlertStatus     `json:"status"`
-	Severity         string          `json:"severity"`
-	Title            string          `json:"title"`
-	Description      string          `json:"description"`
-	FailureCategory  FailureCategory `json:"failureCategory,omitempty"`
-	Channels         []string        `json:"channels"`
-	Deliveries       []AlertDelivery `json:"deliveries"`
-	FirstTriggeredAt time.Time       `json:"firstTriggeredAt"`
-	LastTriggeredAt  time.Time       `json:"lastTriggeredAt"`
-	LastDeliveredAt  *time.Time      `json:"lastDeliveredAt,omitempty"`
-	ResolvedAt       *time.Time      `json:"resolvedAt,omitempty"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
+	ID                string          `json:"id"`
+	MonitorID         string          `json:"monitorId"`
+	RunID             string          `json:"runId,omitempty"`
+	Status            AlertStatus     `json:"status"`
+	Severity          string          `json:"severity"`
+	Title             string          `json:"title"`
+	Description       string          `json:"description"`
+	FailureCategory   FailureCategory `json:"failureCategory,omitempty"`
+	Channels          []string        `json:"channels"`
+	Deliveries        []AlertDelivery `json:"deliveries"`
+	FirstTriggeredAt  time.Time       `json:"firstTriggeredAt"`
+	LastTriggeredAt   time.Time       `json:"lastTriggeredAt"`
+	LastDeliveredAt   *time.Time      `json:"lastDeliveredAt,omitempty"`
+	ResolvedAt        *time.Time      `json:"resolvedAt,omitempty"`
+	AcknowledgedBy    string          `json:"acknowledgedBy,omitempty"`
+	AcknowledgedAt    *time.Time      `json:"acknowledgedAt,omitempty"`
+	SnoozedUntil      *time.Time      `json:"snoozedUntil,omitempty"`
+	SuppressionReason string          `json:"suppressionReason,omitempty"`
+	CreatedAt         time.Time       `json:"createdAt"`
+	UpdatedAt         time.Time       `json:"updatedAt"`
+}
+
+type MaintenanceWindow struct {
+	ID        string    `json:"id"`
+	ScopeType string    `json:"scopeType"`
+	ScopeID   string    `json:"scopeId,omitempty"`
+	StartsAt  time.Time `json:"startsAt"`
+	EndsAt    time.Time `json:"endsAt"`
+	Reason    string    `json:"reason,omitempty"`
+	CreatedBy string    `json:"createdBy,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 type StepRun struct {

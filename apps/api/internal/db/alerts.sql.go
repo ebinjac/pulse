@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getOpenAlert = `-- name: GetOpenAlert :one
+const getActiveAlert = `-- name: GetActiveAlert :one
 SELECT
   id,
   monitor_id,
@@ -27,41 +27,50 @@ SELECT
   last_triggered_at,
   last_delivered_at,
   resolved_at,
+  COALESCE(acknowledged_by, '')::text AS acknowledged_by,
+  acknowledged_at,
+  snoozed_until,
+  COALESCE(suppression_reason, '')::text AS suppression_reason,
   created_at,
   updated_at
 FROM alerts
-WHERE monitor_id = $1 AND status = $2
+WHERE monitor_id = $1
+  AND status = ANY($2::text[])
 ORDER BY last_triggered_at DESC
 LIMIT 1
 `
 
-type GetOpenAlertParams struct {
+type GetActiveAlertParams struct {
 	MonitorID pgtype.Text `json:"monitor_id"`
-	Status    pgtype.Text `json:"status"`
+	Column2   []string    `json:"column_2"`
 }
 
-type GetOpenAlertRow struct {
-	ID               string           `json:"id"`
-	MonitorID        pgtype.Text      `json:"monitor_id"`
-	RunID            string           `json:"run_id"`
-	Status           string           `json:"status"`
-	Severity         string           `json:"severity"`
-	Title            string           `json:"title"`
-	Description      string           `json:"description"`
-	FailureCategory  string           `json:"failure_category"`
-	ChannelsJson     []byte           `json:"channels_json"`
-	DeliveriesJson   []byte           `json:"deliveries_json"`
-	FirstTriggeredAt pgtype.Timestamp `json:"first_triggered_at"`
-	LastTriggeredAt  pgtype.Timestamp `json:"last_triggered_at"`
-	LastDeliveredAt  pgtype.Timestamp `json:"last_delivered_at"`
-	ResolvedAt       pgtype.Timestamp `json:"resolved_at"`
-	CreatedAt        pgtype.Timestamp `json:"created_at"`
-	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
+type GetActiveAlertRow struct {
+	ID                string           `json:"id"`
+	MonitorID         pgtype.Text      `json:"monitor_id"`
+	RunID             string           `json:"run_id"`
+	Status            string           `json:"status"`
+	Severity          string           `json:"severity"`
+	Title             string           `json:"title"`
+	Description       string           `json:"description"`
+	FailureCategory   string           `json:"failure_category"`
+	ChannelsJson      []byte           `json:"channels_json"`
+	DeliveriesJson    []byte           `json:"deliveries_json"`
+	FirstTriggeredAt  pgtype.Timestamp `json:"first_triggered_at"`
+	LastTriggeredAt   pgtype.Timestamp `json:"last_triggered_at"`
+	LastDeliveredAt   pgtype.Timestamp `json:"last_delivered_at"`
+	ResolvedAt        pgtype.Timestamp `json:"resolved_at"`
+	AcknowledgedBy    string           `json:"acknowledged_by"`
+	AcknowledgedAt    pgtype.Timestamp `json:"acknowledged_at"`
+	SnoozedUntil      pgtype.Timestamp `json:"snoozed_until"`
+	SuppressionReason string           `json:"suppression_reason"`
+	CreatedAt         pgtype.Timestamp `json:"created_at"`
+	UpdatedAt         pgtype.Timestamp `json:"updated_at"`
 }
 
-func (q *Queries) GetOpenAlert(ctx context.Context, arg GetOpenAlertParams) (GetOpenAlertRow, error) {
-	row := q.db.QueryRow(ctx, getOpenAlert, arg.MonitorID, arg.Status)
-	var i GetOpenAlertRow
+func (q *Queries) GetActiveAlert(ctx context.Context, arg GetActiveAlertParams) (GetActiveAlertRow, error) {
+	row := q.db.QueryRow(ctx, getActiveAlert, arg.MonitorID, arg.Column2)
+	var i GetActiveAlertRow
 	err := row.Scan(
 		&i.ID,
 		&i.MonitorID,
@@ -77,6 +86,87 @@ func (q *Queries) GetOpenAlert(ctx context.Context, arg GetOpenAlertParams) (Get
 		&i.LastTriggeredAt,
 		&i.LastDeliveredAt,
 		&i.ResolvedAt,
+		&i.AcknowledgedBy,
+		&i.AcknowledgedAt,
+		&i.SnoozedUntil,
+		&i.SuppressionReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAlert = `-- name: GetAlert :one
+SELECT
+  id,
+  monitor_id,
+  COALESCE(run_id, '')::text AS run_id,
+  COALESCE(status, '')::text AS status,
+  COALESCE(severity, '')::text AS severity,
+  COALESCE(title, '')::text AS title,
+  COALESCE(description, '')::text AS description,
+  COALESCE(failure_category, '')::text AS failure_category,
+  channels_json,
+  deliveries_json,
+  first_triggered_at,
+  last_triggered_at,
+  last_delivered_at,
+  resolved_at,
+  COALESCE(acknowledged_by, '')::text AS acknowledged_by,
+  acknowledged_at,
+  snoozed_until,
+  COALESCE(suppression_reason, '')::text AS suppression_reason,
+  created_at,
+  updated_at
+FROM alerts
+WHERE id = $1
+`
+
+type GetAlertRow struct {
+	ID                string           `json:"id"`
+	MonitorID         pgtype.Text      `json:"monitor_id"`
+	RunID             string           `json:"run_id"`
+	Status            string           `json:"status"`
+	Severity          string           `json:"severity"`
+	Title             string           `json:"title"`
+	Description       string           `json:"description"`
+	FailureCategory   string           `json:"failure_category"`
+	ChannelsJson      []byte           `json:"channels_json"`
+	DeliveriesJson    []byte           `json:"deliveries_json"`
+	FirstTriggeredAt  pgtype.Timestamp `json:"first_triggered_at"`
+	LastTriggeredAt   pgtype.Timestamp `json:"last_triggered_at"`
+	LastDeliveredAt   pgtype.Timestamp `json:"last_delivered_at"`
+	ResolvedAt        pgtype.Timestamp `json:"resolved_at"`
+	AcknowledgedBy    string           `json:"acknowledged_by"`
+	AcknowledgedAt    pgtype.Timestamp `json:"acknowledged_at"`
+	SnoozedUntil      pgtype.Timestamp `json:"snoozed_until"`
+	SuppressionReason string           `json:"suppression_reason"`
+	CreatedAt         pgtype.Timestamp `json:"created_at"`
+	UpdatedAt         pgtype.Timestamp `json:"updated_at"`
+}
+
+func (q *Queries) GetAlert(ctx context.Context, id string) (GetAlertRow, error) {
+	row := q.db.QueryRow(ctx, getAlert, id)
+	var i GetAlertRow
+	err := row.Scan(
+		&i.ID,
+		&i.MonitorID,
+		&i.RunID,
+		&i.Status,
+		&i.Severity,
+		&i.Title,
+		&i.Description,
+		&i.FailureCategory,
+		&i.ChannelsJson,
+		&i.DeliveriesJson,
+		&i.FirstTriggeredAt,
+		&i.LastTriggeredAt,
+		&i.LastDeliveredAt,
+		&i.ResolvedAt,
+		&i.AcknowledgedBy,
+		&i.AcknowledgedAt,
+		&i.SnoozedUntil,
+		&i.SuppressionReason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -99,6 +189,10 @@ SELECT
   last_triggered_at,
   last_delivered_at,
   resolved_at,
+  COALESCE(acknowledged_by, '')::text AS acknowledged_by,
+  acknowledged_at,
+  snoozed_until,
+  COALESCE(suppression_reason, '')::text AS suppression_reason,
   created_at,
   updated_at
 FROM alerts
@@ -106,22 +200,26 @@ ORDER BY last_triggered_at DESC
 `
 
 type ListAlertsRow struct {
-	ID               string           `json:"id"`
-	MonitorID        pgtype.Text      `json:"monitor_id"`
-	RunID            string           `json:"run_id"`
-	Status           string           `json:"status"`
-	Severity         string           `json:"severity"`
-	Title            string           `json:"title"`
-	Description      string           `json:"description"`
-	FailureCategory  string           `json:"failure_category"`
-	ChannelsJson     []byte           `json:"channels_json"`
-	DeliveriesJson   []byte           `json:"deliveries_json"`
-	FirstTriggeredAt pgtype.Timestamp `json:"first_triggered_at"`
-	LastTriggeredAt  pgtype.Timestamp `json:"last_triggered_at"`
-	LastDeliveredAt  pgtype.Timestamp `json:"last_delivered_at"`
-	ResolvedAt       pgtype.Timestamp `json:"resolved_at"`
-	CreatedAt        pgtype.Timestamp `json:"created_at"`
-	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
+	ID                string           `json:"id"`
+	MonitorID         pgtype.Text      `json:"monitor_id"`
+	RunID             string           `json:"run_id"`
+	Status            string           `json:"status"`
+	Severity          string           `json:"severity"`
+	Title             string           `json:"title"`
+	Description       string           `json:"description"`
+	FailureCategory   string           `json:"failure_category"`
+	ChannelsJson      []byte           `json:"channels_json"`
+	DeliveriesJson    []byte           `json:"deliveries_json"`
+	FirstTriggeredAt  pgtype.Timestamp `json:"first_triggered_at"`
+	LastTriggeredAt   pgtype.Timestamp `json:"last_triggered_at"`
+	LastDeliveredAt   pgtype.Timestamp `json:"last_delivered_at"`
+	ResolvedAt        pgtype.Timestamp `json:"resolved_at"`
+	AcknowledgedBy    string           `json:"acknowledged_by"`
+	AcknowledgedAt    pgtype.Timestamp `json:"acknowledged_at"`
+	SnoozedUntil      pgtype.Timestamp `json:"snoozed_until"`
+	SuppressionReason string           `json:"suppression_reason"`
+	CreatedAt         pgtype.Timestamp `json:"created_at"`
+	UpdatedAt         pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) ListAlerts(ctx context.Context) ([]ListAlertsRow, error) {
@@ -148,6 +246,10 @@ func (q *Queries) ListAlerts(ctx context.Context) ([]ListAlertsRow, error) {
 			&i.LastTriggeredAt,
 			&i.LastDeliveredAt,
 			&i.ResolvedAt,
+			&i.AcknowledgedBy,
+			&i.AcknowledgedAt,
+			&i.SnoozedUntil,
+			&i.SuppressionReason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -164,14 +266,14 @@ func (q *Queries) ListAlerts(ctx context.Context) ([]ListAlertsRow, error) {
 const resolveOpenAlerts = `-- name: ResolveOpenAlerts :execrows
 UPDATE alerts
 SET status = $2, resolved_at = $3, updated_at = NOW()
-WHERE monitor_id = $1 AND status = $4
+WHERE monitor_id = $1 AND status = ANY($4::text[])
 `
 
 type ResolveOpenAlertsParams struct {
 	MonitorID  pgtype.Text      `json:"monitor_id"`
 	Status     pgtype.Text      `json:"status"`
 	ResolvedAt pgtype.Timestamp `json:"resolved_at"`
-	Status_2   pgtype.Text      `json:"status_2"`
+	Column4    []string         `json:"column_4"`
 }
 
 func (q *Queries) ResolveOpenAlerts(ctx context.Context, arg ResolveOpenAlertsParams) (int64, error) {
@@ -179,7 +281,7 @@ func (q *Queries) ResolveOpenAlerts(ctx context.Context, arg ResolveOpenAlertsPa
 		arg.MonitorID,
 		arg.Status,
 		arg.ResolvedAt,
-		arg.Status_2,
+		arg.Column4,
 	)
 	if err != nil {
 		return 0, err
@@ -203,6 +305,10 @@ INSERT INTO alerts (
   last_triggered_at,
   last_delivered_at,
   resolved_at,
+  acknowledged_by,
+  acknowledged_at,
+  snoozed_until,
+  suppression_reason,
   created_at,
   updated_at
 )
@@ -221,6 +327,10 @@ VALUES (
   $11,
   $15,
   $16,
+  $17,
+  $18,
+  $19,
+  $20,
   $12,
   $13
 )
@@ -236,26 +346,34 @@ ON CONFLICT (id) DO UPDATE SET
   last_triggered_at = EXCLUDED.last_triggered_at,
   last_delivered_at = EXCLUDED.last_delivered_at,
   resolved_at = EXCLUDED.resolved_at,
+  acknowledged_by = EXCLUDED.acknowledged_by,
+  acknowledged_at = EXCLUDED.acknowledged_at,
+  snoozed_until = EXCLUDED.snoozed_until,
+  suppression_reason = EXCLUDED.suppression_reason,
   updated_at = EXCLUDED.updated_at
 `
 
 type UpsertAlertParams struct {
-	ID               string           `json:"id"`
-	MonitorID        pgtype.Text      `json:"monitor_id"`
-	Status           pgtype.Text      `json:"status"`
-	Severity         pgtype.Text      `json:"severity"`
-	Title            pgtype.Text      `json:"title"`
-	Description      pgtype.Text      `json:"description"`
-	FailureCategory  pgtype.Text      `json:"failure_category"`
-	ChannelsJson     []byte           `json:"channels_json"`
-	DeliveriesJson   []byte           `json:"deliveries_json"`
-	FirstTriggeredAt pgtype.Timestamp `json:"first_triggered_at"`
-	LastTriggeredAt  pgtype.Timestamp `json:"last_triggered_at"`
-	CreatedAt        pgtype.Timestamp `json:"created_at"`
-	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
-	RunID            pgtype.Text      `json:"run_id"`
-	LastDeliveredAt  pgtype.Timestamp `json:"last_delivered_at"`
-	ResolvedAt       pgtype.Timestamp `json:"resolved_at"`
+	ID                string           `json:"id"`
+	MonitorID         pgtype.Text      `json:"monitor_id"`
+	Status            pgtype.Text      `json:"status"`
+	Severity          pgtype.Text      `json:"severity"`
+	Title             pgtype.Text      `json:"title"`
+	Description       pgtype.Text      `json:"description"`
+	FailureCategory   pgtype.Text      `json:"failure_category"`
+	ChannelsJson      []byte           `json:"channels_json"`
+	DeliveriesJson    []byte           `json:"deliveries_json"`
+	FirstTriggeredAt  pgtype.Timestamp `json:"first_triggered_at"`
+	LastTriggeredAt   pgtype.Timestamp `json:"last_triggered_at"`
+	CreatedAt         pgtype.Timestamp `json:"created_at"`
+	UpdatedAt         pgtype.Timestamp `json:"updated_at"`
+	RunID             pgtype.Text      `json:"run_id"`
+	LastDeliveredAt   pgtype.Timestamp `json:"last_delivered_at"`
+	ResolvedAt        pgtype.Timestamp `json:"resolved_at"`
+	AcknowledgedBy    pgtype.Text      `json:"acknowledged_by"`
+	AcknowledgedAt    pgtype.Timestamp `json:"acknowledged_at"`
+	SnoozedUntil      pgtype.Timestamp `json:"snoozed_until"`
+	SuppressionReason pgtype.Text      `json:"suppression_reason"`
 }
 
 func (q *Queries) UpsertAlert(ctx context.Context, arg UpsertAlertParams) error {
@@ -276,6 +394,10 @@ func (q *Queries) UpsertAlert(ctx context.Context, arg UpsertAlertParams) error 
 		arg.RunID,
 		arg.LastDeliveredAt,
 		arg.ResolvedAt,
+		arg.AcknowledgedBy,
+		arg.AcknowledgedAt,
+		arg.SnoozedUntil,
+		arg.SuppressionReason,
 	)
 	return err
 }

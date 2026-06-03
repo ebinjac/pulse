@@ -1,3 +1,4 @@
+import { pulseMonitorApiPath } from "@/lib/pulse-api-paths"
 import { proxyToPulseApi } from "@/lib/pulse-upstream"
 
 export async function GET(
@@ -8,6 +9,6 @@ export async function GET(
   const against = new URL(request.url).searchParams.get("against") ?? "published"
   return proxyToPulseApi(
     request,
-    `/api/monitors/${monitorId}/versions/${versionNumber}/diff?against=${encodeURIComponent(against)}`
+    `${pulseMonitorApiPath(monitorId, "versions", versionNumber, "diff")}?against=${encodeURIComponent(against)}`
   )
 }

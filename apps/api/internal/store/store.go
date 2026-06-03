@@ -28,9 +28,16 @@ type Store interface {
 	ListRuns(monitorID string) []domain.MonitorRun
 	GetRun(id string) (domain.MonitorRun, bool)
 	ListAlerts() []domain.AlertEvent
+	GetAlert(id string) (domain.AlertEvent, bool)
 	GetOpenAlert(monitorID string) (domain.AlertEvent, bool)
 	SaveAlert(alert domain.AlertEvent)
+	AcknowledgeAlert(id string, acknowledgedBy string) (domain.AlertEvent, bool)
+	SnoozeAlert(id string, until time.Time, reason string) (domain.AlertEvent, bool)
 	ResolveOpenAlerts(monitorID string, resolvedAt time.Time) int
+	ListMaintenanceWindows(activeOnly bool) []domain.MaintenanceWindow
+	CreateMaintenanceWindow(window domain.MaintenanceWindow) domain.MaintenanceWindow
+	DeleteMaintenanceWindow(id string) bool
+	IsUnderMaintenance(monitorID, applicationID string, at time.Time) (reason string, active bool)
 	ListSecrets() []domain.SecretReference
 	GetSecret(id string) (domain.SecretReference, bool)
 	UpsertSecret(secret domain.SecretReference) (domain.SecretReference, error)

@@ -571,6 +571,7 @@ function ApplicationDetailView({
   onRunNow,
   onToggleActive,
   onDeleteMonitor,
+  onSaveApplication,
   runningAppId,
 }: {
   application: Application
@@ -579,9 +580,12 @@ function ApplicationDetailView({
   onRunNow: (monitorId: string) => Promise<any> | any
   onToggleActive: (monitorId: string, currentActive: boolean) => void
   onDeleteMonitor?: (monitorId: string) => void
+  onSaveApplication: (input: Application) => Promise<void>
   runningAppId?: string
 }) {
   const [running, setRunning] = useState(false)
+  const [routing, setRouting] = useState(application.alertRouting || {})
+  const [savingRouting, setSavingRouting] = useState(false)
   const health = applicationHealth(monitors)
 
   async function run() {
@@ -646,6 +650,65 @@ function ApplicationDetailView({
           <Metric label="Success rate" value={`${health.successRate}%`} icon={CheckCircle2} detail="24h average" />
           <Metric label="Avg latency" value={`${health.avgLatency}ms`} icon={Server} detail={application.environment || "environment"} />
         </div>
+
+        <Card>
+          <CardHeader className="border-b pb-3">
+            <CardTitle className="text-sm font-semibold">Default alert routing</CardTitle>
+            <CardDescription>Monitors can inherit these channels, severity, and on-call targets.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 pt-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="flex items-center gap-2 text-xs font-medium">
+                <input type="checkbox" checked={routing.enabled ?? false} onChange={(e) => setRouting({ ...routing, enabled: e.target.checked })} />
+                Enable app-level alerting defaults
+              </label>
+              <label className="text-xs font-semibold">
+                Severity
+                <NativeSelect size="sm" className="mt-1 w-full" value={routing.severity || "inherit"} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setRouting({ ...routing, severity: e.target.value })}>
+                  <NativeSelectOption value="inherit">Inherit run severity</NativeSelectOption>
+                  <NativeSelectOption value="critical">Critical</NativeSelectOption>
+                  <NativeSelectOption value="warning">Warning</NativeSelectOption>
+                </NativeSelect>
+              </label>
+              <label className="text-xs font-semibold">
+                Email recipients (comma-separated)
+                <Input className="mt-1 h-8 text-xs" value={(routing.emailTo || []).join(", ")} onChange={(e) => setRouting({ ...routing, emailTo: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} />
+              </label>
+              <label className="text-xs font-semibold">
+                On-call targets (comma-separated)
+                <Input className="mt-1 h-8 text-xs" value={(routing.onCallTargets || []).join(", ")} onChange={(e) => setRouting({ ...routing, onCallTargets: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} />
+              </label>
+              <label className="text-xs font-semibold">
+                Slack secret alias
+                <Input className="mt-1 h-8 text-xs" placeholder="slackWebhook" value={routing.slackWebhookSecret || ""} onChange={(e) => setRouting({ ...routing, slackWebhookSecret: e.target.value })} />
+              </label>
+            </div>
+            <div className="flex gap-4 text-xs">
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={routing.email ?? false} onChange={(e) => setRouting({ ...routing, email: e.target.checked })} />
+                Email
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="checkbox" checked={routing.slackWebhook ?? false} onChange={(e) => setRouting({ ...routing, slackWebhook: e.target.checked })} />
+                Slack
+              </label>
+            </div>
+            <Button
+              size="sm"
+              disabled={savingRouting}
+              onClick={async () => {
+                setSavingRouting(true)
+                try {
+                  await onSaveApplication({ ...application, alertRouting: routing })
+                } finally {
+                  setSavingRouting(false)
+                }
+              }}
+            >
+              Save routing
+            </Button>
+          </CardContent>
+        </Card>
 
         <div className="space-y-3">
           <div>
@@ -2659,6 +2722,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
           onRunNow={handleRunNow}
           onToggleActive={handleToggleActive}
           onDeleteMonitor={handleDeleteMonitor}
+          onSaveApplication={handleSaveApplication}
           runningAppId={runningApp?.id}
         />
       )
@@ -2830,12 +2894,19 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
     } else {
       const monitor = monitors.find((item) => item.id === activeAlert.monitorId)
       const run = activeAlert.runId ? runs.find((item) => item.id === activeAlert.runId) : undefined
-      viewContent = <AlertDetail alert={activeAlert} monitor={monitor} run={run} />
+      viewContent = <AlertDetail alert={activeAlert} monitor={monitor} run={run} onAlertUpdated={fetchAlerts} />
     }
   } else if (view === "secrets") {
     viewContent = <Secrets secrets={secrets} onSave={handleSaveSecret} onTest={handleTestSecret} onDelete={handleDeleteSecret} />
   } else if (view === "settings") {
-    viewContent = <SettingsView notificationSettings={notificationSettings} onSaveNotifications={handleSaveNotificationSettings} />
+    viewContent = (
+      <SettingsView
+        notificationSettings={notificationSettings}
+        onSaveNotifications={handleSaveNotificationSettings}
+        applications={applications}
+        monitors={monitors}
+      />
+    )
   } else {
     viewContent = (
       <Dashboard

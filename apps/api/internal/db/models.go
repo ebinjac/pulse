@@ -9,34 +9,50 @@ import (
 )
 
 type Alert struct {
-	ID               string           `json:"id"`
-	MonitorID        pgtype.Text      `json:"monitor_id"`
-	RunID            pgtype.Text      `json:"run_id"`
-	Status           pgtype.Text      `json:"status"`
-	Severity         pgtype.Text      `json:"severity"`
-	Title            pgtype.Text      `json:"title"`
-	Description      pgtype.Text      `json:"description"`
-	FailureCategory  pgtype.Text      `json:"failure_category"`
-	ChannelsJson     []byte           `json:"channels_json"`
-	DeliveriesJson   []byte           `json:"deliveries_json"`
-	FirstTriggeredAt pgtype.Timestamp `json:"first_triggered_at"`
-	LastTriggeredAt  pgtype.Timestamp `json:"last_triggered_at"`
-	LastDeliveredAt  pgtype.Timestamp `json:"last_delivered_at"`
-	ResolvedAt       pgtype.Timestamp `json:"resolved_at"`
-	CreatedAt        pgtype.Timestamp `json:"created_at"`
-	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
+	ID                string           `json:"id"`
+	MonitorID         pgtype.Text      `json:"monitor_id"`
+	RunID             pgtype.Text      `json:"run_id"`
+	Status            pgtype.Text      `json:"status"`
+	Severity          pgtype.Text      `json:"severity"`
+	Title             pgtype.Text      `json:"title"`
+	Description       pgtype.Text      `json:"description"`
+	FailureCategory   pgtype.Text      `json:"failure_category"`
+	ChannelsJson      []byte           `json:"channels_json"`
+	DeliveriesJson    []byte           `json:"deliveries_json"`
+	FirstTriggeredAt  pgtype.Timestamp `json:"first_triggered_at"`
+	LastTriggeredAt   pgtype.Timestamp `json:"last_triggered_at"`
+	LastDeliveredAt   pgtype.Timestamp `json:"last_delivered_at"`
+	ResolvedAt        pgtype.Timestamp `json:"resolved_at"`
+	CreatedAt         pgtype.Timestamp `json:"created_at"`
+	UpdatedAt         pgtype.Timestamp `json:"updated_at"`
+	AcknowledgedBy    pgtype.Text      `json:"acknowledged_by"`
+	AcknowledgedAt    pgtype.Timestamp `json:"acknowledged_at"`
+	SnoozedUntil      pgtype.Timestamp `json:"snoozed_until"`
+	SuppressionReason pgtype.Text      `json:"suppression_reason"`
+}
+
+type AlertMaintenanceWindow struct {
+	ID        string           `json:"id"`
+	ScopeType string           `json:"scope_type"`
+	ScopeID   pgtype.Text      `json:"scope_id"`
+	StartsAt  pgtype.Timestamp `json:"starts_at"`
+	EndsAt    pgtype.Timestamp `json:"ends_at"`
+	Reason    pgtype.Text      `json:"reason"`
+	CreatedBy pgtype.Text      `json:"created_by"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
 }
 
 type Application struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	CarID       string           `json:"car_id"`
-	Description pgtype.Text      `json:"description"`
-	Owner       pgtype.Text      `json:"owner"`
-	Environment pgtype.Text      `json:"environment"`
-	TagsJson    []byte           `json:"tags_json"`
-	CreatedAt   pgtype.Timestamp `json:"created_at"`
-	UpdatedAt   pgtype.Timestamp `json:"updated_at"`
+	ID               string           `json:"id"`
+	Name             string           `json:"name"`
+	CarID            string           `json:"car_id"`
+	Description      pgtype.Text      `json:"description"`
+	Owner            pgtype.Text      `json:"owner"`
+	Environment      pgtype.Text      `json:"environment"`
+	TagsJson         []byte           `json:"tags_json"`
+	CreatedAt        pgtype.Timestamp `json:"created_at"`
+	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
+	AlertRoutingJson []byte           `json:"alert_routing_json"`
 }
 
 type Monitor struct {

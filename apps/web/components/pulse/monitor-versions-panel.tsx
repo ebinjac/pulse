@@ -5,6 +5,7 @@ import { History, Loader2, RotateCcw } from "lucide-react"
 
 import { Button } from "@workspace/ui/components/button"
 import { diffMonitors, formatDiffValue } from "@/lib/monitor-diff"
+import { pulseMonitorApiPath } from "@/lib/pulse-api-paths"
 import type { Monitor, MonitorConfigChange, MonitorVersionSummary } from "@/lib/pulse-types"
 
 interface MonitorVersionsPanelProps {
@@ -32,7 +33,7 @@ export function MonitorVersionsPanel({
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch(`/api/monitors/${monitorId}/versions`)
+      const response = await fetch(pulseMonitorApiPath(monitorId, "versions"))
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error ?? "Failed to load versions")
       setVersions(payload.versions ?? [])
@@ -52,7 +53,7 @@ export function MonitorVersionsPanel({
     setError(null)
     try {
       const response = await fetch(
-        `/api/monitors/${monitorId}/versions/${versionNumber}/diff?against=${diffAgainst}`
+        `${pulseMonitorApiPath(monitorId, "versions", String(versionNumber), "diff")}?against=${diffAgainst}`
       )
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error ?? "Failed to load diff")
@@ -67,7 +68,7 @@ export function MonitorVersionsPanel({
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch(`/api/monitors/${monitorId}/versions/${versionNumber}/rollback`, {
+      const response = await fetch(pulseMonitorApiPath(monitorId, "versions", String(versionNumber), "rollback"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ changeNote: rollbackNote || `Rollback to version ${versionNumber}` }),

@@ -30,8 +30,15 @@ func NewService(store store.Store) *Service {
 }
 
 func (s *Service) ProcessRun(monitor domain.Monitor, run domain.MonitorRun) {
-	policy := monitor.AlertPolicy
-	if !policy.Enabled && !monitor.AlertEnabled {
+	application := domain.Application{}
+	if monitor.ApplicationID != "" {
+		if app, ok := s.store.GetApplication(monitor.ApplicationID); ok {
+			application = app
+		}
+	}
+
+	policy := ResolveAlertPolicy(monitor, application)
+	if !policy.Enabled {
 		return
 	}
 
@@ -42,9 +49,6 @@ func (s *Service) ProcessRun(monitor domain.Monitor, run domain.MonitorRun) {
 
 	threshold := policy.Threshold
 	if threshold <= 0 {
-		threshold = monitor.FailureThreshold
-	}
-	if threshold <= 0 {
 		threshold = 1
 	}
 	if s.consecutiveFailures(monitor.ID) < threshold {
@@ -52,29 +56,56 @@ func (s *Service) ProcessRun(monitor domain.Monitor, run domain.MonitorRun) {
 	}
 
 	now := time.Now().UTC()
+	channels := channelsForResolved(policy)
+
+	if reason, under := s.store.IsUnderMaintenance(monitor.ID, monitor.ApplicationID, now); under {
+		s.persistSuppressed(monitor, run, policy, channels, now, reason, "maintenance window")
+		return
+	}
+
 	alert, exists := s.store.GetOpenAlert(monitor.ID)
 	if !exists {
 		alert = domain.AlertEvent{
 			ID:               "alert-" + run.ID,
 			MonitorID:        monitor.ID,
 			Status:           domain.AlertStatusOpen,
-			Severity:         severityForRun(run),
+			Severity:         severityForRunWithPolicy(run, policy),
 			FirstTriggeredAt: run.EndedAt,
 			CreatedAt:        now,
 		}
 	}
 
 	alert.RunID = run.ID
-	alert.Status = domain.AlertStatusOpen
-	alert.Severity = severityForRun(run)
+	alert.Severity = severityForRunWithPolicy(run, policy)
 	alert.Title = monitor.Name + " is failing"
 	alert.Description = descriptionForRun(run)
 	alert.FailureCategory = run.FailureCategory
-	alert.Channels = channelsForPolicy(policy)
+	alert.Channels = channels
 	alert.LastTriggeredAt = run.EndedAt
 
-	if cooldownActive(alert.LastDeliveredAt, policy.CooldownMinutes, now) {
+	if alert.Status == domain.AlertStatusAcknowledged {
+		s.store.SaveAlert(alert)
+		return
+	}
+
+	if alert.SnoozedUntil != nil && now.Before(*alert.SnoozedUntil) {
+		alert.Status = domain.AlertStatusSuppressed
+		if alert.SuppressionReason == "" {
+			alert.SuppressionReason = "snoozed"
+		}
+		s.store.SaveAlert(alert)
+		return
+	}
+
+	if alert.Status == domain.AlertStatusSuppressed && alert.SnoozedUntil != nil && !now.Before(*alert.SnoozedUntil) {
 		alert.Status = domain.AlertStatusOpen
+		alert.SnoozedUntil = nil
+		alert.SuppressionReason = ""
+	}
+
+	alert.Status = domain.AlertStatusOpen
+
+	if cooldownActive(alert.LastDeliveredAt, policy.CooldownMinutes, now) {
 		alert.Deliveries = []domain.AlertDelivery{{
 			Channel: "cooldown",
 			Status:  "suppressed",
@@ -85,10 +116,38 @@ func (s *Service) ProcessRun(monitor domain.Monitor, run domain.MonitorRun) {
 		return
 	}
 
-	alert.Deliveries = s.deliver(monitor, run, alert.Channels, now)
+	alert.Deliveries = s.deliver(monitor, run, policy, alert.Channels, now)
 	if hasDelivered(alert.Deliveries) {
 		alert.LastDeliveredAt = &now
 	}
+	s.store.SaveAlert(alert)
+}
+
+func (s *Service) persistSuppressed(monitor domain.Monitor, run domain.MonitorRun, policy ResolvedAlertPolicy, channels []string, now time.Time, maintenanceReason, label string) {
+	alert, exists := s.store.GetOpenAlert(monitor.ID)
+	if !exists {
+		alert = domain.AlertEvent{
+			ID:               "alert-" + run.ID,
+			MonitorID:        monitor.ID,
+			FirstTriggeredAt: run.EndedAt,
+			CreatedAt:        now,
+		}
+	}
+	alert.RunID = run.ID
+	alert.Status = domain.AlertStatusSuppressed
+	alert.Severity = severityForRunWithPolicy(run, policy)
+	alert.Title = monitor.Name + " is failing"
+	alert.Description = descriptionForRun(run)
+	alert.FailureCategory = run.FailureCategory
+	alert.Channels = channels
+	alert.LastTriggeredAt = run.EndedAt
+	alert.SuppressionReason = label + ": " + maintenanceReason
+	alert.Deliveries = []domain.AlertDelivery{{
+		Channel: "maintenance",
+		Status:  "suppressed",
+		Detail:  alert.SuppressionReason,
+		SentAt:  now,
+	}}
 	s.store.SaveAlert(alert)
 }
 
@@ -109,14 +168,14 @@ func (s *Service) consecutiveFailures(monitorID string) int {
 	return count
 }
 
-func (s *Service) deliver(monitor domain.Monitor, run domain.MonitorRun, channels []string, now time.Time) []domain.AlertDelivery {
+func (s *Service) deliver(monitor domain.Monitor, run domain.MonitorRun, policy ResolvedAlertPolicy, channels []string, now time.Time) []domain.AlertDelivery {
 	deliveries := make([]domain.AlertDelivery, 0, len(channels))
 	for _, channel := range channels {
 		switch channel {
 		case "slack":
-			deliveries = append(deliveries, s.deliverSlack(monitor, run, now))
+			deliveries = append(deliveries, s.deliverSlack(monitor, run, policy, now))
 		case "email":
-			deliveries = append(deliveries, s.deliverEmail(monitor, run, now))
+			deliveries = append(deliveries, s.deliverEmail(monitor, run, policy, now))
 		}
 	}
 	if len(deliveries) == 0 {
@@ -131,14 +190,18 @@ func (s *Service) deliver(monitor domain.Monitor, run domain.MonitorRun, channel
 	return deliveries
 }
 
-func (s *Service) deliverSlack(monitor domain.Monitor, run domain.MonitorRun, now time.Time) domain.AlertDelivery {
-	webhookURL := s.settingOrEnv("slackWebhook", "PULSE_ALERT_SLACK_WEBHOOK_URL")
+func (s *Service) deliverSlack(monitor domain.Monitor, run domain.MonitorRun, policy ResolvedAlertPolicy, now time.Time) domain.AlertDelivery {
+	webhookURL := s.slackWebhookURL(policy)
 	if webhookURL == "" || strings.Contains(webhookURL, "example") {
 		return domain.AlertDelivery{Channel: "slack", Status: "skipped", Detail: "Slack webhook not configured", SentAt: now}
 	}
 
+	onCall := ""
+	if len(policy.OnCallTargets) > 0 {
+		onCall = " On-call: " + strings.Join(policy.OnCallTargets, ", ")
+	}
 	payload := map[string]string{
-		"text": fmt.Sprintf("Pulse alert: %s is %s. %s", monitor.Name, run.Status, descriptionForRun(run)),
+		"text": fmt.Sprintf("Pulse alert [%s]: %s is %s.%s %s", policy.Severity, monitor.Name, run.Status, onCall, descriptionForRun(run)),
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(body))
@@ -160,10 +223,13 @@ func (s *Service) deliverSlack(monitor domain.Monitor, run domain.MonitorRun, no
 	return domain.AlertDelivery{Channel: "slack", Status: "sent", Detail: "Slack webhook accepted alert", SentAt: now}
 }
 
-func (s *Service) deliverEmail(monitor domain.Monitor, run domain.MonitorRun, now time.Time) domain.AlertDelivery {
-	addr := s.settingOrEnv("alertSmtpAddr", "PULSE_ALERT_SMTP_ADDR")
-	from := s.settingOrEnv("alertEmailFrom", "PULSE_ALERT_EMAIL_FROM")
-	to := splitCSV(s.settingOrEnv("alertEmailTo", "PULSE_ALERT_EMAIL_TO"))
+func (s *Service) deliverEmail(monitor domain.Monitor, run domain.MonitorRun, policy ResolvedAlertPolicy, now time.Time) domain.AlertDelivery {
+	addr := s.secretAliasOrEnv("alertSmtpAddr", "PULSE_ALERT_SMTP_ADDR")
+	from := s.secretAliasOrEnv("alertEmailFrom", "PULSE_ALERT_EMAIL_FROM")
+	to := policy.EmailTo
+	if len(to) == 0 {
+		to = splitCSV(s.secretAliasOrEnv("alertEmailTo", "PULSE_ALERT_EMAIL_TO"))
+	}
 	if addr == "" || from == "" || len(to) == 0 {
 		return domain.AlertDelivery{Channel: "email", Status: "skipped", Detail: "SMTP alert email not configured", SentAt: now}
 	}
@@ -173,11 +239,15 @@ func (s *Service) deliverEmail(monitor domain.Monitor, run domain.MonitorRun, no
 		host = strings.Split(addr, ":")[0]
 	}
 	var auth smtp.Auth
-	if user := s.settingOrEnv("alertSmtpUser", "PULSE_ALERT_SMTP_USER"); user != "" {
-		auth = smtp.PlainAuth("", user, s.settingOrEnv("alertSmtpPassword", "PULSE_ALERT_SMTP_PASSWORD"), host)
+	if user := s.secretAliasOrEnv("alertSmtpUser", "PULSE_ALERT_SMTP_USER"); user != "" {
+		auth = smtp.PlainAuth("", user, s.secretAliasOrEnv("alertSmtpPassword", "PULSE_ALERT_SMTP_PASSWORD"), host)
 	}
 
-	subject := fmt.Sprintf("Pulse alert: %s is %s", monitor.Name, run.Status)
+	subject := fmt.Sprintf("Pulse alert [%s]: %s is %s", policy.Severity, monitor.Name, run.Status)
+	onCallLine := ""
+	if len(policy.OnCallTargets) > 0 {
+		onCallLine = "On-call: " + strings.Join(policy.OnCallTargets, ", ") + "\r\n"
+	}
 	message := strings.Join([]string{
 		"From: " + from,
 		"To: " + strings.Join(to, ", "),
@@ -187,6 +257,7 @@ func (s *Service) deliverEmail(monitor domain.Monitor, run domain.MonitorRun, no
 		subject,
 		"",
 		descriptionForRun(run),
+		onCallLine,
 		"Run ID: " + run.ID,
 		"Failure category: " + string(run.FailureCategory),
 		"Duration: " + strconv.Itoa(run.DurationMS) + "ms",
@@ -200,24 +271,25 @@ func (s *Service) deliverEmail(monitor domain.Monitor, run domain.MonitorRun, no
 	return domain.AlertDelivery{Channel: "email", Status: "sent", Detail: "SMTP accepted alert", SentAt: now}
 }
 
-func (s *Service) settingOrEnv(alias string, envKey string) string {
+func (s *Service) slackWebhookURL(policy ResolvedAlertPolicy) string {
+	candidate := strings.TrimSpace(policy.SlackWebhookSecret)
+	if candidate != "" {
+		if strings.HasPrefix(candidate, "http") {
+			return candidate
+		}
+		if value, ok := s.store.GetRawSecretValue(candidate); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return s.secretAliasOrEnv("slackWebhook", "PULSE_ALERT_SLACK_WEBHOOK_URL")
+}
+
+func (s *Service) secretAliasOrEnv(alias string, envKey string) string {
 	if value, ok := s.store.GetRawSecretValue(alias); ok && strings.TrimSpace(value) != "" {
 		return strings.TrimSpace(value)
 	}
 
 	return strings.TrimSpace(os.Getenv(envKey))
-}
-
-func channelsForPolicy(policy domain.AlertPolicy) []string {
-	channels := []string{}
-	if policy.Email {
-		channels = append(channels, "email")
-	}
-	if policy.SlackWebhook {
-		channels = append(channels, "slack")
-	}
-
-	return channels
 }
 
 func cooldownActive(lastDeliveredAt *time.Time, cooldownMinutes int, now time.Time) bool {

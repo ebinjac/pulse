@@ -2277,6 +2277,74 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
                           </label>
                         </div>
                       </div>
+                      <label className="md:col-span-2">
+                        <span className={labelClass}>Severity override</span>
+                        <select
+                          className={inputClass}
+                          value={draft.alertPolicy.severity || "inherit"}
+                          onChange={(e) => updateDraft({
+                            ...draft,
+                            alertPolicy: { ...draft.alertPolicy, severity: e.target.value }
+                          })}
+                        >
+                          <option value="inherit">Inherit from application / run</option>
+                          <option value="critical">Critical</option>
+                          <option value="warning">Warning</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-2 md:col-span-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={draft.alertPolicy.inheritFromApplication ?? true}
+                          onChange={(e) => updateDraft({
+                            ...draft,
+                            alertPolicy: { ...draft.alertPolicy, inheritFromApplication: e.target.checked }
+                          })}
+                        />
+                        Inherit application default channels and routing
+                      </label>
+                      <label>
+                        <span className={labelClass}>Email recipients (override)</span>
+                        <input
+                          className={inputClass}
+                          placeholder="oncall@team.com, pager@team.com"
+                          value={(draft.alertPolicy.emailTo || []).join(", ")}
+                          onChange={(e) => updateDraft({
+                            ...draft,
+                            alertPolicy: {
+                              ...draft.alertPolicy,
+                              emailTo: e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                            }
+                          })}
+                        />
+                      </label>
+                      <label>
+                        <span className={labelClass}>On-call targets</span>
+                        <input
+                          className={inputClass}
+                          placeholder="@oncall-primary, @oncall-secondary"
+                          value={(draft.alertPolicy.onCallTargets || []).join(", ")}
+                          onChange={(e) => updateDraft({
+                            ...draft,
+                            alertPolicy: {
+                              ...draft.alertPolicy,
+                              onCallTargets: e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                            }
+                          })}
+                        />
+                      </label>
+                      <label className="md:col-span-2">
+                        <span className={labelClass}>Slack webhook secret alias</span>
+                        <input
+                          className={inputClass}
+                          placeholder="slackWebhook or custom alias"
+                          value={draft.alertPolicy.slackWebhookSecret || ""}
+                          onChange={(e) => updateDraft({
+                            ...draft,
+                            alertPolicy: { ...draft.alertPolicy, slackWebhookSecret: e.target.value }
+                          })}
+                        />
+                      </label>
                     </div>
                   )}
                 </div>

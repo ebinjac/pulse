@@ -33,6 +33,7 @@ SELECT
   COALESCE(owner, '')::text AS owner,
   COALESCE(environment, '')::text AS environment,
   tags_json,
+  alert_routing_json,
   created_at,
   updated_at
 FROM applications
@@ -40,15 +41,16 @@ WHERE id = $1
 `
 
 type GetApplicationRow struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	CarID       string           `json:"car_id"`
-	Description string           `json:"description"`
-	Owner       string           `json:"owner"`
-	Environment string           `json:"environment"`
-	TagsJson    []byte           `json:"tags_json"`
-	CreatedAt   pgtype.Timestamp `json:"created_at"`
-	UpdatedAt   pgtype.Timestamp `json:"updated_at"`
+	ID               string           `json:"id"`
+	Name             string           `json:"name"`
+	CarID            string           `json:"car_id"`
+	Description      string           `json:"description"`
+	Owner            string           `json:"owner"`
+	Environment      string           `json:"environment"`
+	TagsJson         []byte           `json:"tags_json"`
+	AlertRoutingJson []byte           `json:"alert_routing_json"`
+	CreatedAt        pgtype.Timestamp `json:"created_at"`
+	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) GetApplication(ctx context.Context, id string) (GetApplicationRow, error) {
@@ -62,6 +64,7 @@ func (q *Queries) GetApplication(ctx context.Context, id string) (GetApplication
 		&i.Owner,
 		&i.Environment,
 		&i.TagsJson,
+		&i.AlertRoutingJson,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -77,6 +80,7 @@ SELECT
   COALESCE(owner, '')::text AS owner,
   COALESCE(environment, '')::text AS environment,
   tags_json,
+  alert_routing_json,
   created_at,
   updated_at
 FROM applications
@@ -84,15 +88,16 @@ ORDER BY name ASC
 `
 
 type ListApplicationsRow struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	CarID       string           `json:"car_id"`
-	Description string           `json:"description"`
-	Owner       string           `json:"owner"`
-	Environment string           `json:"environment"`
-	TagsJson    []byte           `json:"tags_json"`
-	CreatedAt   pgtype.Timestamp `json:"created_at"`
-	UpdatedAt   pgtype.Timestamp `json:"updated_at"`
+	ID               string           `json:"id"`
+	Name             string           `json:"name"`
+	CarID            string           `json:"car_id"`
+	Description      string           `json:"description"`
+	Owner            string           `json:"owner"`
+	Environment      string           `json:"environment"`
+	TagsJson         []byte           `json:"tags_json"`
+	AlertRoutingJson []byte           `json:"alert_routing_json"`
+	CreatedAt        pgtype.Timestamp `json:"created_at"`
+	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) ListApplications(ctx context.Context) ([]ListApplicationsRow, error) {
@@ -112,6 +117,7 @@ func (q *Queries) ListApplications(ctx context.Context) ([]ListApplicationsRow, 
 			&i.Owner,
 			&i.Environment,
 			&i.TagsJson,
+			&i.AlertRoutingJson,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -134,10 +140,11 @@ INSERT INTO applications (
   owner,
   environment,
   tags_json,
+  alert_routing_json,
   created_at,
   updated_at
 )
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   car_id = EXCLUDED.car_id,
@@ -145,19 +152,21 @@ ON CONFLICT (id) DO UPDATE SET
   owner = EXCLUDED.owner,
   environment = EXCLUDED.environment,
   tags_json = EXCLUDED.tags_json,
+  alert_routing_json = EXCLUDED.alert_routing_json,
   updated_at = EXCLUDED.updated_at
 `
 
 type UpsertApplicationParams struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	CarID       string           `json:"car_id"`
-	Description pgtype.Text      `json:"description"`
-	Owner       pgtype.Text      `json:"owner"`
-	Environment pgtype.Text      `json:"environment"`
-	TagsJson    []byte           `json:"tags_json"`
-	CreatedAt   pgtype.Timestamp `json:"created_at"`
-	UpdatedAt   pgtype.Timestamp `json:"updated_at"`
+	ID               string           `json:"id"`
+	Name             string           `json:"name"`
+	CarID            string           `json:"car_id"`
+	Description      pgtype.Text      `json:"description"`
+	Owner            pgtype.Text      `json:"owner"`
+	Environment      pgtype.Text      `json:"environment"`
+	TagsJson         []byte           `json:"tags_json"`
+	AlertRoutingJson []byte           `json:"alert_routing_json"`
+	CreatedAt        pgtype.Timestamp `json:"created_at"`
+	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) UpsertApplication(ctx context.Context, arg UpsertApplicationParams) error {
@@ -169,6 +178,7 @@ func (q *Queries) UpsertApplication(ctx context.Context, arg UpsertApplicationPa
 		arg.Owner,
 		arg.Environment,
 		arg.TagsJson,
+		arg.AlertRoutingJson,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)

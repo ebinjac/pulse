@@ -21,6 +21,16 @@ export function pulseApiRequiredResponse(): Response {
   )
 }
 
+import { pulseMonitorApiPath } from "./pulse-api-paths"
+
+export { pulseMonitorApiPath }
+
+function resolvePulseApiUrl(baseUrl: string, path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`
+  const base = new URL(baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`)
+  return new URL(normalizedPath.slice(1), base).toString()
+}
+
 export async function proxyToPulseApi(request: Request, path: string): Promise<Response> {
   const baseUrl = process.env.PULSE_API_BASE_URL?.trim()
   if (!baseUrl) {
@@ -31,7 +41,7 @@ export async function proxyToPulseApi(request: Request, path: string): Promise<R
   headers.delete("host")
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD"
-  const upstreamResponse = await fetch(new URL(path, baseUrl), {
+  const upstreamResponse = await fetch(resolvePulseApiUrl(baseUrl, path), {
     method: request.method,
     headers,
     body: hasBody ? await request.arrayBuffer() : undefined,

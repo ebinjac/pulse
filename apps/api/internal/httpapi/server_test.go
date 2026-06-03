@@ -18,6 +18,27 @@ func testServer() http.Handler {
 	return NewServer(store, executor.NewMockExecutor(store)).Routes()
 }
 
+func TestListMonitorVersionsEndpoint(t *testing.T) {
+	handler := testServer()
+	request := httptest.NewRequest(http.MethodGet, "/api/monitors/mon-protected-api/versions", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	var payload struct {
+		Versions []domain.MonitorVersionSummary `json:"versions"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Versions) == 0 {
+		t.Fatal("expected at least one version for seeded monitor")
+	}
+}
+
 func TestRunMonitorEndpoint(t *testing.T) {
 	handler := testServer()
 	request := httptest.NewRequest(http.MethodPost, "/api/monitors/mon-protected-api/run", nil)

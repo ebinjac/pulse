@@ -113,15 +113,16 @@ func (s *PostgresStore) UpsertApplication(application domain.Application) domain
 	application.UpdatedAt = now
 
 	if err := s.queries.UpsertApplication(context.Background(), pulsedb.UpsertApplicationParams{
-		ID:          application.ID,
-		Name:        application.Name,
-		CarID:       application.CarID,
-		Description: pgText(application.Description),
-		Owner:       pgText(application.Owner),
-		Environment: pgText(application.Environment),
-		TagsJson:    mustJSON(application.Tags),
-		CreatedAt:   pgTimestamp(application.CreatedAt),
-		UpdatedAt:   pgTimestamp(application.UpdatedAt),
+		ID:               application.ID,
+		Name:             application.Name,
+		CarID:            application.CarID,
+		Description:      pgText(application.Description),
+		Owner:            pgText(application.Owner),
+		Environment:      pgText(application.Environment),
+		TagsJson:         mustJSON(application.Tags),
+		AlertRoutingJson: mustJSON(application.AlertRouting),
+		CreatedAt:        pgTimestamp(application.CreatedAt),
+		UpdatedAt:        pgTimestamp(application.UpdatedAt),
 	}); err != nil {
 		log.Printf("upsert application: %v", err)
 	}
@@ -443,18 +444,6 @@ func (s *PostgresStore) ListAlerts() []domain.AlertEvent {
 	return alerts
 }
 
-func (s *PostgresStore) GetOpenAlert(monitorID string) (domain.AlertEvent, bool) {
-	row, err := s.queries.GetOpenAlert(context.Background(), pulsedb.GetOpenAlertParams{
-		MonitorID: pgText(monitorID),
-		Status:    pgText(string(domain.AlertStatusOpen)),
-	})
-	if err != nil {
-		return domain.AlertEvent{}, false
-	}
-
-	return alertFromOpenRow(row), true
-}
-
 func (s *PostgresStore) SaveAlert(alert domain.AlertEvent) {
 	now := time.Now().UTC()
 	if alert.ID == "" {
@@ -478,27 +467,16 @@ func (s *PostgresStore) SaveAlert(alert domain.AlertEvent) {
 		LastTriggeredAt:  pgTimestamp(alert.LastTriggeredAt),
 		CreatedAt:        pgTimestamp(alert.CreatedAt),
 		UpdatedAt:        pgTimestamp(alert.UpdatedAt),
-		RunID:            pgNullableText(alert.RunID),
-		LastDeliveredAt:  pgTimestampPtr(alert.LastDeliveredAt),
-		ResolvedAt:       pgTimestampPtr(alert.ResolvedAt),
+		RunID:              pgNullableText(alert.RunID),
+		LastDeliveredAt:    pgTimestampPtr(alert.LastDeliveredAt),
+		ResolvedAt:         pgTimestampPtr(alert.ResolvedAt),
+		AcknowledgedBy:     pgNullableText(alert.AcknowledgedBy),
+		AcknowledgedAt:     pgTimestampPtr(alert.AcknowledgedAt),
+		SnoozedUntil:       pgTimestampPtr(alert.SnoozedUntil),
+		SuppressionReason:  pgNullableText(alert.SuppressionReason),
 	}); err != nil {
 		log.Printf("save alert: %v", err)
 	}
-}
-
-func (s *PostgresStore) ResolveOpenAlerts(monitorID string, resolvedAt time.Time) int {
-	count, err := s.queries.ResolveOpenAlerts(context.Background(), pulsedb.ResolveOpenAlertsParams{
-		MonitorID:  pgText(monitorID),
-		Status:     pgText(string(domain.AlertStatusResolved)),
-		ResolvedAt: pgTimestamp(resolvedAt),
-		Status_2:   pgText(string(domain.AlertStatusOpen)),
-	})
-	if err != nil {
-		log.Printf("resolve alerts: %v", err)
-		return 0
-	}
-
-	return int(count)
 }
 
 func (s *PostgresStore) ListSecrets() []domain.SecretReference {
@@ -747,6 +725,7 @@ func applicationFromListRow(row pulsedb.ListApplicationsRow) domain.Application 
 		UpdatedAt:   pgTime(row.UpdatedAt),
 	}
 	_ = json.Unmarshal(row.TagsJson, &application.Tags)
+	_ = json.Unmarshal(row.AlertRoutingJson, &application.AlertRouting)
 	if application.Tags == nil {
 		application.Tags = []string{}
 	}
@@ -765,6 +744,7 @@ func applicationFromGetRow(row pulsedb.GetApplicationRow) domain.Application {
 		UpdatedAt:   pgTime(row.UpdatedAt),
 	}
 	_ = json.Unmarshal(row.TagsJson, &application.Tags)
+	_ = json.Unmarshal(row.AlertRoutingJson, &application.AlertRouting)
 	if application.Tags == nil {
 		application.Tags = []string{}
 	}
@@ -892,21 +872,10 @@ func alertFromListRow(row pulsedb.ListAlertsRow) domain.AlertEvent {
 		CreatedAt:        pgTime(row.CreatedAt),
 		UpdatedAt:        pgTime(row.UpdatedAt),
 	}
-	alert.LastDeliveredAt = pgTimePtr(row.LastDeliveredAt)
-	alert.ResolvedAt = pgTimePtr(row.ResolvedAt)
-	_ = json.Unmarshal(row.ChannelsJson, &alert.Channels)
-	_ = json.Unmarshal(row.DeliveriesJson, &alert.Deliveries)
-	if alert.Channels == nil {
-		alert.Channels = []string{}
-	}
-	if alert.Deliveries == nil {
-		alert.Deliveries = []domain.AlertDelivery{}
-	}
-
-	return alert
+	return populateAlertFields(&alert, row.LastDeliveredAt, row.ResolvedAt, row.AcknowledgedAt, row.SnoozedUntil, row.AcknowledgedBy, row.SuppressionReason, row.ChannelsJson, row.DeliveriesJson)
 }
 
-func alertFromOpenRow(row pulsedb.GetOpenAlertRow) domain.AlertEvent {
+func alertFromGetRow(row pulsedb.GetAlertRow) domain.AlertEvent {
 	alert := domain.AlertEvent{
 		ID:               row.ID,
 		MonitorID:        pgTextString(row.MonitorID),
@@ -921,18 +890,43 @@ func alertFromOpenRow(row pulsedb.GetOpenAlertRow) domain.AlertEvent {
 		CreatedAt:        pgTime(row.CreatedAt),
 		UpdatedAt:        pgTime(row.UpdatedAt),
 	}
-	alert.LastDeliveredAt = pgTimePtr(row.LastDeliveredAt)
-	alert.ResolvedAt = pgTimePtr(row.ResolvedAt)
-	_ = json.Unmarshal(row.ChannelsJson, &alert.Channels)
-	_ = json.Unmarshal(row.DeliveriesJson, &alert.Deliveries)
+	return populateAlertFields(&alert, row.LastDeliveredAt, row.ResolvedAt, row.AcknowledgedAt, row.SnoozedUntil, row.AcknowledgedBy, row.SuppressionReason, row.ChannelsJson, row.DeliveriesJson)
+}
+
+func alertFromActiveRow(row pulsedb.GetActiveAlertRow) domain.AlertEvent {
+	alert := domain.AlertEvent{
+		ID:               row.ID,
+		MonitorID:        pgTextString(row.MonitorID),
+		RunID:            row.RunID,
+		Status:           domain.AlertStatus(row.Status),
+		Severity:         row.Severity,
+		Title:            row.Title,
+		Description:      row.Description,
+		FailureCategory:  domain.FailureCategory(row.FailureCategory),
+		FirstTriggeredAt: pgTime(row.FirstTriggeredAt),
+		LastTriggeredAt:  pgTime(row.LastTriggeredAt),
+		CreatedAt:        pgTime(row.CreatedAt),
+		UpdatedAt:        pgTime(row.UpdatedAt),
+	}
+	return populateAlertFields(&alert, row.LastDeliveredAt, row.ResolvedAt, row.AcknowledgedAt, row.SnoozedUntil, row.AcknowledgedBy, row.SuppressionReason, row.ChannelsJson, row.DeliveriesJson)
+}
+
+func populateAlertFields(alert *domain.AlertEvent, lastDelivered, resolved, acknowledgedAt, snoozedUntil pgtype.Timestamp, acknowledgedBy, suppressionReason string, channelsJSON, deliveriesJSON []byte) domain.AlertEvent {
+	alert.LastDeliveredAt = pgTimePtr(lastDelivered)
+	alert.ResolvedAt = pgTimePtr(resolved)
+	alert.AcknowledgedBy = acknowledgedBy
+	alert.AcknowledgedAt = pgTimePtr(acknowledgedAt)
+	alert.SnoozedUntil = pgTimePtr(snoozedUntil)
+	alert.SuppressionReason = suppressionReason
+	_ = json.Unmarshal(channelsJSON, &alert.Channels)
+	_ = json.Unmarshal(deliveriesJSON, &alert.Deliveries)
 	if alert.Channels == nil {
 		alert.Channels = []string{}
 	}
 	if alert.Deliveries == nil {
 		alert.Deliveries = []domain.AlertDelivery{}
 	}
-
-	return alert
+	return *alert
 }
 
 func secretFromListRow(row pulsedb.ListSecretsRow) domain.SecretReference {

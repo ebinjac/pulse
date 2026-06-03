@@ -2,7 +2,8 @@
 
 import { useState } from "react"
 import { Braces, Clock, DatabaseZap, Mail, RotateCw, ShieldCheck } from "lucide-react"
-import type { NotificationSettings, NotificationSettingsInput } from "@/lib/pulse-types"
+import type { Application, Monitor, NotificationSettings, NotificationSettingsInput } from "@/lib/pulse-types"
+import { MaintenanceWindowsPanel } from "./maintenance-windows-panel"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@workspace/ui/components/card"
@@ -36,9 +37,13 @@ export function ConfiguredDot({ configured }: { configured: boolean }) {
 export function SettingsView({
   notificationSettings,
   onSaveNotifications,
+  applications = [],
+  monitors = [],
 }: {
   notificationSettings: NotificationSettings | null
   onSaveNotifications: (input: NotificationSettingsInput) => Promise<void>
+  applications?: Application[]
+  monitors?: Monitor[]
 }) {
   const [form, setForm] = useState<NotificationSettingsInput>(defaultNotificationInput)
   const [saving, setSaving] = useState(false)
@@ -156,6 +161,8 @@ export function SettingsView({
             </div>
           </CardContent>
         </Card>
+
+        <MaintenanceWindowsPanel applications={applications} monitors={monitors} />
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Section title="Scheduler" icon={Clock}>

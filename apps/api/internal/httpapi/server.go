@@ -35,6 +35,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/monitors", s.listMonitors)
 	mux.HandleFunc("POST /api/monitors", s.createMonitor)
 	mux.HandleFunc("POST /api/monitors/test", s.testMonitor)
+	s.registerMonitorVersionRoutes(mux)
 	mux.HandleFunc("/api/monitors/", s.monitorRoutes)
 	mux.HandleFunc("GET /api/runs", s.listAllRuns)
 	mux.HandleFunc("/api/runs/", s.runRoutes)
@@ -42,6 +43,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/secrets", s.createSecret)
 	mux.HandleFunc("/api/secrets/", s.secretRoutes)
 	mux.HandleFunc("GET /api/alerts", s.listAlerts)
+	mux.HandleFunc("/api/alerts/", s.alertRoutes)
+	mux.HandleFunc("GET /api/maintenance-windows", s.maintenanceRoutes)
+	mux.HandleFunc("POST /api/maintenance-windows", s.maintenanceRoutes)
+	mux.HandleFunc("/api/maintenance-windows/", s.maintenanceWindowRoutes)
 	mux.HandleFunc("GET /api/settings/notifications", s.getNotificationSettings)
 	mux.HandleFunc("PUT /api/settings/notifications", s.updateNotificationSettings)
 
