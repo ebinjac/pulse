@@ -7,24 +7,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ensemble-pulse/pulse/apps/api/internal/executor"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/jobqueue"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/store"
 	"github.com/robfig/cron/v3"
 )
 
 type Scheduler struct {
 	store     store.Store
-	executor  executor.Executor
+	queue     jobqueue.Queue
 	cron      *cron.Cron
 	entries   map[string]cron.EntryID // monitorID -> cron EntryID
 	schedules map[string]string       // monitorID -> resolved spec string
 	mu        sync.RWMutex
 }
 
-func NewScheduler(store store.Store, executor executor.Executor) *Scheduler {
+func NewScheduler(store store.Store, queue jobqueue.Queue) *Scheduler {
 	return &Scheduler{
 		store:     store,
-		executor:  executor,
+		queue:     queue,
 		cron:      cron.New(cron.WithParser(cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor))),
 		entries:   make(map[string]cron.EntryID),
 		schedules: make(map[string]string),
@@ -141,11 +141,20 @@ func (s *Scheduler) executeJob(monitorID string) {
 		return
 	}
 
-	log.Printf("[Scheduler] Executing scheduled monitor check for: %s (%s)", latestMonitor.Name, latestMonitor.ID)
+	enqueued, err := s.queue.EnqueueMonitorRun(context.Background(), jobqueue.MonitorRunJob{
+		MonitorID:   latestMonitor.ID,
+		Trigger:     "schedule",
+		EnqueuedAt:  time.Now().UTC(),
+		ScheduledAt: time.Now().UTC(),
+	})
+	if err != nil {
+		log.Printf("[Scheduler] Failed to enqueue scheduled monitor check for %s (%s): %v", latestMonitor.Name, latestMonitor.ID, err)
+		return
+	}
+	if !enqueued {
+		log.Printf("[Scheduler] Scheduled monitor check for %s (%s) is already queued, skipping duplicate", latestMonitor.Name, latestMonitor.ID)
+		return
+	}
 
-	// Executor.Run automatically handles step executions, assertion checks, masks secrets,
-	// and writes the MonitorRun result history back into the database store.
-	run := s.executor.RunScheduled(latestMonitor)
-
-	log.Printf("[Scheduler] Finished check for %s. Duration: %dms, Status: %s", latestMonitor.Name, run.DurationMS, run.Status)
+	log.Printf("[Scheduler] Enqueued scheduled monitor check for: %s (%s)", latestMonitor.Name, latestMonitor.ID)
 }

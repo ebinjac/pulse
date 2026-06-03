@@ -2,7 +2,7 @@
 
 Go API service for the Pulse MVP.
 
-This service owns monitor persistence, monitor execution, scheduling, encrypted database secrets, run history, and persisted alert events. It uses PostgreSQL when `DATABASE_URL` is configured and falls back to an in-memory store for local contract testing.
+This service owns monitor persistence, scheduling, encrypted database secrets, run history, and persisted alert events. Scheduled monitor execution is queue-backed: the API scheduler enqueues Redis jobs, and the worker process consumes them. Manual runs still execute synchronously through the API.
 
 ## Endpoints
 
@@ -31,6 +31,12 @@ go run ./cmd/api
 
 The service listens on `:8080` by default. Override with `PULSE_API_ADDR`.
 
+Run the scheduled execution worker in a second terminal:
+
+```bash
+go run ./cmd/worker
+```
+
 ## Environment
 
 Local values live in `.env`.
@@ -41,6 +47,8 @@ Required for the real runtime:
 DATABASE_URL=postgres://pulse:pulse@localhost:5432/pulse?sslmode=disable
 REDIS_URL=redis://localhost:6379/0
 PULSE_SECRET_ENCRYPTION_KEY=base64-encoded-32-byte-key
+PULSE_SCHEDULER_ENABLED=true
+PULSE_WORKER_ENABLED=false
 ```
 
 Optional alert delivery:
@@ -56,7 +64,17 @@ PULSE_ALERT_EMAIL_TO=
 
 ## Database
 
-The PostgreSQL migration lives at `migrations/001_initial_schema.sql`. Startup also applies compatible schema patches for existing local databases.
+PostgreSQL migrations live in `migrations` and are run by the `cmd/migrate` command.
+
+```bash
+set -a; source .env; set +a
+go run ./cmd/migrate up
+go run ./cmd/migrate version
+```
+
+The Docker image also includes `/app/pulse-migrate` and `/app/pulse-worker`. The root `docker-compose.yml` runs migrations first, starts the API scheduler, then starts the worker as a separate service.
+
+See `../../MIGRATIONS.md` for the full migration runbook.
 
 ## sqlc
 

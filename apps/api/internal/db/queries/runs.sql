@@ -27,6 +27,7 @@ INSERT INTO monitor_step_runs (
   assertion_results_json,
   extractor_results_json,
   console_output_json,
+  timing_json,
   latency_ms,
   error_message,
   started_at,
@@ -48,7 +49,8 @@ VALUES (
   $12,
   $13,
   $14,
-  $15
+  $15,
+  $16
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -102,6 +104,7 @@ SELECT
   assertion_results_json,
   extractor_results_json,
   console_output_json,
+  COALESCE(timing_json, '{}'::jsonb) AS timing_json,
   COALESCE(latency_ms, 0)::int AS latency_ms,
   COALESCE(error_message, '')::text AS error_message
 FROM monitor_step_runs

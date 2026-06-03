@@ -38,6 +38,9 @@ func TestRunMonitorEndpoint(t *testing.T) {
 	if payload.Run.Status != domain.StatusFailed {
 		t.Fatalf("run status = %s, want failed", payload.Run.Status)
 	}
+	if len(payload.Run.Steps) < 2 || payload.Run.Steps[1].Timing.TotalMS <= 0 {
+		t.Fatalf("http step timing was not returned: %+v", payload.Run.Steps)
+	}
 }
 
 func TestSecretsEndpointDoesNotExposeRawValues(t *testing.T) {
@@ -91,6 +94,36 @@ func TestCreateSecretStoresRawValueWithoutExposingIt(t *testing.T) {
 	}
 }
 
+func TestMonitorStatusJSONBoundaryUsesLowercaseValues(t *testing.T) {
+	handler := testServer()
+	request := httptest.NewRequest(http.MethodPost, "/api/monitors/mon-protected-api/run", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+
+	responseBody := response.Body.String()
+	if !strings.Contains(responseBody, `"status":"failed"`) {
+		t.Fatalf("run response should expose lowercase status: %s", responseBody)
+	}
+	if strings.Contains(responseBody, `"status":"FAILED"`) {
+		t.Fatalf("run response exposed uppercase internal status: %s", responseBody)
+	}
+
+	var payload struct {
+		Run domain.MonitorRun `json:"run"`
+	}
+	if err := json.NewDecoder(strings.NewReader(responseBody)).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Run.Status != domain.StatusFailed {
+		t.Fatalf("decoded run status = %s, want %s", payload.Run.Status, domain.StatusFailed)
+	}
+}
+
 func TestSecretTestRequiresDecryptableSecret(t *testing.T) {
 	memoryStore := store.NewMemoryStore()
 	handler := NewServer(memoryStore, executor.NewMockExecutor(memoryStore)).Routes()
@@ -126,5 +159,37 @@ func TestSecretTestRequiresDecryptableSecret(t *testing.T) {
 	}
 	if strings.Contains(testResponse.Body.String(), "raw-partner-secret") {
 		t.Fatalf("test response exposed raw secret: %s", testResponse.Body.String())
+	}
+}
+
+func TestNotificationSettingsStoreEncryptedValuesWithoutExposingThem(t *testing.T) {
+	memoryStore := store.NewMemoryStore()
+	handler := NewServer(memoryStore, executor.NewMockExecutor(memoryStore)).Routes()
+	body := bytes.NewBufferString(`{
+		"smtpHost":"smtp.freesmtpservers.com",
+		"smtpPort":"25",
+		"smtpFrom":"pulse-alerts@example.com",
+		"smtpTo":"oncall@example.com",
+		"slackWebhookUrl":"https://hooks.slack.com/services/T000/B000/secret"
+	}`)
+	request := httptest.NewRequest(http.MethodPut, "/api/settings/notifications", body)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	responseBody := response.Body.String()
+	for _, sensitive := range []string{"smtp.freesmtpservers.com", "oncall@example.com", "hooks.slack.com"} {
+		if strings.Contains(responseBody, sensitive) {
+			t.Fatalf("settings response exposed configured value %q: %s", sensitive, responseBody)
+		}
+	}
+	if raw, ok := memoryStore.GetRawSecretValue("alertSmtpAddr"); !ok || raw != "smtp.freesmtpservers.com:25" {
+		t.Fatalf("smtp addr = %q, ok = %v", raw, ok)
+	}
+	if raw, ok := memoryStore.GetRawSecretValue("slackWebhook"); !ok || raw != "https://hooks.slack.com/services/T000/B000/secret" {
+		t.Fatalf("slack webhook = %q, ok = %v", raw, ok)
 	}
 }

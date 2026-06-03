@@ -2,46 +2,19 @@ package scheduler
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/ensemble-pulse/pulse/apps/api/internal/domain"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/jobqueue"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/store"
 )
-
-type mockExecutor struct {
-	mu   sync.Mutex
-	runs map[string]int
-}
-
-func (m *mockExecutor) Run(monitor domain.Monitor) domain.MonitorRun {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.runs[monitor.ID]++
-	return domain.MonitorRun{
-		ID:          "run-test",
-		MonitorID:   monitor.ID,
-		MonitorName: monitor.Name,
-		Status:      domain.StatusSuccess,
-	}
-}
-
-func (m *mockExecutor) RunScheduled(monitor domain.Monitor) domain.MonitorRun {
-	run := m.Run(monitor)
-	run.TriggeredBy = "schedule"
-	return run
-}
-
-func (m *mockExecutor) Test(monitor domain.Monitor) domain.MonitorRun {
-	return domain.MonitorRun{}
-}
 
 func TestSchedulerSync(t *testing.T) {
 	ctx := context.Background()
 	mStore := store.NewMemoryStore()
-	exec := &mockExecutor{runs: make(map[string]int)}
-	sched := NewScheduler(mStore, exec)
+	queue := jobqueue.NewMemoryQueue(8)
+	sched := NewScheduler(mStore, queue)
 
 	// Create a test monitor
 	m1 := domain.Monitor{
@@ -101,8 +74,8 @@ func TestSchedulerSync(t *testing.T) {
 func TestSchedulerTimezoneSpec(t *testing.T) {
 	ctx := context.Background()
 	mStore := store.NewMemoryStore()
-	exec := &mockExecutor{runs: make(map[string]int)}
-	sched := NewScheduler(mStore, exec)
+	queue := jobqueue.NewMemoryQueue(8)
+	sched := NewScheduler(mStore, queue)
 
 	// Create test monitor with timezone
 	m2 := domain.Monitor{
@@ -127,10 +100,10 @@ func TestSchedulerTimezoneSpec(t *testing.T) {
 	}
 }
 
-func TestSchedulerExecuteJob(t *testing.T) {
+func TestSchedulerExecuteJobEnqueuesRun(t *testing.T) {
 	mStore := store.NewMemoryStore()
-	exec := &mockExecutor{runs: make(map[string]int)}
-	sched := NewScheduler(mStore, exec)
+	queue := jobqueue.NewMemoryQueue(8)
+	sched := NewScheduler(mStore, queue)
 
 	m3 := domain.Monitor{
 		ID:           "mon-3",
@@ -141,15 +114,17 @@ func TestSchedulerExecuteJob(t *testing.T) {
 	}
 	mStore.UpsertMonitor(m3)
 
-	// Directly call executeJob (the callback registered in cron)
 	sched.executeJob("mon-3")
 
-	exec.mu.Lock()
-	count := exec.runs["mon-3"]
-	exec.mu.Unlock()
-
-	if count != 1 {
-		t.Errorf("Expected executor to be called exactly 1 time, called %d times", count)
+	job, err := queue.DequeueMonitorRun(context.Background(), time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected queued monitor run job, got error: %v", err)
+	}
+	if job.MonitorID != "mon-3" {
+		t.Fatalf("queued monitor ID = %s, want mon-3", job.MonitorID)
+	}
+	if job.Trigger != "schedule" {
+		t.Fatalf("queued trigger = %s, want schedule", job.Trigger)
 	}
 
 	// Unschedule monitor or disable it, verify skipped execution
@@ -158,19 +133,15 @@ func TestSchedulerExecuteJob(t *testing.T) {
 
 	sched.executeJob("mon-3")
 
-	exec.mu.Lock()
-	count2 := exec.runs["mon-3"]
-	exec.mu.Unlock()
-
-	if count2 != 1 {
-		t.Errorf("Expected execution to be skipped when monitor is inactive, got run count: %d", count2)
+	if _, err := queue.DequeueMonitorRun(context.Background(), time.Millisecond); err != jobqueue.ErrNoJob {
+		t.Fatalf("expected no job after inactive monitor, got %v", err)
 	}
 }
 
 func TestSchedulerStartStop(t *testing.T) {
 	mStore := store.NewMemoryStore()
-	exec := &mockExecutor{runs: make(map[string]int)}
-	sched := NewScheduler(mStore, exec)
+	queue := jobqueue.NewMemoryQueue(8)
+	sched := NewScheduler(mStore, queue)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sched.Start(ctx)

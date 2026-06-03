@@ -9,7 +9,6 @@ services:
       - "5432:5432"
     volumes:
       - pulse-postgres:/var/lib/postgresql/data
-      - ./apps/api/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pulse -d pulse"]
       interval: 5s
@@ -26,12 +25,26 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["/app/pulse-migrate", "up"]
+    environment:
+      DATABASE_URL: postgres://pulse:pulse@postgres:5432/pulse?sslmode=disable
+      PULSE_MIGRATIONS_PATH: file://migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
       PULSE_API_ADDR: ":8080"
+      PULSE_SCHEDULER_ENABLED: "true"
+      PULSE_WORKER_ENABLED: "false"
       DATABASE_URL: postgres://pulse:pulse@postgres:5432/pulse?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       PULSE_SECRET_ENCRYPTION_KEY: ZW5zZW1ibGUtcHVsc2UtbG9jYWwtZGV2LWtleS0wMSE=
@@ -44,6 +57,31 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["/app/pulse-worker"]
+    environment:
+      DATABASE_URL: postgres://pulse:pulse@postgres:5432/pulse?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      PULSE_SECRET_ENCRYPTION_KEY: ZW5zZW1ibGUtcHVsc2UtbG9jYWwtZGV2LWtleS0wMSE=
+      PULSE_ALERT_SLACK_WEBHOOK_URL: ""
+      PULSE_ALERT_SMTP_ADDR: ""
+      PULSE_ALERT_SMTP_USER: ""
+      PULSE_ALERT_SMTP_PASSWORD: ""
+      PULSE_ALERT_EMAIL_FROM: ""
+      PULSE_ALERT_EMAIL_TO: ""
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

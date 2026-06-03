@@ -7,9 +7,22 @@ import (
 )
 
 type Store interface {
+	ListApplications() []domain.Application
+	GetApplication(id string) (domain.Application, bool)
+	UpsertApplication(application domain.Application) domain.Application
+	DeleteApplication(id string) bool
 	ListMonitors() []domain.Monitor
+	ListMonitorsByApplication(applicationID string) []domain.Monitor
 	GetMonitor(id string) (domain.Monitor, bool)
+	GetMonitorDetail(id string) (domain.MonitorDetail, bool)
 	UpsertMonitor(monitor domain.Monitor) domain.Monitor
+	SaveMonitorDraft(monitor domain.Monitor) domain.Monitor
+	GetMonitorDraft(id string) (domain.Monitor, bool)
+	DiscardMonitorDraft(id string) (domain.Monitor, bool)
+	PublishMonitorDraft(id string, changeNote string, createdBy string) (domain.Monitor, error)
+	ListMonitorVersions(id string) []domain.MonitorVersionSummary
+	GetMonitorVersion(id string, versionNumber int) (domain.MonitorVersion, bool)
+	RollbackMonitorVersion(id string, versionNumber int, changeNote string, createdBy string) (domain.Monitor, error)
 	DeleteMonitor(id string) bool
 	SaveRun(run domain.MonitorRun)
 	ListRuns(monitorID string) []domain.MonitorRun
@@ -22,4 +35,5 @@ type Store interface {
 	GetSecret(id string) (domain.SecretReference, bool)
 	UpsertSecret(secret domain.SecretReference) (domain.SecretReference, error)
 	GetRawSecretValue(alias string) (string, bool)
+	DeleteSecret(id string) bool
 }

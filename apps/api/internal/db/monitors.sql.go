@@ -59,6 +59,7 @@ func (q *Queries) DeleteMonitorSteps(ctx context.Context, monitorID pgtype.Text)
 const getMonitor = `-- name: GetMonitor :one
 SELECT
   id,
+  COALESCE(application_id, '')::text AS application_id,
   name,
   COALESCE(description, '')::text AS description,
   COALESCE(schedule_mode, '')::text AS schedule_mode,
@@ -77,6 +78,8 @@ SELECT
   last_run_at,
   COALESCE(last_duration_ms, 0)::int AS last_duration_ms,
   COALESCE(success_rate_24h, 0)::float8 AS success_rate_24h,
+  COALESCE(published_version, 1)::int AS published_version,
+  COALESCE(has_unpublished_draft, FALSE)::bool AS has_unpublished_draft,
   created_at,
   updated_at
 FROM monitors
@@ -85,6 +88,7 @@ WHERE id = $1
 
 type GetMonitorRow struct {
 	ID                  string           `json:"id"`
+	ApplicationID       string           `json:"application_id"`
 	Name                string           `json:"name"`
 	Description         string           `json:"description"`
 	ScheduleMode        string           `json:"schedule_mode"`
@@ -103,6 +107,8 @@ type GetMonitorRow struct {
 	LastRunAt           pgtype.Timestamp `json:"last_run_at"`
 	LastDurationMs      int32            `json:"last_duration_ms"`
 	SuccessRate24h      float64          `json:"success_rate_24h"`
+	PublishedVersion    int32            `json:"published_version"`
+	HasUnpublishedDraft bool             `json:"has_unpublished_draft"`
 	CreatedAt           pgtype.Timestamp `json:"created_at"`
 	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
 }
@@ -112,6 +118,7 @@ func (q *Queries) GetMonitor(ctx context.Context, id string) (GetMonitorRow, err
 	var i GetMonitorRow
 	err := row.Scan(
 		&i.ID,
+		&i.ApplicationID,
 		&i.Name,
 		&i.Description,
 		&i.ScheduleMode,
@@ -130,6 +137,8 @@ func (q *Queries) GetMonitor(ctx context.Context, id string) (GetMonitorRow, err
 		&i.LastRunAt,
 		&i.LastDurationMs,
 		&i.SuccessRate24h,
+		&i.PublishedVersion,
+		&i.HasUnpublishedDraft,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -217,6 +226,7 @@ func (q *Queries) InsertMonitorStep(ctx context.Context, arg InsertMonitorStepPa
 const listMonitors = `-- name: ListMonitors :many
 SELECT
   id,
+  COALESCE(application_id, '')::text AS application_id,
   name,
   COALESCE(description, '')::text AS description,
   COALESCE(schedule_mode, '')::text AS schedule_mode,
@@ -235,6 +245,8 @@ SELECT
   last_run_at,
   COALESCE(last_duration_ms, 0)::int AS last_duration_ms,
   COALESCE(success_rate_24h, 0)::float8 AS success_rate_24h,
+  COALESCE(published_version, 1)::int AS published_version,
+  COALESCE(has_unpublished_draft, FALSE)::bool AS has_unpublished_draft,
   created_at,
   updated_at
 FROM monitors
@@ -243,6 +255,7 @@ ORDER BY created_at DESC
 
 type ListMonitorsRow struct {
 	ID                  string           `json:"id"`
+	ApplicationID       string           `json:"application_id"`
 	Name                string           `json:"name"`
 	Description         string           `json:"description"`
 	ScheduleMode        string           `json:"schedule_mode"`
@@ -261,6 +274,8 @@ type ListMonitorsRow struct {
 	LastRunAt           pgtype.Timestamp `json:"last_run_at"`
 	LastDurationMs      int32            `json:"last_duration_ms"`
 	SuccessRate24h      float64          `json:"success_rate_24h"`
+	PublishedVersion    int32            `json:"published_version"`
+	HasUnpublishedDraft bool             `json:"has_unpublished_draft"`
 	CreatedAt           pgtype.Timestamp `json:"created_at"`
 	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
 }
@@ -276,6 +291,7 @@ func (q *Queries) ListMonitors(ctx context.Context) ([]ListMonitorsRow, error) {
 		var i ListMonitorsRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.ApplicationID,
 			&i.Name,
 			&i.Description,
 			&i.ScheduleMode,
@@ -294,6 +310,111 @@ func (q *Queries) ListMonitors(ctx context.Context) ([]ListMonitorsRow, error) {
 			&i.LastRunAt,
 			&i.LastDurationMs,
 			&i.SuccessRate24h,
+			&i.PublishedVersion,
+			&i.HasUnpublishedDraft,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMonitorsByApplication = `-- name: ListMonitorsByApplication :many
+SELECT
+  id,
+  COALESCE(application_id, '')::text AS application_id,
+  name,
+  COALESCE(description, '')::text AS description,
+  COALESCE(schedule_mode, '')::text AS schedule_mode,
+  COALESCE(schedule_label, '')::text AS schedule_label,
+  COALESCE(schedule_cron, '')::text AS schedule_cron,
+  COALESCE(timezone, 'UTC')::text AS timezone,
+  COALESCE(timeout_ms, 30000)::int AS timeout_ms,
+  COALESCE(retry_count, 0)::int AS retry_count,
+  COALESCE(failure_threshold, 3)::int AS failure_threshold,
+  COALESCE(response_body_limit_kb, 32)::int AS response_body_limit_kb,
+  COALESCE(is_active, TRUE)::bool AS is_active,
+  COALESCE(alert_enabled, FALSE)::bool AS alert_enabled,
+  variables_json,
+  alert_policy_json,
+  COALESCE(status, '')::text AS status,
+  last_run_at,
+  COALESCE(last_duration_ms, 0)::int AS last_duration_ms,
+  COALESCE(success_rate_24h, 0)::float8 AS success_rate_24h,
+  COALESCE(published_version, 1)::int AS published_version,
+  COALESCE(has_unpublished_draft, FALSE)::bool AS has_unpublished_draft,
+  created_at,
+  updated_at
+FROM monitors
+WHERE application_id = $1
+ORDER BY created_at DESC
+`
+
+type ListMonitorsByApplicationRow struct {
+	ID                  string           `json:"id"`
+	ApplicationID       string           `json:"application_id"`
+	Name                string           `json:"name"`
+	Description         string           `json:"description"`
+	ScheduleMode        string           `json:"schedule_mode"`
+	ScheduleLabel       string           `json:"schedule_label"`
+	ScheduleCron        string           `json:"schedule_cron"`
+	Timezone            string           `json:"timezone"`
+	TimeoutMs           int32            `json:"timeout_ms"`
+	RetryCount          int32            `json:"retry_count"`
+	FailureThreshold    int32            `json:"failure_threshold"`
+	ResponseBodyLimitKb int32            `json:"response_body_limit_kb"`
+	IsActive            bool             `json:"is_active"`
+	AlertEnabled        bool             `json:"alert_enabled"`
+	VariablesJson       []byte           `json:"variables_json"`
+	AlertPolicyJson     []byte           `json:"alert_policy_json"`
+	Status              string           `json:"status"`
+	LastRunAt           pgtype.Timestamp `json:"last_run_at"`
+	LastDurationMs      int32            `json:"last_duration_ms"`
+	SuccessRate24h      float64          `json:"success_rate_24h"`
+	PublishedVersion    int32            `json:"published_version"`
+	HasUnpublishedDraft bool             `json:"has_unpublished_draft"`
+	CreatedAt           pgtype.Timestamp `json:"created_at"`
+	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
+}
+
+func (q *Queries) ListMonitorsByApplication(ctx context.Context, applicationID pgtype.Text) ([]ListMonitorsByApplicationRow, error) {
+	rows, err := q.db.Query(ctx, listMonitorsByApplication, applicationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMonitorsByApplicationRow{}
+	for rows.Next() {
+		var i ListMonitorsByApplicationRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ApplicationID,
+			&i.Name,
+			&i.Description,
+			&i.ScheduleMode,
+			&i.ScheduleLabel,
+			&i.ScheduleCron,
+			&i.Timezone,
+			&i.TimeoutMs,
+			&i.RetryCount,
+			&i.FailureThreshold,
+			&i.ResponseBodyLimitKb,
+			&i.IsActive,
+			&i.AlertEnabled,
+			&i.VariablesJson,
+			&i.AlertPolicyJson,
+			&i.Status,
+			&i.LastRunAt,
+			&i.LastDurationMs,
+			&i.SuccessRate24h,
+			&i.PublishedVersion,
+			&i.HasUnpublishedDraft,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -404,6 +525,7 @@ func (q *Queries) ListSteps(ctx context.Context, monitorID pgtype.Text) ([]ListS
 const upsertMonitor = `-- name: UpsertMonitor :exec
 INSERT INTO monitors (
   id,
+  application_id,
   name,
   description,
   schedule_mode,
@@ -426,11 +548,11 @@ INSERT INTO monitors (
   updated_at
 )
 VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-  $21,
-  $17, $18, $19, $20
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+  $18, $19, $20, $21, $22
 )
 ON CONFLICT (id) DO UPDATE SET
+  application_id = EXCLUDED.application_id,
   name = EXCLUDED.name,
   description = EXCLUDED.description,
   schedule_mode = EXCLUDED.schedule_mode,
@@ -454,6 +576,7 @@ ON CONFLICT (id) DO UPDATE SET
 
 type UpsertMonitorParams struct {
 	ID                  string           `json:"id"`
+	ApplicationID       pgtype.Text      `json:"application_id"`
 	Name                string           `json:"name"`
 	Description         pgtype.Text      `json:"description"`
 	ScheduleMode        pgtype.Text      `json:"schedule_mode"`
@@ -469,16 +592,17 @@ type UpsertMonitorParams struct {
 	VariablesJson       []byte           `json:"variables_json"`
 	AlertPolicyJson     []byte           `json:"alert_policy_json"`
 	Status              pgtype.Text      `json:"status"`
+	LastRunAt           pgtype.Timestamp `json:"last_run_at"`
 	LastDurationMs      pgtype.Int4      `json:"last_duration_ms"`
 	SuccessRate24h      pgtype.Numeric   `json:"success_rate_24h"`
 	CreatedAt           pgtype.Timestamp `json:"created_at"`
 	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
-	LastRunAt           pgtype.Timestamp `json:"last_run_at"`
 }
 
 func (q *Queries) UpsertMonitor(ctx context.Context, arg UpsertMonitorParams) error {
 	_, err := q.db.Exec(ctx, upsertMonitor,
 		arg.ID,
+		arg.ApplicationID,
 		arg.Name,
 		arg.Description,
 		arg.ScheduleMode,
@@ -494,11 +618,11 @@ func (q *Queries) UpsertMonitor(ctx context.Context, arg UpsertMonitorParams) er
 		arg.VariablesJson,
 		arg.AlertPolicyJson,
 		arg.Status,
+		arg.LastRunAt,
 		arg.LastDurationMs,
 		arg.SuccessRate24h,
 		arg.CreatedAt,
 		arg.UpdatedAt,
-		arg.LastRunAt,
 	)
 	return err
 }

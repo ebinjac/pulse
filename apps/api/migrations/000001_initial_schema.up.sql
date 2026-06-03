@@ -1,5 +1,18 @@
+CREATE TABLE IF NOT EXISTS applications (
+    id TEXT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    car_id VARCHAR(64) UNIQUE NOT NULL,
+    description TEXT,
+    owner VARCHAR(255),
+    environment VARCHAR(100),
+    tags_json JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS monitors (
     id TEXT PRIMARY KEY,
+    application_id TEXT REFERENCES applications(id) ON DELETE SET NULL,
     name VARCHAR(255) NOT NULL,
     description TEXT,
     schedule_mode VARCHAR(100),
@@ -91,6 +104,7 @@ CREATE TABLE IF NOT EXISTS monitor_step_runs (
     assertion_results_json JSONB DEFAULT '[]'::jsonb,
     extractor_results_json JSONB DEFAULT '[]'::jsonb,
     console_output_json JSONB DEFAULT '[]'::jsonb,
+    timing_json JSONB DEFAULT '{}'::jsonb,
     latency_ms INTEGER,
     error_message TEXT,
     started_at TIMESTAMP,
@@ -117,6 +131,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_applications_car_id ON applications (car_id);
+CREATE INDEX IF NOT EXISTS idx_monitors_application ON monitors (application_id);
 CREATE INDEX IF NOT EXISTS idx_monitors_active_schedule ON monitors (is_active, schedule_cron);
 CREATE INDEX IF NOT EXISTS idx_monitor_steps_monitor_order ON monitor_steps (monitor_id, step_order);
 CREATE INDEX IF NOT EXISTS idx_monitor_runs_monitor_started ON monitor_runs (monitor_id, started_at DESC);

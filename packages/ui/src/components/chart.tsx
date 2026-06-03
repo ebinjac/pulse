@@ -48,9 +48,7 @@ function ChartContainer({
   ...props
 }: React.ComponentProps<"div"> & {
   config: ChartConfig
-  children: React.ComponentProps<
-    typeof RechartsPrimitive.ResponsiveContainer
-  >["children"]
+  children: React.ReactElement
   initialDimension?: {
     width: number
     height: number
@@ -58,10 +56,40 @@ function ChartContainer({
 }) {
   const uniqueId = React.useId()
   const chartId = `chart-${id ?? uniqueId.replace(/:/g, "")}`
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const [dimensions, setDimensions] = React.useState(initialDimension)
+
+  React.useLayoutEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const updateDimensions = () => {
+      const rect = container.getBoundingClientRect()
+      const nextWidth = Math.max(Math.round(rect.width), initialDimension.width)
+      const nextHeight = Math.max(Math.round(rect.height), initialDimension.height)
+      setDimensions((current) => {
+        if (current.width === nextWidth && current.height === nextHeight) {
+          return current
+        }
+        return { width: nextWidth, height: nextHeight }
+      })
+    }
+
+    updateDimensions()
+
+    if (typeof ResizeObserver === "undefined") {
+      return
+    }
+
+    const observer = new ResizeObserver(updateDimensions)
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [initialDimension.height, initialDimension.width])
 
   return (
     <ChartContext.Provider value={{ config }}>
       <div
+        ref={containerRef}
         data-slot="chart"
         data-chart={chartId}
         className={cn(
@@ -71,11 +99,10 @@ function ChartContainer({
         {...props}
       >
         <ChartStyle id={chartId} config={config} />
-        <RechartsPrimitive.ResponsiveContainer
-          initialDimension={initialDimension}
-        >
-          {children}
-        </RechartsPrimitive.ResponsiveContainer>
+        {React.cloneElement(children, {
+          width: dimensions.width,
+          height: dimensions.height,
+        } as Partial<React.ComponentProps<typeof RechartsPrimitive.AreaChart>>)}
       </div>
     </ChartContext.Provider>
   )

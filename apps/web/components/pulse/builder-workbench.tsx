@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
+  Clock,
   Code2,
   FileJson,
   KeyRound,
@@ -19,18 +20,57 @@ import {
   TerminalSquare,
   Trash2,
   Workflow,
+  Sparkles,
   X,
   XCircle,
+  Edit3,
+  AlertTriangle,
+  Loader2,
+  Copy,
+  Check,
+  Upload,
+  History,
+  Rocket,
 } from "lucide-react"
 
-import { buildMockRun } from "@/lib/pulse-execution"
-import type { Monitor, MonitorRun, MonitorStatus, MonitorStep, PulseAssertion, PulseExtractor, PreRequestAction } from "@/lib/pulse-types"
+import { MonitorImportExportDialog } from "./monitor-import-export-dialog"
+import { MonitorVersionsPanel } from "./monitor-versions-panel"
 import { ScriptEditor } from "./script-editor"
+import Editor from "@monaco-editor/react"
+import { useTheme } from "next-themes"
+import type { Application, Monitor, MonitorRun, MonitorStatus, MonitorStep, PulseAssertion, PulseExtractor, PreRequestAction } from "@/lib/pulse-types"
 import { Button } from "@workspace/ui/components/button"
+import { Card } from "@workspace/ui/components/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@workspace/ui/components/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@workspace/ui/components/alert-dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
 import { cn } from "@workspace/ui/lib/utils"
 
 interface BuilderWorkbenchProps {
   monitor: Monitor
+  applications?: Application[]
 }
 
 type ExecutionState = "idle" | "running" | "complete"
@@ -43,6 +83,7 @@ const labelClass = "text-muted-foreground mb-1.5 block text-xs font-medium"
 
 function configFromMonitor(monitor: Monitor) {
   return {
+    applicationId: monitor.applicationId || "",
     name: monitor.name,
     description: monitor.description,
     scheduleMode: monitor.scheduleMode,
@@ -229,15 +270,159 @@ interface StepCardProps {
   step: MonitorStep
   index: number
   totalSteps: number
+  mockRun: MonitorRun | null
   onUpdate: (patch: Partial<MonitorStep>) => void
   onDelete: () => void
   onMoveUp: () => void
   onMoveDown: () => void
 }
 
-function StepCard({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMoveDown }: StepCardProps) {
+const methodColors: Record<string, string> = {
+  GET: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+  POST: "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20",
+  PUT: "text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/20",
+  PATCH: "text-purple-600 dark:text-purple-400 bg-purple-500/10 border-purple-500/20",
+  DELETE: "text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20",
+  HEAD: "text-zinc-600 dark:text-zinc-400 bg-zinc-500/10 border-zinc-500/20",
+  OPTIONS: "text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
+}
+
+function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMoveUp, onMoveDown }: StepCardProps) {
+  const { resolvedTheme } = useTheme()
+  const editorTheme = resolvedTheme === "light" ? "light" : "vs-dark"
   // Tabs State
-  const [activeTab, setActiveTab] = useState<"headers" | "body" | "scripts" | "tests">("headers")
+  const [activeTab, setActiveTab] = useState<"headers" | "body" | "scripts" | "tests" | "settings">("headers")
+
+  // Copilot AI Suggestions States
+  const [aiSuggestions, setAiSuggestions] = useState<any[]>([])
+  const [isSuggesting, setIsSuggesting] = useState(false)
+  const [suggestionError, setSuggestionError] = useState<string | null>(null)
+
+  // Copilot AI Extractor Suggestions States
+  const [aiExtractorSuggestions, setAiExtractorSuggestions] = useState<any[]>([])
+  const [isSuggestingExtractors, setIsSuggestingExtractors] = useState(false)
+  const [extractorSuggestionError, setExtractorSuggestionError] = useState<string | null>(null)
+
+  const suggestExtractorsWithAI = async () => {
+    setExtractorSuggestionError(null)
+    setAiExtractorSuggestions([])
+
+    const stepResult = mockRun?.steps?.find((s) => s.stepName === step.name || s.id === step.id)
+    const finalStepResult = stepResult || mockRun?.steps?.[index]
+
+    if (!finalStepResult || !finalStepResult.responseSummary) {
+      setExtractorSuggestionError("Please click 'Run Test' at the top to execute the monitor and get a response payload first.")
+      return
+    }
+
+    setIsSuggestingExtractors(true)
+    try {
+      const response = await fetch("/api/copilot/extractors", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: step.url ?? "",
+          method: step.method ?? "GET",
+          statusCode: finalStepResult.errorMessage ? 0 : 200,
+          responseBody: finalStepResult.responseSummary,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to generate suggestions")
+      }
+
+      const data = await response.json()
+      if (Array.isArray(data.suggestions)) {
+        setAiExtractorSuggestions(data.suggestions)
+      } else {
+        throw new Error("AI extractor suggestions were not returned as a valid array.")
+      }
+    } catch (err) {
+      setExtractorSuggestionError(err instanceof Error ? err.message : "Failed to suggest extractors.")
+    } finally {
+      setIsSuggestingExtractors(false)
+    }
+  }
+
+  const addSuggestedExtractor = (suggestion: any) => {
+    const newExt: PulseExtractor = {
+      id: `extract-${crypto.randomUUID()}`,
+      name: suggestion.name || "extracted_var",
+      type: suggestion.type || "jsonPath",
+      source: suggestion.source || "",
+      sensitive: false,
+      optional: false,
+    }
+    onUpdate({
+      extractors: [...step.extractors, newExt],
+    })
+    setAiExtractorSuggestions((prev) => prev.filter((e) => e.name !== suggestion.name))
+  }
+
+  const suggestAssertionsWithAI = async () => {
+    setSuggestionError(null)
+    setAiSuggestions([])
+
+    const stepResult = mockRun?.steps?.find((s) => s.stepName === step.name || s.id === step.id)
+    const finalStepResult = stepResult || mockRun?.steps?.[index]
+
+    if (!finalStepResult || !finalStepResult.responseSummary) {
+      setSuggestionError("Please click 'Run Test' at the top to execute the monitor and get a response payload first.")
+      return
+    }
+
+    setIsSuggesting(true)
+    try {
+      const response = await fetch("/api/copilot/assertions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: step.url ?? "",
+          method: step.method ?? "GET",
+          statusCode: finalStepResult.errorMessage ? 0 : 200,
+          responseBody: finalStepResult.responseSummary,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Failed to generate suggestions")
+      }
+
+      const data = await response.json()
+      if (Array.isArray(data.suggestions)) {
+        setAiSuggestions(data.suggestions)
+      } else {
+        throw new Error("AI suggestions were not returned as a valid array.")
+      }
+    } catch (err) {
+      setSuggestionError(err instanceof Error ? err.message : "Failed to suggest assertions.")
+    } finally {
+      setIsSuggesting(false)
+    }
+  }
+
+  const addSuggestedAssertion = (suggestion: any) => {
+    const newAssert: PulseAssertion = {
+      id: `assert-${crypto.randomUUID()}`,
+      type: suggestion.type || "jsonPath",
+      label: suggestion.label || `${suggestion.type} assertion`,
+      target: suggestion.target || "",
+      operator: suggestion.operator || "equals",
+      expected: suggestion.expected !== undefined ? String(suggestion.expected) : "",
+      sensitive: false,
+    }
+    onUpdate({
+      assertions: [...step.assertions, newAssert],
+    })
+    setAiSuggestions((prev) => prev.filter((a) => a.label !== suggestion.label))
+  }
 
   // Headers Local Form State
   const [localHeaders, setLocalHeaders] = useState<{ key: string; value: string }[]>(() =>
@@ -388,39 +573,27 @@ function StepCard({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
   }
 
   return (
-    <div className="rounded-md border border-border/80 bg-muted/10 p-5 space-y-4">
-      {/* Step Header */}
-      <div className="flex items-center justify-between gap-3 border-b border-border/40 pb-3 flex-wrap">
-        <div>
-          <span className="bg-primary/10 text-primary rounded-full size-6 inline-flex items-center justify-center text-xs font-semibold mr-2">
-            {step.order}
-          </span>
-          <span className="font-heading font-semibold text-sm">{step.name}</span>
-          <span className="text-muted-foreground text-xs ml-2 uppercase px-1.5 py-0.5 rounded bg-muted font-mono font-medium">
-            {step.type}
-          </span>
+    <div className="p-4 space-y-5">
+      {/* Header Info */}
+      <div className="flex items-center justify-between border-b border-border/40 pb-2.5 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Step Editor</span>
+          <span className="text-muted-foreground text-xs">·</span>
+          <span className="font-mono text-xs font-semibold text-primary">{step.name}</span>
         </div>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" type="button" onClick={onMoveUp} disabled={index === 0} className="size-8">
-            <ArrowUp className="size-4" />
-          </Button>
-          <Button variant="ghost" size="icon" type="button" onClick={onMoveDown} disabled={index === totalSteps - 1} className="size-8">
-            <ArrowDown className="size-4" />
-          </Button>
-          <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="text-rose-500 hover:text-rose-700 size-8">
-            <Trash2 className="size-4" />
-          </Button>
-        </div>
+        <span className="text-[10px] font-mono font-semibold uppercase px-2 py-0.5 rounded bg-muted text-muted-foreground border border-border/30">
+          {step.type === "http" ? "HTTP Request" : "Pre-request Action"}
+        </span>
       </div>
 
-      {/* Step Common Config */}
-      <div className="grid gap-3 md:grid-cols-2">
-        <label>
-          <span className={labelClass}>Step Name</span>
-          <input className={inputClass} value={step.name} onChange={(event) => onUpdate({ name: event.target.value })} />
-        </label>
-        <div className="grid gap-2 grid-cols-2">
-          <label>
+      {/* Step Settings (Name, Timeout, Retry) */}
+      {step.type !== "http" && (
+        <div className="grid gap-3 grid-cols-1 md:grid-cols-3 bg-muted/15 border border-border/20 p-3 rounded-lg items-end">
+          <div>
+            <span className={labelClass}>Step Name</span>
+            <input className={inputClass} value={step.name} onChange={(event) => onUpdate({ name: event.target.value })} />
+          </div>
+          <div>
             <span className={labelClass}>Timeout (ms)</span>
             <input
               type="number"
@@ -429,8 +602,8 @@ function StepCard({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
               value={step.timeoutMs}
               onChange={(event) => onUpdate({ timeoutMs: Number(event.target.value) })}
             />
-          </label>
-          <label>
+          </div>
+          <div>
             <span className={labelClass}>Retry Count</span>
             <input
               type="number"
@@ -439,131 +612,160 @@ function StepCard({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
               value={step.retryCount}
               onChange={(event) => onUpdate({ retryCount: Number(event.target.value) })}
             />
-          </label>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* HTTP Request Step Config */}
+      {/* HTTP Config */}
       {step.type === "http" && (
         <div className="space-y-4">
-          {/* Persistent URL Bar */}
-          <div className="flex gap-2 items-end">
-            <label className="w-[120px] shrink-0">
-              <span className={labelClass}>Method</span>
-              <select
-                className={inputClass}
-                value={step.method ?? "GET"}
-                onChange={(event) => onUpdate({ method: event.target.value })}
-              >
-                {["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map((method) => (
-                  <option key={method} value={method}>{method}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex-1">
-              <span className={labelClass}>URL</span>
+          {/* Request Bar */}
+          <div className="space-y-1.5">
+            <span className={labelClass}>Request URL</span>
+            <div className="flex items-center rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 overflow-hidden shadow-xs">
+              <div className="w-[110px] shrink-0 border-r border-input bg-muted/30">
+                <Select value={step.method ?? "GET"} onValueChange={(val) => onUpdate({ method: val ?? undefined })}>
+                  <SelectTrigger className="w-full h-9 border-none bg-transparent rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 px-3 cursor-pointer font-bold text-xs select-none">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map((method) => (
+                      <SelectItem key={method} value={method}>
+                        {method}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <input
-                className={inputClass}
+                className="flex-1 bg-transparent px-3 py-2 text-sm outline-none border-none h-9 w-full min-w-0 font-mono text-xs"
                 value={step.url ?? ""}
                 placeholder="https://{{variables.baseUrl}}/health"
                 onChange={(event) => onUpdate({ url: event.target.value })}
               />
-            </label>
+            </div>
           </div>
 
-          {/* Tab Navigation */}
+          {/* Sub-Tabs Navigation */}
           <div className="flex gap-1 border-b border-border/40 pb-0 pt-2">
             {([
-              { key: "headers", label: "Headers" },
-              { key: "body", label: "Body" },
-              { key: "scripts", label: "Pre-request Script", icon: Code2 },
-              { key: "tests", label: "Tests" },
-            ] as { key: "headers" | "body" | "scripts" | "tests"; label: string; icon?: typeof Code2 }[]).map((tab) => {
-              const Icon = tab.icon
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key)}
-                  className={cn(
-                    "px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors flex items-center gap-1.5 -mb-px border-b-2 border-transparent",
-                    activeTab === tab.key
-                      ? "bg-background text-foreground border-b-primary font-semibold"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  )}
-                >
-                  {Icon && <Icon className="size-3" />}
-                  {tab.label}
-                </button>
-              )
-            })}
+              { key: "headers", label: "Headers", count: Object.keys(step.config?.headers || {}).length },
+              { key: "body", label: "Body", hasIndicator: !!step.config?.body },
+              { key: "scripts", label: "Pre-request Script", hasIndicator: !!step.preRequestScript },
+              { key: "tests", label: "Tests & Extractors", count: step.assertions.length + step.extractors.length },
+              { key: "settings", label: "Settings" },
+            ] as const).map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  "px-3 py-2 text-xs font-semibold rounded-t-md transition-all -mb-px border-b-2 border-transparent flex items-center gap-1.5",
+                  activeTab === tab.key
+                    ? "bg-background text-foreground border-b-primary font-bold shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <span>{tab.label}</span>
+                {"count" in tab && tab.count > 0 && (
+                  <span className="bg-muted px-1.5 py-0.5 rounded-[4px] text-[10px] font-mono font-medium text-muted-foreground border border-border/20">
+                    {tab.count}
+                  </span>
+                )}
+                {"hasIndicator" in tab && tab.hasIndicator && (
+                  <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+                )}
+              </button>
+            ))}
           </div>
 
-          {/* Tab Content */}
+          {/* Sub-Tab Contents */}
           {activeTab === "headers" && (
             <div className="space-y-3">
-              <div className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-2">Request Headers</div>
-              <div className="space-y-2">
-                {localHeaders.length > 0 ? (
-                  localHeaders.map((header, idx) => (
-                    <div key={idx} className="flex gap-2 items-center">
-                      <input
-                        placeholder="Key"
-                        className={cn(inputClass, "flex-1")}
-                        value={header.key}
-                        onChange={(e) => updateLocalHeader(idx, "key", e.target.value)}
-                      />
-                      <span className="text-muted-foreground text-xs">:</span>
-                      <input
-                        placeholder="Value"
-                        className={cn(inputClass, "flex-[2]")}
-                        value={header.value}
-                        onChange={(e) => updateLocalHeader(idx, "value", e.target.value)}
-                      />
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        type="button"
-                        onClick={() => removeLocalHeader(idx)}
-                        className="text-rose-500 hover:text-rose-700 size-8 shrink-0"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-muted-foreground text-xs italic p-1">No custom headers added.</div>
-                )}
+              <div className="text-xs font-semibold text-muted-foreground flex items-center justify-between">
+                <span>Headers List</span>
+                <span className="text-[10px] font-mono text-muted-foreground">({Object.keys(step.config?.headers || {}).length} total)</span>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                type="button"
-                onClick={addLocalHeader}
-                className="h-8 gap-1 mt-1"
-              >
-                <Plus className="size-3.5" /> Add Header
-              </Button>
+              <div className="space-y-2 border border-border/40 p-3 rounded-lg bg-muted/5">
+                {localHeaders.length > 0 ? (
+                  <div className="space-y-2">
+                    {localHeaders.map((header, idx) => (
+                      <div key={idx} className="flex gap-2 items-center">
+                        <input
+                          placeholder="Header Key (e.g. Content-Type)"
+                          className={cn(inputClass, "font-mono text-xs flex-1 bg-background")}
+                          value={header.key}
+                          onChange={(e) => updateLocalHeader(idx, "key", e.target.value)}
+                        />
+                        <span className="text-muted-foreground text-xs">:</span>
+                        <input
+                          placeholder="Value"
+                          className={cn(inputClass, "font-mono text-xs flex-[2] bg-background")}
+                          value={header.value}
+                          onChange={(e) => updateLocalHeader(idx, "value", e.target.value)}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          type="button"
+                          onClick={() => removeLocalHeader(idx)}
+                          className="text-rose-500 hover:text-rose-700 size-8 shrink-0"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground italic text-center py-4">
+                    No custom headers defined.
+                  </div>
+                )}
+                <div className="pt-2 border-t border-border/40 mt-1 flex justify-start">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={addLocalHeader}
+                    className="h-8 text-xs gap-1"
+                  >
+                    <Plus className="size-3.5" /> Add Header
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
 
           {activeTab === "body" && (
             <div className="space-y-2">
               <span className={labelClass}>Raw Request Body</span>
-              <textarea
-                className="min-h-[180px] w-full resize-y rounded-md bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100 outline-none border border-border/50"
-                value={step.config?.body ?? ""}
-                placeholder='{\n  "key": "value"\n}'
-                spellCheck={false}
-                onChange={(e) => {
-                  onUpdate({
-                    config: {
-                      ...step.config,
-                      body: e.target.value,
-                    },
-                  })
-                }}
-              />
+              <div className="min-h-[180px] w-full rounded-md border border-border/50 overflow-hidden bg-[#1e1e1e] dark:bg-[#1e1e1e] light:bg-[#fffffe] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+                <Editor
+                  height="180px"
+                  language="json"
+                  theme={editorTheme}
+                  value={step.config?.body ?? ""}
+                  onChange={(val) => {
+                    onUpdate({
+                      config: {
+                        ...step.config,
+                        body: val ?? "",
+                      },
+                    })
+                  }}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 12,
+                    fontFamily: "var(--font-mono), monospace",
+                    lineNumbers: "on",
+                    scrollBeyondLastLine: false,
+                    automaticLayout: true,
+                    padding: { top: 8, bottom: 8 },
+                    tabSize: 2,
+                    fixedOverflowWidgets: true,
+                  }}
+                />
+              </div>
             </div>
           )}
 
@@ -578,146 +780,378 @@ function StepCard({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
           {activeTab === "tests" && (
             <div className="space-y-4">
               {/* Assertions Section */}
-              <div className="rounded-lg border border-border/50 bg-background/50 p-4 space-y-3">
-                <div className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Assertions</div>
-                {/* List existing */}
-                <div className="space-y-2">
-                  {step.assertions.length ? (
-                    step.assertions.map((assertion) => (
-                      <div key={assertion.id} className="flex justify-between items-center bg-muted/50 px-3 py-2 rounded-md text-xs border border-border/30">
-                        <div>
-                          <span className="font-semibold text-primary uppercase">{assertion.type}</span>
-                          <span className="mx-1.5 text-muted-foreground">·</span>
-                          <span className="font-mono text-muted-foreground">{assertion.target || "body"}</span>
-                          <span className="mx-1.5 text-muted-foreground text-[10px] font-semibold uppercase">{assertion.operator}</span>
-                          <span className="font-mono bg-muted px-1.5 py-0.5 rounded border border-border/20 text-foreground">{assertion.expected}</span>
-                          {assertion.sensitive && <span className="ml-2 text-emerald-600 font-semibold text-[10px] uppercase">(masked)</span>}
+              <div className="rounded-lg border border-border/50 bg-background/50 p-4 space-y-3 flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="text-xs font-bold uppercase text-muted-foreground tracking-wider flex items-center justify-between">
+                    <span>Assertions</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={suggestAssertionsWithAI}
+                      disabled={isSuggesting}
+                      className="text-primary hover:text-primary/90 gap-1 h-7 text-[10.5px] px-2 rounded-md hover:bg-muted/80"
+                    >
+                      {isSuggesting ? (
+                        <RotateCw className="size-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="size-3 text-primary animate-pulse" />
+                      )}
+                      Suggest (AI)
+                    </Button>
+                  </div>
+                  <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                    {step.assertions.length ? (
+                      step.assertions.map((assertion) => (
+                        <div key={assertion.id} className="flex justify-between items-center bg-muted/50 px-2.5 py-1.5 rounded-md text-xs border border-border/30">
+                          <div className="truncate flex-1 mr-2">
+                            <span className="font-semibold text-primary uppercase text-[10px]">{assertion.type}</span>
+                            <span className="mx-1 text-muted-foreground/60">·</span>
+                            <span className="font-mono text-muted-foreground">{assertion.target || "body"}</span>
+                            <span className="mx-1 text-muted-foreground/60 text-[10px] font-semibold uppercase">{assertion.operator}</span>
+                            <span className="font-mono bg-muted px-1 py-0.2 rounded border border-border/20 text-foreground">{assertion.expected}</span>
+                            {assertion.sensitive && <span className="ml-1.5 text-emerald-600 font-semibold text-[9px] uppercase">(masked)</span>}
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              type="button"
+                              onClick={() => {
+                                setAssertType(assertion.type)
+                                setAssertTarget(assertion.target || "")
+                                setAssertOperator(assertion.operator || "equals")
+                                setAssertExpected(assertion.expected || "")
+                                setAssertSensitive(!!assertion.sensitive)
+                                handleDeleteAssertion(assertion.id)
+                              }}
+                              className="text-muted-foreground hover:text-foreground size-6 hover:bg-muted/80 rounded"
+                              title="Edit Assertion"
+                            >
+                              <Edit3 className="size-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              type="button"
+                              onClick={() => handleDeleteAssertion(assertion.id)}
+                              className="text-rose-500 hover:text-rose-700 size-6 hover:bg-muted/80 rounded"
+                              title="Delete Assertion"
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </div>
                         </div>
-                        <Button variant="ghost" size="icon" type="button" onClick={() => handleDeleteAssertion(assertion.id)} className="text-rose-500 hover:text-rose-700 size-6">
-                          <X className="size-3.5" />
+                      ))
+                    ) : (
+                      <div className="text-muted-foreground text-xs italic">No assertions added yet.</div>
+                    )}
+                  </div>
+
+                  {isSuggesting && (
+                    <div className="rounded-md border border-primary/20 bg-primary/5 p-2.5 text-xs text-primary flex items-center gap-2">
+                      <RotateCw className="size-3.5 animate-spin text-primary" />
+                      Copilot is analyzing response payload...
+                    </div>
+                  )}
+
+                  {suggestionError && (
+                    <div className="rounded-md border border-amber-250 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-950/40 dark:bg-amber-950/20 dark:text-amber-300 flex justify-between items-start gap-2">
+                      <span className="flex-1">{suggestionError}</span>
+                      <button type="button" onClick={() => setSuggestionError(null)} className="text-amber-800 hover:text-amber-900 shrink-0 font-bold text-sm">×</button>
+                    </div>
+                  )}
+
+                  {aiSuggestions.length > 0 && (
+                    <div className="bg-primary/5 rounded-lg border border-primary/10 p-3 space-y-2">
+                      <div className="text-[10px] font-bold uppercase text-primary tracking-wider flex items-center justify-between">
+                        <span>AI Suggestions</span>
+                        <Button variant="ghost" size="icon" onClick={() => setAiSuggestions([])} className="size-5 text-primary hover:bg-primary/10 rounded">
+                          <X className="size-3" />
                         </Button>
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-muted-foreground text-xs italic">No assertions added yet.</div>
+                      <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                        {aiSuggestions.map((suggestion, sIdx) => (
+                          <div key={sIdx} className="flex justify-between items-center bg-background px-2.5 py-1.5 rounded-md text-xs border border-border/20">
+                            <div className="truncate flex-1 mr-2 leading-relaxed text-left">
+                              <span className="font-semibold text-primary uppercase text-[9px]">{suggestion.type}</span>
+                              <span className="mx-1 text-muted-foreground/60">·</span>
+                              <span className="font-mono text-muted-foreground">{suggestion.target}</span>
+                              <span className="mx-1 text-muted-foreground/60 text-[9px] font-semibold uppercase">{suggestion.operator}</span>
+                              <span className="font-mono bg-muted px-1 py-0.2 rounded text-foreground">{suggestion.expected}</span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="xs"
+                              onClick={() => addSuggestedAssertion(suggestion)}
+                              className="h-6 px-2 text-[10px] text-emerald-600 border-emerald-600/30 hover:bg-emerald-500/10 shrink-0"
+                            >
+                              Add
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
-                {/* Add new */}
-                <div className="grid gap-2 grid-cols-2 md:grid-cols-[120px_1fr_120px_1fr_40px] pt-3 border-t border-border/30 mt-3 items-end">
-                  <div>
-                    <span className={labelClass}>Assert Type</span>
-                    <select className={inputClass} value={assertType} onChange={(e) => setAssertType(e.target.value)}>
-                      <option value="statusCode">Status Code</option>
-                      <option value="responseTime">Response Time</option>
-                      <option value="jsonPath">JSONPath</option>
-                      <option value="header">Header</option>
-                      <option value="bodyContains">Body Contains</option>
-                      <option value="regex">Regex Match</option>
-                    </select>
+
+                <div className="pt-3 border-t border-border/30 mt-3 space-y-3">
+                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_1fr_45px] items-end">
+                    <div>
+                      <span className={labelClass}>Assert Type</span>
+                      <Select value={assertType} onValueChange={(val) => val && setAssertType(val)}>
+                        <SelectTrigger className="w-full h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="statusCode">Status Code</SelectItem>
+                          <SelectItem value="responseTime">Response Time</SelectItem>
+                          <SelectItem value="jsonPath">JSONPath</SelectItem>
+                          <SelectItem value="header">Header</SelectItem>
+                          <SelectItem value="bodyContains">Body Contains</SelectItem>
+                          <SelectItem value="regex">Regex Match</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <span className={labelClass}>Target</span>
+                      <input placeholder="status, latency, $.id" className={cn(inputClass, "h-8 text-xs")} value={assertTarget} onChange={(e) => setAssertTarget(e.target.value)} />
+                    </div>
+                    <div>
+                      <span className={labelClass}>Operator</span>
+                      <Select value={assertOperator} onValueChange={(val) => val && setAssertOperator(val)}>
+                        <SelectTrigger className="w-full h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="equals">equals</SelectItem>
+                          <SelectItem value="notEquals">notEquals</SelectItem>
+                          <SelectItem value="contains">contains</SelectItem>
+                          <SelectItem value="notContains">notContains</SelectItem>
+                          <SelectItem value="exists">exists</SelectItem>
+                          <SelectItem value="notExists">notExists</SelectItem>
+                          <SelectItem value="greaterThan">greaterThan</SelectItem>
+                          <SelectItem value="lessThan">lessThan</SelectItem>
+                          <SelectItem value="matchesRegex">matchesRegex</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <span className={labelClass}>Expected</span>
+                      <input placeholder="Expected val" className={cn(inputClass, "h-8 text-xs")} value={assertExpected} onChange={(e) => setAssertExpected(e.target.value)} />
+                    </div>
+                    <div className="flex flex-col items-center justify-center h-8">
+                      <span className="text-[8px] text-muted-foreground font-semibold uppercase mb-0.5">Mask</span>
+                      <input type="checkbox" checked={assertSensitive} onChange={(e) => setAssertSensitive(e.target.checked)} className="size-3.5 cursor-pointer" />
+                    </div>
                   </div>
-                  <div>
-                    <span className={labelClass}>Target</span>
-                    <input placeholder="status, latency, $.id" className={inputClass} value={assertTarget} onChange={(e) => setAssertTarget(e.target.value)} />
-                  </div>
-                  <div>
-                    <span className={labelClass}>Operator</span>
-                    <select className={inputClass} value={assertOperator} onChange={(e) => setAssertOperator(e.target.value)}>
-                      <option value="equals">equals</option>
-                      <option value="notEquals">notEquals</option>
-                      <option value="contains">contains</option>
-                      <option value="notContains">notContains</option>
-                      <option value="exists">exists</option>
-                      <option value="notExists">notExists</option>
-                      <option value="greaterThan">greaterThan</option>
-                      <option value="lessThan">lessThan</option>
-                      <option value="matchesRegex">matchesRegex</option>
-                    </select>
-                  </div>
-                  <div>
-                    <span className={labelClass}>Expected</span>
-                    <input placeholder="Expected val" className={inputClass} value={assertExpected} onChange={(e) => setAssertExpected(e.target.value)} />
-                  </div>
-                  <div className="flex flex-col items-center gap-1.5 h-[58px] justify-center">
-                    <span className="text-[9px] text-muted-foreground font-semibold uppercase">Mask</span>
-                    <input type="checkbox" checked={assertSensitive} onChange={(e) => setAssertSensitive(e.target.checked)} className="size-4 cursor-pointer" />
-                  </div>
+                  <Button variant="outline" size="sm" type="button" onClick={handleAddAssertion} className="w-full h-8 text-xs mt-1">
+                    <PlusCircle className="size-3.5 mr-1" /> Add Assertion
+                  </Button>
                 </div>
-                <Button variant="outline" size="sm" type="button" onClick={handleAddAssertion} className="w-full h-8">
-                  <PlusCircle className="size-3.5 mr-1" /> Add Assertion
-                </Button>
               </div>
 
               {/* Extractors Section */}
-              <div className="rounded-lg border border-border/50 bg-background/50 p-4 space-y-3">
-                <div className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Extractors</div>
-                {/* List existing */}
-                <div className="space-y-2">
-                  {step.extractors.length ? (
-                    step.extractors.map((extractor) => (
-                      <div key={extractor.id} className="flex justify-between items-center bg-muted/50 px-3 py-2 rounded-md text-xs border border-border/30">
-                        <div>
-                          <span className="font-semibold text-primary">{extractor.name}</span>
-                          <span className="mx-1.5 text-muted-foreground">·</span>
-                          <span className="font-mono text-muted-foreground uppercase text-[10px]">{extractor.type}</span>
-                          <span className="mx-1.5 text-muted-foreground">from</span>
-                          <span className="font-mono text-muted-foreground bg-muted px-1 rounded">{extractor.source}</span>
-                          {extractor.sensitive && <span className="ml-2 text-emerald-600 font-semibold text-[10px] uppercase">(masked)</span>}
-                          {extractor.optional && <span className="ml-2 text-muted-foreground font-medium text-[10px]">(optional)</span>}
+              <div className="rounded-lg border border-border/50 bg-background/50 p-4 space-y-3 flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="text-xs font-bold uppercase text-muted-foreground tracking-wider flex items-center justify-between">
+                    <span>Extractors</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={suggestExtractorsWithAI}
+                      disabled={isSuggestingExtractors}
+                      className="text-primary hover:text-primary/90 gap-1 h-7 text-[10.5px] px-2 rounded-md hover:bg-muted/80"
+                    >
+                      {isSuggestingExtractors ? (
+                        <RotateCw className="size-3 animate-spin" />
+                      ) : (
+                        <Sparkles className="size-3 text-primary animate-pulse" />
+                      )}
+                      Suggest (AI)
+                    </Button>
+                  </div>
+                  <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                    {step.extractors.length ? (
+                      step.extractors.map((extractor) => (
+                        <div key={extractor.id} className="flex justify-between items-center bg-muted/50 px-2.5 py-1.5 rounded-md text-xs border border-border/30">
+                          <div className="truncate flex-1 mr-2">
+                            <span className="font-semibold text-primary">{extractor.name}</span>
+                            <span className="mx-1 text-muted-foreground/60">·</span>
+                            <span className="font-mono text-muted-foreground uppercase text-[9px]">{extractor.type}</span>
+                            <span className="mx-1 text-muted-foreground/60">from</span>
+                            <span className="font-mono text-muted-foreground bg-muted px-1 rounded">{extractor.source}</span>
+                            {extractor.sensitive && <span className="ml-1.5 text-emerald-600 font-semibold text-[9px] uppercase">(masked)</span>}
+                            {extractor.optional && <span className="ml-1 text-muted-foreground font-medium text-[9px]">(optional)</span>}
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              type="button"
+                              onClick={() => {
+                                setExtType(extractor.type)
+                                setExtName(extractor.name)
+                                setExtSource(extractor.source)
+                                setExtSensitive(!!extractor.sensitive)
+                                setExtOptional(!!extractor.optional)
+                                handleDeleteExtractor(extractor.id)
+                              }}
+                              className="text-muted-foreground hover:text-foreground size-6 hover:bg-muted/80 rounded"
+                              title="Edit Extractor"
+                            >
+                              <Edit3 className="size-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              type="button"
+                              onClick={() => handleDeleteExtractor(extractor.id)}
+                              className="text-rose-500 hover:text-rose-700 size-6 hover:bg-muted/80 rounded"
+                              title="Delete Extractor"
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          </div>
                         </div>
-                        <Button variant="ghost" size="icon" type="button" onClick={() => handleDeleteExtractor(extractor.id)} className="text-rose-500 hover:text-rose-700 size-6">
-                          <X className="size-3.5" />
+                      ))
+                    ) : (
+                      <div className="text-muted-foreground text-xs italic">No extractors added yet.</div>
+                    )}
+                  </div>
+
+                  {isSuggestingExtractors && (
+                    <div className="rounded-md border border-primary/20 bg-primary/5 p-2.5 text-xs text-primary flex items-center gap-2">
+                      <RotateCw className="size-3.5 animate-spin text-primary" />
+                      Copilot is analyzing response payload...
+                    </div>
+                  )}
+
+                  {extractorSuggestionError && (
+                    <div className="rounded-md border border-amber-250 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-950/40 dark:bg-amber-950/20 dark:text-amber-300 flex justify-between items-start gap-2">
+                      <span className="flex-1">{extractorSuggestionError}</span>
+                      <button type="button" onClick={() => setExtractorSuggestionError(null)} className="text-amber-800 hover:text-amber-900 shrink-0 font-bold text-sm">×</button>
+                    </div>
+                  )}
+
+                  {aiExtractorSuggestions.length > 0 && (
+                    <div className="bg-primary/5 rounded-lg border border-primary/10 p-3 space-y-2">
+                      <div className="text-[10px] font-bold uppercase text-primary tracking-wider flex items-center justify-between">
+                        <span>AI Suggestions</span>
+                        <Button variant="ghost" size="icon" onClick={() => setAiExtractorSuggestions([])} className="size-5 text-primary hover:bg-primary/10 rounded">
+                          <X className="size-3" />
                         </Button>
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-muted-foreground text-xs italic">No extractors added yet.</div>
+                      <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                        {aiExtractorSuggestions.map((suggestion, sIdx) => (
+                          <div key={sIdx} className="flex justify-between items-center bg-background px-2.5 py-1.5 rounded-md text-xs border border-border/20">
+                            <div className="truncate flex-1 mr-2 leading-relaxed text-left">
+                              <span className="font-semibold text-primary">{suggestion.name}</span>
+                              <span className="mx-1 text-muted-foreground/60">·</span>
+                              <span className="font-mono text-muted-foreground uppercase text-[9px]">{suggestion.type}</span>
+                              <span className="mx-1 text-muted-foreground/60">from</span>
+                              <span className="font-mono text-muted-foreground bg-muted px-1 rounded">{suggestion.source}</span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="xs"
+                              onClick={() => addSuggestedExtractor(suggestion)}
+                              className="h-6 px-2 text-[10px] text-emerald-600 border-emerald-600/30 hover:bg-emerald-500/10 shrink-0"
+                            >
+                              Add
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
-                {/* Add new */}
-                <div className="grid gap-2 grid-cols-2 md:grid-cols-[1fr_120px_1fr_40px_40px] pt-3 border-t border-border/30 mt-3 items-end">
-                  <div>
-                    <span className={labelClass}>Variable Name</span>
-                    <input placeholder="token" className={inputClass} value={extName} onChange={(e) => setExtName(e.target.value)} />
+
+                <div className="pt-3 border-t border-border/30 mt-3 space-y-3">
+                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-[1fr_1fr_2fr_40px_40px] items-end">
+                    <div>
+                      <span className={labelClass}>Variable Name</span>
+                      <input placeholder="token" className={cn(inputClass, "h-8 text-xs")} value={extName} onChange={(e) => setExtName(e.target.value)} />
+                    </div>
+                    <div>
+                      <span className={labelClass}>Type</span>
+                      <Select value={extType} onValueChange={(val) => val && setExtType(val)}>
+                        <SelectTrigger className="w-full h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="jsonPath">JSONPath</SelectItem>
+                          <SelectItem value="header">Header</SelectItem>
+                          <SelectItem value="cookie">Cookie</SelectItem>
+                          <SelectItem value="regex">Regex</SelectItem>
+                          <SelectItem value="statusCode">Status Code</SelectItem>
+                          <SelectItem value="responseTime">Response Time</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <span className={labelClass}>Source</span>
+                      <input placeholder="$.access_token, Authorization" className={cn(inputClass, "h-8 text-xs")} value={extSource} onChange={(e) => setExtSource(e.target.value)} />
+                    </div>
+                    <div className="flex flex-col items-center justify-center h-8">
+                      <span className="text-[8px] text-muted-foreground font-semibold uppercase mb-0.5">Mask</span>
+                      <input type="checkbox" checked={extSensitive} onChange={(e) => setExtSensitive(e.target.checked)} className="size-3.5 cursor-pointer" />
+                    </div>
+                    <div className="flex flex-col items-center justify-center h-8">
+                      <span className="text-[8px] text-muted-foreground font-semibold uppercase mb-0.5">Opt</span>
+                      <input type="checkbox" checked={extOptional} onChange={(e) => setExtOptional(e.target.checked)} className="size-3.5 cursor-pointer" />
+                    </div>
                   </div>
-                  <div>
-                    <span className={labelClass}>Type</span>
-                    <select className={inputClass} value={extType} onChange={(e) => setExtType(e.target.value)}>
-                      <option value="jsonPath">JSONPath</option>
-                      <option value="header">Header</option>
-                      <option value="cookie">Cookie</option>
-                      <option value="regex">Regex</option>
-                      <option value="statusCode">Status Code</option>
-                      <option value="responseTime">Response Time</option>
-                    </select>
-                  </div>
-                  <div>
-                    <span className={labelClass}>Source</span>
-                    <input placeholder="$.access_token, Authorization" className={inputClass} value={extSource} onChange={(e) => setExtSource(e.target.value)} />
-                  </div>
-                  <div className="flex flex-col items-center gap-1.5 h-[58px] justify-center">
-                    <span className="text-[9px] text-muted-foreground font-semibold uppercase">Mask</span>
-                    <input type="checkbox" checked={extSensitive} onChange={(e) => setExtSensitive(e.target.checked)} className="size-4 cursor-pointer" />
-                  </div>
-                  <div className="flex flex-col items-center gap-1.5 h-[58px] justify-center">
-                    <span className="text-[9px] text-muted-foreground font-semibold uppercase">Opt</span>
-                    <input type="checkbox" checked={extOptional} onChange={(e) => setExtOptional(e.target.checked)} className="size-4 cursor-pointer" />
-                  </div>
+                  <Button variant="outline" size="sm" type="button" onClick={handleAddExtractor} className="w-full h-8 text-xs mt-1">
+                    <PlusCircle className="size-3.5 mr-1" /> Add Extractor
+                  </Button>
                 </div>
-                <Button variant="outline" size="sm" type="button" onClick={handleAddExtractor} className="w-full h-8">
-                  <PlusCircle className="size-3.5 mr-1" /> Add Extractor
-                </Button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "settings" && (
+            <div className="space-y-4">
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Step Configuration</div>
+              <div className="grid gap-3 grid-cols-1 md:grid-cols-3 bg-muted/15 border border-border/20 p-4 rounded-lg items-end">
+                <div>
+                  <span className={labelClass}>Step Name</span>
+                  <input className={inputClass} value={step.name} onChange={(event) => onUpdate({ name: event.target.value })} />
+                </div>
+                <div>
+                  <span className={labelClass}>Timeout (ms)</span>
+                  <input
+                    type="number"
+                    className={inputClass}
+                    min={100}
+                    value={step.timeoutMs}
+                    onChange={(event) => onUpdate({ timeoutMs: Number(event.target.value) })}
+                  />
+                </div>
+                <div>
+                  <span className={labelClass}>Retry Count</span>
+                  <input
+                    type="number"
+                    className={inputClass}
+                    min={0}
+                    value={step.retryCount}
+                    onChange={(event) => onUpdate({ retryCount: Number(event.target.value) })}
+                  />
+                </div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Pre-Request Step Config */}
+      {/* Pre-Request Config */}
       {step.type === "preRequest" && (
         <div className="space-y-4">
           <div className="rounded-lg border border-border/50 bg-background/50 p-4 space-y-3">
-            <div className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Pre-request Actions</div>
-            {/* List actions */}
+            <div className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Pre-request Actions</div>
             <div className="space-y-2">
               {(step.actions || []).length ? (
                 (step.actions || []).map((action) => (
@@ -739,43 +1173,48 @@ function StepCard({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
                 <div className="text-muted-foreground text-xs italic">No actions defined yet.</div>
               )}
             </div>
-            {/* Add Action Form */}
+
             <div className="grid gap-2 grid-cols-2 md:grid-cols-[140px_1fr_1fr] pt-3 border-t border-border/30 mt-3 items-end">
               <div>
                 <span className={labelClass}>Action Type</span>
-                <select className={inputClass} value={actionType} onChange={(e) => setActionType(e.target.value)}>
-                  <option value="generateJWT">Generate JWT</option>
-                  <option value="hmacSha256">HMAC SHA256</option>
-                  <option value="generateUUID">Generate UUID</option>
-                  <option value="generateTimestamp">Generate Timestamp</option>
-                  <option value="base64Encode">Base64 Encode</option>
-                  <option value="base64Decode">Base64 Decode</option>
-                  <option value="urlEncode">URL Encode</option>
-                  <option value="urlDecode">URL Decode</option>
-                  <option value="sha256">SHA256 Hash</option>
-                  <option value="setVariable">Set Variable</option>
-                  <option value="readStepOutput">Read Previous Output</option>
-                </select>
+                <Select value={actionType} onValueChange={(val) => val && setActionType(val)}>
+                  <SelectTrigger className="w-full h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="generateJWT">Generate JWT</SelectItem>
+                    <SelectItem value="hmacSha256">HMAC SHA256</SelectItem>
+                    <SelectItem value="generateUUID">Generate UUID</SelectItem>
+                    <SelectItem value="generateTimestamp">Generate Timestamp</SelectItem>
+                    <SelectItem value="base64Encode">Base64 Encode</SelectItem>
+                    <SelectItem value="base64Decode">Base64 Decode</SelectItem>
+                    <SelectItem value="urlEncode">URL Encode</SelectItem>
+                    <SelectItem value="urlDecode">URL Decode</SelectItem>
+                    <SelectItem value="sha256">SHA256 Hash</SelectItem>
+                    <SelectItem value="setVariable">Set Variable</SelectItem>
+                    <SelectItem value="readStepOutput">Read Previous Output</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <span className={labelClass}>Label</span>
-                <input placeholder="Generate client assertion" className={inputClass} value={actionLabel} onChange={(e) => setActionLabel(e.target.value)} />
+                <input placeholder="Generate client assertion" className={cn(inputClass, "h-8 text-xs")} value={actionLabel} onChange={(e) => setActionLabel(e.target.value)} />
               </div>
               <div>
                 <span className={labelClass}>Output Key</span>
-                <input placeholder="jwt" className={inputClass} value={actionOutput} onChange={(e) => setActionOutput(e.target.value)} />
+                <input placeholder="jwt" className={cn(inputClass, "h-8 text-xs")} value={actionOutput} onChange={(e) => setActionOutput(e.target.value)} />
               </div>
             </div>
             <div className="mt-2">
               <span className={labelClass}>Config Parameters</span>
               <input
                 placeholder="iss/sub={{secrets.clientId}}, aud={{variables.audience}}"
-                className={inputClass}
+                className={cn(inputClass, "h-8 text-xs")}
                 value={actionConfig}
                 onChange={(e) => setActionConfig(e.target.value)}
               />
             </div>
-            <Button variant="outline" size="sm" type="button" onClick={handleAddAction} className="w-full h-8">
+            <Button variant="outline" size="sm" type="button" onClick={handleAddAction} className="w-full h-8 text-xs mt-1">
               <PlusCircle className="size-3.5 mr-1" /> Add Action
             </Button>
           </div>
@@ -783,30 +1222,84 @@ function StepCard({ step, index, totalSteps, onUpdate, onDelete, onMoveUp, onMov
       )}
 
       {/* Continue on failure check */}
-      <div className="flex items-center gap-2 border-t border-border/20 pt-3">
+      <div className="flex items-center justify-between pt-4 border-t border-border/20 mt-4 bg-muted/10 px-4 py-2.5 rounded-lg">
+        <div className="space-y-0.5">
+          <div className="text-xs font-semibold text-foreground">Continue on Failure</div>
+          <p className="text-[10px] text-muted-foreground">If enabled, subsequent steps will execute even if this step fails.</p>
+        </div>
         <input
           type="checkbox"
           id={`continue-${step.id}`}
           checked={step.continueOnFailure}
           onChange={(e) => onUpdate({ continueOnFailure: e.target.checked })}
-          className="size-4 cursor-pointer"
+          className="size-4 cursor-pointer rounded border-input text-primary focus:ring-primary"
         />
-        <label htmlFor={`continue-${step.id}`} className="text-xs font-medium cursor-pointer text-muted-foreground select-none">
-          Continue executing subsequent steps if this step fails
-        </label>
       </div>
     </div>
   )
 }
 
-export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
+export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenchProps) {
+  const { resolvedTheme } = useTheme()
+  const editorTheme = resolvedTheme === "light" ? "light" : "vs-dark"
   const [draft, setDraft] = useState(monitor)
   const [jsonText, setJsonText] = useState(() => JSON.stringify(configFromMonitor(monitor), null, 2))
   const [parseError, setParseError] = useState<string | null>(null)
   const [executionState, setExecutionState] = useState<ExecutionState>("idle")
+  const [executionError, setExecutionError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>("idle")
   const [mockRun, setMockRun] = useState<MonitorRun | null>(null)
-  const [builderTab, setBuilderTab] = useState<"steps" | "variables" | "settings" | "json">("steps")
+  const [isConsoleOpen, setIsConsoleOpen] = useState(false)
+  const [published, setPublished] = useState<Monitor>(monitor)
+  const [publishedVersion, setPublishedVersion] = useState(monitor.publishedVersion ?? 1)
+  const [hasUnpublishedDraft, setHasUnpublishedDraft] = useState(monitor.hasUnpublishedDraft ?? false)
+  const [publishNote, setPublishNote] = useState("")
+  const [builderTab, setBuilderTab] = useState<"steps" | "variables" | "settings" | "json" | "copilot" | "versions">("steps")
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(() => {
+    return monitor.steps.length > 0 ? (monitor.steps[0]?.id ?? null) : null
+  })
+
+  // AI Builder and Optimizer States
+  const [safetyWarnings, setSafetyWarnings] = useState<any[] | null>(null)
+  const [safetyCheckLoading, setSafetyCheckLoading] = useState(false)
+  const [isSafetyModalOpen, setIsSafetyModalOpen] = useState(false)
+  const [isImportExportOpen, setIsImportExportOpen] = useState(false)
+  const [isCurlModalOpen, setIsCurlModalOpen] = useState(false)
+  const [curlInput, setCurlInput] = useState("")
+  const [curlConverting, setCurlConverting] = useState(false)
+  const [curlResult, setCurlResult] = useState<any | null>(null)
+  const [optimizing, setOptimizing] = useState(false)
+
+  useEffect(() => {
+    if (!monitor.id) return
+
+    async function loadDetail() {
+      try {
+        const response = await fetch(`/api/monitors/${monitor.id}`)
+        if (!response.ok) return
+        const payload = await response.json()
+        const nextPublished = (payload.published ?? payload.monitor) as Monitor
+        const nextDraft = (payload.draft ?? nextPublished) as Monitor
+        setPublished(nextPublished)
+        setDraft(nextDraft)
+        setPublishedVersion(payload.publishedVersion ?? nextPublished.publishedVersion ?? 1)
+        setHasUnpublishedDraft(payload.hasUnpublishedDraft ?? nextPublished.hasUnpublishedDraft ?? false)
+        setJsonText(JSON.stringify(configFromMonitor(nextDraft), null, 2))
+      } catch (error) {
+        console.error("Failed to load monitor detail:", error)
+      }
+    }
+
+    void loadDetail()
+  }, [monitor.id])
+  const [optimizationSuggestions, setOptimizationSuggestions] = useState<any[]>([])
+  const [monitorPrompt, setMonitorPrompt] = useState("")
+  const [promptGenerating, setPromptGenerating] = useState(false)
+  const [promptResult, setPromptResult] = useState<any | null>(null)
+
+  const selectedStep = useMemo(() => {
+    return draft.steps.find((s) => s.id === selectedStepId) || draft.steps[0] || null
+  }, [draft.steps, selectedStepId])
 
   // Local add form states
   const [newVarKey, setNewVarKey] = useState("")
@@ -875,8 +1368,9 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
   }
 
   function addHttpStep() {
+    const newId = `step-${crypto.randomUUID()}`
     const newStep: MonitorStep = {
-      id: `step-${crypto.randomUUID()}`,
+      id: newId,
       order: draft.steps.length + 1,
       name: `Step ${draft.steps.length + 1}: HTTP Request`,
       type: "http",
@@ -903,11 +1397,13 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
       ...draft,
       steps: [...draft.steps, newStep],
     })
+    setSelectedStepId(newId)
   }
 
   function addPreRequestStep() {
+    const newId = `step-${crypto.randomUUID()}`
     const newStep: MonitorStep = {
-      id: `step-${crypto.randomUUID()}`,
+      id: newId,
       order: draft.steps.length + 1,
       name: `Step ${draft.steps.length + 1}: Pre-Request Script Actions`,
       type: "preRequest",
@@ -922,6 +1418,7 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
       ...draft,
       steps: [...draft.steps, newStep],
     })
+    setSelectedStepId(newId)
   }
 
   function deleteStep(stepId: string) {
@@ -932,6 +1429,9 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
       ...draft,
       steps: nextSteps,
     })
+    if (selectedStepId === stepId) {
+      setSelectedStepId(nextSteps.length > 0 ? (nextSteps[0]?.id ?? null) : null)
+    }
   }
 
   function moveStep(index: number, direction: "up" | "down") {
@@ -961,12 +1461,20 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
 
     if (result.draft) {
       updateDraft(result.draft)
+      const nextSteps = result.draft.steps
+      if (nextSteps.length > 0) {
+        if (!nextSteps.some((s) => s.id === selectedStepId)) {
+          setSelectedStepId(nextSteps[0]?.id ?? null)
+        }
+      } else {
+        setSelectedStepId(null)
+      }
     }
   }
 
-  async function saveDraft() {
+  async function saveDraft(): Promise<string | null> {
     const errors = validateMonitor(draft)
-    if (errors.length) return
+    if (errors.length) return null
 
     setSaveState("saving")
 
@@ -985,16 +1493,167 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
 
       if (!response.ok) throw new Error("Save failed")
 
-      const payload = (await response.json()) as { monitor: Monitor }
-      updateDraft(payload.monitor)
+      const payload = await response.json()
+      if (isNew) {
+        const detail = payload.detail as { published: Monitor; draft?: Monitor; publishedVersion: number; hasUnpublishedDraft: boolean } | undefined
+        const created = detail?.draft ?? detail?.published ?? payload.monitor
+        if (created) {
+          updateDraft(created)
+          setPublished(detail?.published ?? created)
+          setPublishedVersion(detail?.publishedVersion ?? 1)
+          setHasUnpublishedDraft(detail?.hasUnpublishedDraft ?? false)
+          window.history.replaceState(null, "", `/monitors/${created.id}/edit`)
+          setSaveState("saved")
+          setTimeout(() => setSaveState("idle"), 2000)
+          return created.id
+        }
+      } else {
+        const savedDraft = (payload.draft ?? payload.monitor) as Monitor
+        updateDraft(savedDraft)
+        setHasUnpublishedDraft(payload.hasUnpublishedDraft ?? true)
+        if (payload.published) setPublished(payload.published as Monitor)
+      }
       setSaveState("saved")
-      
-      setTimeout(() => {
-        window.location.href = "/monitors"
-      }, 500)
+      setTimeout(() => setSaveState("idle"), 2000)
+      return draft.id
+    } catch {
+      setSaveState("error")
+      return null
+    }
+  }
+
+  async function publishDraft() {
+    const monitorId = draft.id || (await saveDraft())
+    if (!monitorId) return
+
+    setSaveState("saving")
+    try {
+      await fetch(`/api/monitors/${monitorId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      })
+
+      const response = await fetch(`/api/monitors/${monitorId}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ changeNote: publishNote }),
+      })
+      if (!response.ok) throw new Error("Publish failed")
+
+      const payload = await response.json()
+      const nextPublished = payload.monitor as Monitor
+      setPublished(nextPublished)
+      updateDraft(nextPublished)
+      setPublishedVersion(nextPublished.publishedVersion ?? publishedVersion + 1)
+      setHasUnpublishedDraft(false)
+      setPublishNote("")
+      setSaveState("saved")
+      setTimeout(() => setSaveState("idle"), 2000)
     } catch {
       setSaveState("error")
     }
+  }
+
+  async function discardDraftChanges() {
+    if (!draft.id) return
+    setSaveState("saving")
+    try {
+      const response = await fetch(`/api/monitors/${draft.id}/draft/discard`, { method: "POST" })
+      if (!response.ok) throw new Error("Discard failed")
+      const payload = await response.json()
+      const nextDraft = (payload.draft ?? published) as Monitor
+      updateDraft(nextDraft)
+      setHasUnpublishedDraft(false)
+      setSaveState("idle")
+    } catch {
+      setSaveState("error")
+    }
+  }
+
+  async function runPublishedMonitor() {
+    if (!draft.id) return
+    setExecutionState("running")
+    setExecutionError(null)
+    setMockRun(null)
+    setIsConsoleOpen(true)
+    try {
+      const response = await fetch(`/api/monitors/${draft.id}/run`, { method: "POST" })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(payload?.error ?? "Published run failed")
+      setMockRun(payload.run)
+      setExecutionState("complete")
+    } catch (err) {
+      setExecutionError(err instanceof Error ? err.message : "Published run failed")
+      setExecutionState("idle")
+    }
+  }
+
+  async function handleSaveClick() {
+    const errors = validateMonitor(draft)
+    if (errors.length) return
+
+    setSafetyCheckLoading(true)
+    try {
+      const res = await fetch("/api/copilot/secret-safety", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ steps: draft.steps }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.result && !data.result.safe && data.result.warnings.length > 0) {
+          setSafetyWarnings(data.result.warnings)
+          setIsSafetyModalOpen(true)
+          return
+        }
+      }
+    } catch (e) {
+      console.error("Failed to check secret safety:", e)
+    } finally {
+      setSafetyCheckLoading(false)
+    }
+
+    await saveDraft()
+  }
+
+  function importCurlStep() {
+    if (!curlResult) return
+    const newId = `step-${crypto.randomUUID()}`
+    const newStep: MonitorStep = {
+      id: newId,
+      order: draft.steps.length + 1,
+      name: curlResult.name || `Step ${draft.steps.length + 1}: HTTP Request`,
+      type: "http",
+      method: curlResult.method || "GET",
+      url: curlResult.url || "https://",
+      timeoutMs: 10000,
+      retryCount: 0,
+      continueOnFailure: false,
+      assertions: (curlResult.assertions || []).map((a: any) => ({
+        id: `assert-${crypto.randomUUID()}`,
+        type: a.type || "statusCode",
+        label: a.label || "Check status",
+        target: a.target || "status",
+        operator: a.operator || "equals",
+        expected: String(a.expected || "200"),
+      })),
+      extractors: [],
+      preRequestScript: "",
+      config: {
+        headers: curlResult.headers || {},
+        body: curlResult.body || "",
+      },
+    }
+
+    updateDraft({
+      ...draft,
+      steps: [...draft.steps, newStep],
+    })
+    setSelectedStepId(newId)
+    setIsCurlModalOpen(false)
+    setCurlInput("")
+    setCurlResult(null)
   }
 
   async function testMonitorRealData() {
@@ -1002,10 +1661,15 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
     if (errors.length) return
 
     setExecutionState("running")
+    setExecutionError(null)
     setMockRun(null)
+    setIsConsoleOpen(true)
 
     try {
-      const response = await fetch(`/api/monitors/test`, {
+      const endpoint = draft.id
+        ? `/api/monitors/${draft.id}/run/draft`
+        : `/api/monitors/test`
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1013,15 +1677,32 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
         body: JSON.stringify(draft),
       })
 
-      if (!response.ok) throw new Error("Test failed")
+      const payload = (await response.json().catch(() => null)) as
+        | { run: MonitorRun }
+        | { error?: string; code?: string; detail?: string }
+        | null
 
-      const payload = (await response.json()) as { run: MonitorRun }
+      if (!response.ok) {
+        const message =
+          payload && "detail" in payload && payload.detail
+            ? payload.detail
+            : payload && "error" in payload && payload.error
+              ? payload.error
+              : "Monitor test failed"
+        throw new Error(message)
+      }
+
+      if (!payload || !("run" in payload)) {
+        throw new Error("Monitor test returned an invalid response")
+      }
+
       setMockRun(payload.run)
       setExecutionState("complete")
     } catch (err) {
-      console.error("Failed to test monitor with real data, falling back to mock run:", err)
-      setMockRun(buildMockRun(draft))
-      setExecutionState("complete")
+      const message = err instanceof Error ? err.message : "Monitor test failed"
+      console.error("Failed to test monitor:", err)
+      setExecutionError(message)
+      setExecutionState("idle")
     }
   }
 
@@ -1036,46 +1717,102 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
               {draft.name || "Unnamed Monitor"}
             </span>
           </h1>
-          <p className="text-muted-foreground text-xs mt-0.5">Configure endpoints, schedules, alerting rules, and run live verification tests.</p>
+          <p className="text-muted-foreground text-xs mt-0.5">
+            Edit draft config, publish to production, and run draft tests without affecting the scheduled monitor.
+          </p>
+          {draft.id ? (
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded">
+                Published v{publishedVersion}
+              </span>
+              {hasUnpublishedDraft ? (
+                <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 px-2 py-0.5 rounded">
+                  Unpublished draft changes
+                </span>
+              ) : (
+                <span className="text-[10px] font-semibold uppercase tracking-wider bg-muted text-muted-foreground border border-border/40 px-2 py-0.5 rounded">
+                  Draft matches published
+                </span>
+              )}
+            </div>
+          ) : null}
         </div>
-        <div className="flex gap-2">
-          <Button 
-            size="sm" 
-            onClick={saveDraft} 
-            disabled={saveState === "saving" || validationErrors.length > 0} 
-            className="gap-1.5 h-9 font-semibold"
-          >
-            {saveState === "saving" ? (
-              <RotateCw className="size-3.5 animate-spin" />
-            ) : saveState === "saved" ? (
-              <CheckCircle2 className="size-3.5 text-emerald-300 animate-pulse" />
-            ) : (
-              <Save className="size-3.5" />
-            )}
-            {saveState === "saving"
-              ? "Saving..."
-              : saveState === "saved"
-              ? "Saved!"
-              : draft.id
-              ? "Save Monitor"
-              : "Create Monitor"}
-          </Button>
-          <Button 
-            size="sm" 
+        <div className="flex flex-wrap gap-2 justify-end">
+          <Button
+            size="sm"
             variant="outline"
-            onClick={testMonitorRealData} 
-            disabled={executionState === "running" || validationErrors.length > 0} 
+            onClick={() => setIsImportExportOpen(true)}
+            className="gap-1.5 h-9"
+          >
+            <Upload className="size-3.5" />
+            Import / Export
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleSaveClick}
+            disabled={saveState === "saving" || validationErrors.length > 0}
+            className="gap-1.5 h-9"
+          >
+            {saveState === "saving" ? <RotateCw className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+            {draft.id ? "Save draft" : "Create monitor"}
+          </Button>
+          {draft.id ? (
+            <>
+              <input
+                value={publishNote}
+                onChange={(e) => setPublishNote(e.target.value)}
+                placeholder="Publish note (optional)"
+                className="h-9 w-36 rounded-md border border-input bg-transparent px-2 text-xs hidden xl:block"
+              />
+              <Button
+                size="sm"
+                onClick={() => void publishDraft()}
+                disabled={saveState === "saving" || validationErrors.length > 0}
+                className="gap-1.5 h-9 font-semibold"
+              >
+                <Rocket className="size-3.5" />
+                Publish
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void discardDraftChanges()}
+                disabled={!hasUnpublishedDraft || saveState === "saving"}
+                className="h-9 text-xs"
+              >
+                Discard draft
+              </Button>
+            </>
+          ) : null}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={testMonitorRealData}
+            disabled={executionState === "running" || validationErrors.length > 0}
             className="gap-1.5 h-9"
           >
             {executionState === "running" ? <RotateCw className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-            Run Test
+            Run draft
           </Button>
+          {draft.id ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void runPublishedMonitor()}
+              disabled={executionState === "running"}
+              className="gap-1.5 h-9"
+            >
+              <Play className="size-3.5" />
+              Run published
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      {/* Main Grid Workspace */}
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_430px]">
-        {/* Left Config tabs block */}
+      {/* Main Workspace (Full Width) */}
+      <div className="space-y-6">
+        {/* Config tabs block */}
         <div className="space-y-4">
           {/* Tab navigation */}
           <div className="flex gap-1 border-b border-border/40 pb-0">
@@ -1084,6 +1821,8 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
               { key: "variables", label: "Variables & Secrets", icon: KeyRound },
               { key: "settings", label: "Monitor Settings", icon: SlidersHorizontal },
               { key: "json", label: "Raw JSON Config", icon: FileJson },
+              { key: "copilot", label: "Pulse AI Copilot", icon: Sparkles },
+              ...(draft.id ? [{ key: "versions" as const, label: "Versions", icon: History }] : []),
             ] as const).map((tab) => {
               const Icon = tab.icon
               return (
@@ -1108,33 +1847,165 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
           {/* Tab contents */}
           {builderTab === "steps" && (
             <Section title="Step builder" icon={Workflow}>
-              <div className="space-y-4">
-                {draft.steps.length ? (
-                  draft.steps.map((step, idx) => (
-                    <StepCard
-                      key={step.id}
-                      step={step}
-                      index={idx}
-                      totalSteps={draft.steps.length}
-                      onUpdate={(patch) => updateStep(step.id, patch)}
-                      onDelete={() => deleteStep(step.id)}
-                      onMoveUp={() => moveStep(idx, "up")}
-                      onMoveDown={() => moveStep(idx, "down")}
-                    />
-                  ))
-                ) : (
-                  <div className="text-muted-foreground text-sm py-8 italic border border-dashed rounded-md text-center bg-muted/5 dark:bg-muted/1">
-                    No request steps added yet. Add a step using the buttons below.
+              <div className="grid grid-cols-1 lg:grid-cols-[250px_1fr] border border-border/50 rounded-lg overflow-hidden bg-background min-h-[580px] shadow-xs">
+                {/* Left: Steps Explorer Sidebar */}
+                <div className="border-r border-border/40 bg-muted/5 flex flex-col justify-between select-none">
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <div className="p-3 border-b border-border/40 bg-muted/10 flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Steps Explorer</span>
+                      <span className="text-[10px] font-mono font-medium bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                        {draft.steps.length} {draft.steps.length === 1 ? 'step' : 'steps'}
+                      </span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1 max-h-[500px]">
+                      {draft.steps.map((step, idx) => {
+                        const isActive = selectedStep?.id === step.id
+                        const isPreRequest = step.type === "preRequest"
+                        return (
+                          <div
+                            key={step.id}
+                            onClick={() => setSelectedStepId(step.id)}
+                            className={cn(
+                              "group flex items-center justify-between px-2.5 py-2 rounded-md cursor-pointer transition-all border text-left",
+                              isActive
+                                ? "bg-primary/5 text-primary border-primary/25 font-semibold"
+                                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                            )}
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="font-mono text-[10px] text-muted-foreground/60 w-3.5 shrink-0 text-right">
+                                {step.order}
+                              </span>
+                              {isPreRequest ? (
+                                <span className="text-[9px] font-mono font-semibold uppercase px-1 py-0.5 rounded bg-zinc-500/10 text-zinc-500 border border-zinc-500/20 shrink-0">
+                                  PreReq
+                                </span>
+                              ) : (
+                                <span className={cn("text-[9px] font-mono font-semibold uppercase px-1 py-0.5 rounded border shrink-0", methodColors[step.method ?? "GET"] || "bg-muted text-muted-foreground border-border")}>
+                                  {step.method ?? "GET"}
+                                </span>
+                              )}
+                              <span className="text-xs truncate font-medium flex-1">
+                                {step.name}
+                              </span>
+                            </div>
+                            
+                            {/* Hover Controls for reordering/deleting */}
+                            <div className="hidden group-hover:flex items-center gap-0.5 pl-1.5 bg-transparent shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  moveStep(idx, "up")
+                                }}
+                                disabled={idx === 0}
+                                className="text-muted-foreground hover:text-foreground disabled:opacity-30 p-0.5 rounded"
+                              >
+                                <ArrowUp className="size-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  moveStep(idx, "down")
+                                }}
+                                disabled={idx === draft.steps.length - 1}
+                                className="text-muted-foreground hover:text-foreground disabled:opacity-30 p-0.5 rounded"
+                              >
+                                <ArrowDown className="size-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  deleteStep(step.id)
+                                }}
+                                className="text-rose-500 hover:text-rose-700 p-0.5 rounded ml-0.5"
+                              >
+                                <Trash2 className="size-3" />
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {!draft.steps.length && (
+                        <div className="text-center py-8 text-xs text-muted-foreground italic px-2">
+                          No steps added yet.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
 
-                <div className="flex gap-2 pt-2">
-                  <Button type="button" variant="outline" size="sm" onClick={addHttpStep} className="flex-1 h-9">
-                    <PlusCircle className="size-4 mr-1.5" /> Add HTTP Request Step
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" onClick={addPreRequestStep} className="flex-1 h-9">
-                    <PlusCircle className="size-4 mr-1.5" /> Add Pre-Request Action Step
-                  </Button>
+                  {/* Left Sidebar Footer quick step adder buttons */}
+                  <div className="p-2 border-t border-border/40 bg-muted/10 space-y-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      onClick={addHttpStep}
+                      className="w-full text-[10px] h-7 justify-start gap-1 font-semibold"
+                    >
+                      <Plus className="size-3" /> Add HTTP Request
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      onClick={addPreRequestStep}
+                      className="w-full text-[10px] h-7 justify-start gap-1 font-semibold"
+                    >
+                      <Plus className="size-3" /> Add Pre-Request Script
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      onClick={() => setIsCurlModalOpen(true)}
+                      className="w-full text-[10px] h-7 justify-start gap-1 font-semibold text-primary hover:bg-primary/5 cursor-pointer"
+                    >
+                      <Sparkles className="size-3 text-primary animate-pulse" /> Import HTTP from cURL
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Right: Selected Step Editor Workspace */}
+                <div className="flex-1 min-w-0 bg-background flex flex-col justify-between">
+                  {selectedStep ? (
+                    <StepCard
+                      key={selectedStep.id}
+                      step={selectedStep}
+                      index={draft.steps.findIndex(s => s.id === selectedStep.id)}
+                      totalSteps={draft.steps.length}
+                      mockRun={mockRun}
+                      onUpdate={(patch) => updateStep(selectedStep.id, patch)}
+                      onDelete={() => deleteStep(selectedStep.id)}
+                      onMoveUp={() => moveStep(draft.steps.findIndex(s => s.id === selectedStep.id), "up")}
+                      onMoveDown={() => moveStep(draft.steps.findIndex(s => s.id === selectedStep.id), "down")}
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-20 px-6 text-center h-full flex-1 min-h-[400px]">
+                      <div className="rounded-full bg-muted/50 p-4 mb-3 border border-border/30">
+                        <Workflow className="size-8 text-muted-foreground/60 animate-pulse" />
+                      </div>
+                      <h3 className="font-semibold text-sm">No steps added to this monitor</h3>
+                      <p className="text-xs text-muted-foreground max-w-[280px] mt-1.5 mb-5">
+                        Add request steps to run in sequence. You can configure endpoints, headers, assertions, and extract variables.
+                      </p>
+                      <div className="flex flex-col gap-2 w-full max-w-[320px]">
+                        <div className="flex gap-2">
+                          <Button type="button" variant="outline" size="sm" onClick={addHttpStep} className="flex-1 h-9 cursor-pointer">
+                            <PlusCircle className="size-4 mr-1.5" /> Add HTTP Step
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" onClick={addPreRequestStep} className="flex-1 h-9 cursor-pointer">
+                            <PlusCircle className="size-4 mr-1.5" /> Add Pre-Request
+                          </Button>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={() => setIsCurlModalOpen(true)} className="w-full h-9 gap-1.5 font-semibold text-primary cursor-pointer">
+                          <Sparkles className="size-4 text-primary animate-pulse" /> Import HTTP Step from cURL command
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </Section>
@@ -1251,6 +2122,25 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
             <div className="space-y-4">
               <Section title="Basic details" icon={SlidersHorizontal}>
                 <div className="grid gap-3 md:grid-cols-2">
+                  <label>
+                    <span className={labelClass}>Application</span>
+                    <Select
+                      value={draft.applicationId ? draft.applicationId : "none"}
+                      onValueChange={(value) => updateDraft({ ...draft, applicationId: !value || value === "none" ? "" : value })}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select application" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Unassigned</SelectItem>
+                        {applications.map((application) => (
+                          <SelectItem key={application.id} value={application.id}>
+                            {application.name} · CAR {application.carId}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
                   <label>
                     <span className={labelClass}>Monitor name</span>
                     <input
@@ -1397,15 +2287,27 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
           {builderTab === "json" && (
             <Section title="JSON config" icon={FileJson}>
               <div className="space-y-3">
-                <textarea
-                  className="min-h-[450px] w-full resize-y rounded-md bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100 outline-none border border-border/50"
-                  spellCheck={false}
-                  value={jsonText}
-                  onChange={(event) => {
-                    setJsonText(event.target.value)
-                    setParseError(null)
-                  }}
-                />
+                <div className="min-h-[450px] w-full rounded-md border border-border/50 overflow-hidden bg-[#1e1e1e] dark:bg-[#1e1e1e] light:bg-[#fffffe] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+                  <Editor
+                    height="450px"
+                    language="json"
+                    theme={editorTheme}
+                    value={jsonText}
+                    onChange={(val) => {
+                      setJsonText(val ?? "")
+                      setParseError(null)
+                    }}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 12,
+                      fontFamily: "var(--font-mono), monospace",
+                      lineNumbers: "on",
+                      scrollBeyondLastLine: false,
+                      wordWrap: "on",
+                      padding: { top: 12, bottom: 12 },
+                    }}
+                  />
+                </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={handleApplyJson}>
                     <Save className="size-4 mr-1.5" />
@@ -1419,6 +2321,242 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
                 )}
               </div>
             </Section>
+          )}
+
+          {builderTab === "versions" && draft.id && (
+            <MonitorVersionsPanel
+              monitorId={draft.id}
+              published={published}
+              draft={draft}
+              onRollbackApplied={(monitor) => {
+                setPublished(monitor)
+                updateDraft(monitor)
+                setPublishedVersion(monitor.publishedVersion ?? publishedVersion)
+                setHasUnpublishedDraft(monitor.hasUnpublishedDraft ?? false)
+                setJsonText(JSON.stringify(configFromMonitor(monitor), null, 2))
+              }}
+            />
+          )}
+
+          {builderTab === "copilot" && (
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Left Column: AI Monitor Optimizer / Improvement suggestions */}
+              <Card className="p-4 space-y-4 border border-border/80 bg-card">
+                <div className="flex items-center gap-2 border-b border-border/40 pb-2">
+                  <Sparkles className="size-4 text-primary animate-pulse" />
+                  <h3 className="font-bold text-sm text-foreground">Pulse AI Monitor Optimizer</h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Get recommendations from Copilot to optimize your check coverage, performance timeouts, retries, and overall alert security.
+                </p>
+                <div className="space-y-3">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      setOptimizing(true)
+                      setOptimizationSuggestions([])
+                      try {
+                        const res = await fetch("/api/copilot/monitor-improvement", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ monitor: draft }),
+                        })
+                        if (res.ok) {
+                          const data = await res.json()
+                          setOptimizationSuggestions(data.result.suggestions || [])
+                        }
+                      } catch (e) {
+                        console.error(e)
+                      } finally {
+                        setOptimizing(false)
+                      }
+                    }}
+                    className="w-full text-xs font-semibold gap-1 cursor-pointer"
+                    disabled={optimizing}
+                  >
+                    {optimizing ? <RotateCw className="size-3 animate-spin" /> : <Sparkles className="size-3 text-primary animate-pulse" />}
+                    Analyze Monitor Configuration
+                  </Button>
+
+                  {optimizing && (
+                    <div className="flex flex-col items-center justify-center py-6 text-xs text-muted-foreground gap-2 animate-pulse">
+                      <Loader2 className="size-5 animate-spin text-primary" />
+                      Auditing steps, assertions, timeouts, and secrets...
+                    </div>
+                  )}
+
+                  {!optimizing && optimizationSuggestions.length === 0 && (
+                    <div className="text-center py-8 text-xs text-muted-foreground border border-dashed rounded-md bg-muted/10">
+                      No analysis run yet. Click above to run AI optimizer check.
+                    </div>
+                  )}
+
+                  {!optimizing && optimizationSuggestions.length > 0 && (
+                    <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+                      {optimizationSuggestions.map((suggestion, idx) => (
+                        <div key={idx} className="rounded border bg-muted/20 p-3 space-y-1.5 text-xs">
+                          <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                            <span className={cn(
+                              "text-[9px] uppercase px-1.5 py-0.5 rounded font-bold border",
+                              suggestion.category === "security"
+                                ? "bg-rose-500/5 text-rose-500 border-rose-500/20"
+                                : suggestion.category === "assertion"
+                                  ? "bg-emerald-500/5 text-emerald-500 border-emerald-500/20"
+                                  : "bg-blue-500/5 text-blue-500 border-blue-500/20"
+                            )}>
+                              {suggestion.category}
+                            </span>
+                            <span>{suggestion.title}</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            {suggestion.description}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              {/* Right Column: AI Prompt Monitor Builder */}
+              <Card className="p-4 space-y-4 border border-border/80 bg-card">
+                <div className="flex items-center gap-2 border-b border-border/40 pb-2">
+                  <Code2 className="size-4 text-primary animate-pulse" />
+                  <h3 className="font-bold text-sm text-foreground">Natural Language Monitor Builder</h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Describe what APIs you want to test and how often, and Pulse Copilot will write a complete configuration draft.
+                </p>
+                <div className="space-y-3 text-xs">
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-foreground">Monitor Prompt / Description</label>
+                    <textarea
+                      value={monitorPrompt}
+                      onChange={(e) => setMonitorPrompt(e.target.value)}
+                      placeholder="e.g. Call https://api.mycompany.com/auth first with client credentials, extract the access_token variable from the response JSON body, then call https://api.mycompany.com/v1/profile using that token in the Authorization header. Run this check every 5 minutes."
+                      className="w-full min-h-[90px] border border-border rounded p-2 text-xs bg-background focus:ring-1 focus:ring-primary focus:outline-none resize-none leading-relaxed"
+                    />
+                  </div>
+
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      if (!monitorPrompt.trim() || promptGenerating) return
+                      setPromptGenerating(true)
+                      try {
+                        const res = await fetch("/api/copilot/generate-monitor", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ prompt: monitorPrompt }),
+                        })
+                        if (res.ok) {
+                          const data = await res.json()
+                          setPromptResult(data.result)
+                        }
+                      } catch (e) {
+                        console.error(e)
+                      } finally {
+                        setPromptGenerating(false)
+                      }
+                    }}
+                    className="w-full text-xs font-semibold gap-1 cursor-pointer bg-primary text-primary-foreground"
+                    disabled={promptGenerating || !monitorPrompt.trim()}
+                  >
+                    {promptGenerating ? <RotateCw className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+                    Generate Draft Config
+                  </Button>
+
+                  {promptGenerating && (
+                    <div className="flex flex-col items-center justify-center py-6 text-xs text-muted-foreground gap-2 animate-pulse">
+                      <Loader2 className="size-5 animate-spin text-primary" />
+                      Analyzing requirements and composing monitor layout...
+                    </div>
+                  )}
+
+                  {promptResult && (
+                    <div className="space-y-3 animate-in fade-in duration-200">
+                      <div className="rounded border bg-muted/30 p-2.5 space-y-2">
+                        <div className="flex justify-between items-center border-b border-border/40 pb-1.5">
+                          <span className="font-semibold text-foreground">{promptResult.name || "Draft Monitor"}</span>
+                          <span className="text-[10px] text-muted-foreground font-mono">{promptResult.cron}</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">{promptResult.description}</p>
+                        <div className="space-y-1">
+                          <span className="font-bold text-[9px] uppercase tracking-wider text-muted-foreground">Steps to Create:</span>
+                          <div className="space-y-1">
+                            {promptResult.steps?.map((step: any, idx: number) => (
+                              <div key={idx} className="flex items-center justify-between text-[11px] bg-background/50 border rounded px-2 py-1 text-muted-foreground font-medium">
+                                <span className="truncate">{step.name}</span>
+                                <span className="font-mono font-bold text-[9px] text-primary">{step.method}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          // Apply the generated draft to current state
+                          const nextSteps = (promptResult.steps || []).map((s: any, idx: number) => ({
+                            id: `step-${crypto.randomUUID()}`,
+                            order: idx + 1,
+                            name: s.name || `Step ${idx + 1}: HTTP Request`,
+                            type: "http",
+                            method: s.method || "GET",
+                            url: s.url || "https://",
+                            timeoutMs: s.timeoutMs || 10000,
+                            retryCount: s.retryCount || 0,
+                            continueOnFailure: s.continueOnFailure || false,
+                            assertions: (s.assertions || []).map((a: any) => ({
+                              id: `assert-${crypto.randomUUID()}`,
+                              type: a.type || "statusCode",
+                              label: a.label || "Check status",
+                              target: a.target || "status",
+                              operator: a.operator || "equals",
+                              expected: String(a.expected || "200"),
+                            })),
+                            extractors: (s.extractors || []).map((e: any) => ({
+                              id: `extract-${crypto.randomUUID()}`,
+                              variableName: e.variableName,
+                              type: e.type || "jsonPath",
+                              source: e.source || "responseBody",
+                              target: e.target,
+                            })),
+                            preRequestScript: "",
+                            config: { headers: {}, body: "" },
+                          }))
+
+                          updateDraft({
+                            ...draft,
+                            name: promptResult.name || draft.name,
+                            description: promptResult.description || draft.description,
+                            cron: promptResult.cron || draft.cron,
+                            timeoutMs: promptResult.timeoutMs || draft.timeoutMs,
+                            retryCount: promptResult.retryCount || draft.retryCount,
+                            failureThreshold: promptResult.failureThreshold || draft.failureThreshold,
+                            steps: nextSteps,
+                          })
+
+                          if (nextSteps.length > 0) {
+                            setSelectedStepId(nextSteps[0].id)
+                          }
+
+                          // Redirect back to steps tab
+                          setBuilderTab("steps")
+                          setPromptResult(null)
+                          setMonitorPrompt("")
+                        }}
+                        className="w-full text-xs font-semibold gap-1 cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white"
+                      >
+                        Apply Draft Config to Builder
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
           )}
 
           {/* Validation Status Area (if errors exist) */}
@@ -1445,113 +2583,516 @@ export function BuilderWorkbench({ monitor }: BuilderWorkbenchProps) {
           )}
         </div>
 
-        {/* Right Sidebar: Execution log results */}
-        <aside className="space-y-4">
-          <Section title="Test execution" icon={TerminalSquare}>
-            {executionState === "idle" ? (
-              <p className="text-muted-foreground text-xs leading-6">
-                Click the **"Run Test"** button in the header to trigger a live dry-run of this monitor draft. 
-                It will run all HTTP requests, evaluate assertions, and extract variables without writing to the database history.
-              </p>
-            ) : null}
-            {executionState === "running" ? (
-              <div className="text-muted-foreground flex items-center gap-2 text-sm py-4 justify-center">
-                <RotateCw className="size-4 animate-spin text-primary" />
-                Executing draft steps live...
-              </div>
-            ) : null}
-            {mockRun ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3 border-b border-border/40 pb-2.5">
+        {/* Test Execution Console Dialog */}
+        <Dialog open={isConsoleOpen} onOpenChange={setIsConsoleOpen}>
+          <DialogContent className="min-w-[80vw] w-full max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
+            {/* Modal Header */}
+            <DialogHeader className="px-6 py-4 border-b border-border/40 shrink-0">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <TerminalSquare className="size-5 text-primary" />
                   <div>
-                    <div className="text-xs font-semibold">Dry-run Results</div>
-                    <div className="text-muted-foreground text-[10px]">{mockRun.durationMs}ms total latency</div>
+                    <DialogTitle className="text-sm font-bold tracking-tight">Test Execution Console</DialogTitle>
+                    <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                      Live dry-run of the current monitor draft — nothing is saved to history.
+                    </DialogDescription>
                   </div>
-                  <StatusPill status={mockRun.status} />
+                  {mockRun && (
+                    <div className="flex items-center gap-2 ml-2">
+                      <span className={cn(
+                        "text-[11px] font-bold px-2.5 py-1 rounded-full border",
+                        mockRun.status === "success"
+                          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400"
+                          : "bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400"
+                      )}>
+                        {mockRun.status === "success" ? "✓ All Passed" : "✗ Failed"}
+                      </span>
+                      <span className="text-[11px] font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border/30">
+                        {mockRun.durationMs}ms total
+                      </span>
+                    </div>
+                  )}
                 </div>
-                
-                {mockRun.failureReason && (
-                  <div className="rounded-md border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300">
-                    <div className="font-semibold mb-0.5">Failure Reason:</div>
-                    {mockRun.failureReason}
-                  </div>
-                )}
+              </div>
+            </DialogHeader>
 
-                <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
-                  {mockRun.steps.map((step) => (
-                    <div key={step.id} className="rounded-md bg-muted/60 border border-border/40 p-3 text-xs space-y-2">
-                      <div className="flex items-center justify-between gap-2 border-b border-border/20 pb-1">
-                        <span className="font-semibold">{step.stepName}</span>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] text-muted-foreground font-mono">{step.latencyMs}ms</span>
-                          <StatusPill status={step.status} />
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+              {executionState === "running" && (
+                <div className="text-muted-foreground flex items-center gap-3 text-sm py-16 justify-center font-medium bg-muted/5 rounded-xl border border-border/20">
+                  <RotateCw className="size-5 animate-spin text-primary" />
+                  Executing monitor draft steps live...
+                </div>
+              )}
+
+              {executionError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300 flex items-start gap-2">
+                  <XCircle className="size-4 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold">Test failed: </span>
+                    {executionError}
+                    {executionError.includes("PULSE_API_BASE_URL") ? null : (
+                      <p className="mt-2 text-xs text-rose-600/90 dark:text-rose-400/90">
+                        Ensure `PULSE_API_BASE_URL` is set in `apps/web/.env.local` and the Go API is running.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {mockRun && (
+                <div className="space-y-6">
+                  {mockRun.failureReason && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300 flex items-start gap-2">
+                      <XCircle className="size-4 shrink-0 mt-0.5" />
+                      <div><span className="font-semibold">Run Failed: </span>{mockRun.failureReason}</div>
+                    </div>
+                  )}
+
+                  {mockRun.steps.map((step, idx) => {
+                    const method = step.requestSummary?.split(" ")[0]
+                    const url = step.requestSummary?.includes(" ")
+                      ? step.requestSummary.substring(step.requestSummary.indexOf(" ") + 1)
+                      : step.requestSummary
+                    const isHttp = step.type === "http"
+
+                    // Try to pretty-print the response body
+                    let prettyBody = step.responseBody || step.responseSummary || ""
+                    try {
+                      if (prettyBody && prettyBody.trim().startsWith("{") || prettyBody?.trim().startsWith("[")) {
+                        prettyBody = JSON.stringify(JSON.parse(prettyBody), null, 2)
+                      }
+                    } catch {}
+
+                    let prettyRequestBody = step.requestBody || ""
+                    try {
+                      if (prettyRequestBody && prettyRequestBody.trim().startsWith("{")) {
+                        prettyRequestBody = JSON.stringify(JSON.parse(prettyRequestBody), null, 2)
+                      }
+                    } catch {}
+
+                    return (
+                      <div key={step.id} className="rounded-xl bg-card border border-border/40 shadow-sm overflow-hidden">
+                        {/* Step Header */}
+                        <div className={cn(
+                          "flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-border/30",
+                          step.status === "success" ? "bg-emerald-500/5" : "bg-rose-500/5"
+                        )}>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="font-mono text-[10px] font-semibold text-muted-foreground bg-muted/80 px-2 py-0.5 rounded border border-border/20 shrink-0">
+                              Step {idx + 1}
+                            </span>
+                            {isHttp && method ? (
+                              <span className={cn(
+                                "text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded border shrink-0",
+                                methodColors[method] || "bg-muted text-muted-foreground border-border"
+                              )}>
+                                {method}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-zinc-500/10 text-zinc-500 border border-zinc-500/20 shrink-0">
+                                PRE-REQ
+                              </span>
+                            )}
+                            <span className="font-semibold text-sm text-foreground truncate">{step.stepName}</span>
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            {step.statusCode !== undefined && step.statusCode > 0 && (
+                              <span className={cn(
+                                "font-mono text-xs font-bold px-2 py-0.5 rounded border",
+                                step.statusCode >= 200 && step.statusCode < 300
+                                  ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                  : step.statusCode >= 400
+                                    ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                                    : "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                              )}>
+                                HTTP {step.statusCode}
+                              </span>
+                            )}
+                            <div className="flex items-center gap-1 text-muted-foreground text-[11px] font-mono">
+                              <Clock className="size-3 text-muted-foreground/60" />
+                              <span>{step.latencyMs}ms</span>
+                            </div>
+                            <StatusPill status={step.status} />
+                          </div>
+                        </div>
+
+                        {/* Step Body */}
+                        <div className="p-5 space-y-5">
+                          {/* URL */}
+                          {isHttp && url && (
+                            <div className="flex items-center gap-2 bg-muted/30 px-3 py-2 rounded-lg border border-border/20">
+                              <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider shrink-0">URL</span>
+                              <span className="font-mono text-xs text-foreground select-all break-all">{url}</span>
+                            </div>
+                          )}
+
+                          {/* Error */}
+                          {step.errorMessage && (
+                            <div className="rounded-lg border border-rose-200 bg-rose-50/50 px-4 py-3 text-sm text-rose-700 dark:border-rose-950 dark:bg-rose-950/20 dark:text-rose-300 flex gap-2 items-start">
+                              <XCircle className="size-4 shrink-0 mt-0.5" />
+                              <div><span className="font-bold">Error: </span>{step.errorMessage}</div>
+                            </div>
+                          )}
+
+
+                          {/* Main Content Grid — 2 cols only when there is request data to show */}
+                          {(() => {
+                            const hasRequestDetails = isHttp && (
+                              (step.requestHeaders && Object.keys(step.requestHeaders).length > 0) ||
+                              !!prettyRequestBody
+                            )
+                            return (
+                              <div className={cn("gap-5", hasRequestDetails ? "grid grid-cols-1 lg:grid-cols-2" : "flex flex-col")}>
+                                {/* LEFT: Request Details — only when there's something to show */}
+                                {hasRequestDetails && (
+                                  <div className="space-y-4">
+                                    {/* Request Headers */}
+                                    {step.requestHeaders && Object.keys(step.requestHeaders).length > 0 && (
+                                      <div className="space-y-1.5">
+                                        <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+                                          <Code2 className="size-3" />
+                                          Request Headers
+                                        </div>
+                                        <div className="rounded-lg border border-border/30 overflow-hidden">
+                                          {Object.entries(step.requestHeaders).map(([key, value], i) => (
+                                            <div key={key} className={cn("grid grid-cols-[180px_1fr] text-[11px]", i % 2 === 0 ? "bg-muted/20" : "bg-transparent")}>
+                                              <div className="font-mono font-semibold text-muted-foreground px-3 py-1.5 border-r border-border/20 truncate">{key}</div>
+                                              <div className="font-mono text-foreground/80 px-3 py-1.5 break-all">{value}</div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Request Body */}
+                                    {prettyRequestBody && (
+                                      <div className="space-y-1.5">
+                                        <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+                                          <FileJson className="size-3" />
+                                          Request Body
+                                        </div>
+                                        <pre className="text-[11px] font-mono bg-zinc-950 text-zinc-200 p-3 rounded-lg border border-zinc-800 max-h-52 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed select-all">
+                                          {prettyRequestBody}
+                                        </pre>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+
+                            {/* RIGHT: Response Details */}
+                            <div className="space-y-4">
+                              {/* Response Body */}
+                              {(step.responseBody || step.responseSummary) && (
+                                <div className="space-y-1.5">
+                                  <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+                                    <FileJson className="size-3" />
+                                    Response Body
+                                  </div>
+                                  <pre className="text-[11px] font-mono bg-zinc-950 text-zinc-200 p-3 rounded-lg border border-zinc-800 max-h-64 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed select-all">
+                                    {prettyBody}
+                                  </pre>
+                                </div>
+                              )}
+
+                              {/* Response Headers */}
+                              {step.responseHeaders && Object.keys(step.responseHeaders).length > 0 && (
+                                <div className="space-y-1.5">
+                                  <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+                                    <Code2 className="size-3" />
+                                    Response Headers
+                                  </div>
+                                  <div className="rounded-lg border border-border/30 overflow-hidden max-h-52 overflow-y-auto">
+                                    {Object.entries(step.responseHeaders).map(([key, value], i) => (
+                                      <div key={key} className={cn("grid grid-cols-[200px_1fr] text-[11px]", i % 2 === 0 ? "bg-muted/20" : "bg-transparent")}>
+                                        <div className="font-mono font-semibold text-muted-foreground px-3 py-1.5 border-r border-border/20 truncate">{key}</div>
+                                        <div className="font-mono text-foreground/80 px-3 py-1.5 break-all">{value}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            </div>
+                            )
+                          })()}
+
+                          {/* Full-Width Bottom: Assertions, Extracted Vars, Console */}
+                          <div className="space-y-4">
+                            {/* Assertions */}
+                            {step.assertions && step.assertions.length > 0 && (
+                              <div className="space-y-2">
+                                <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+                                  <ShieldCheck className="size-3" />
+                                  Assertions ({step.assertions.length})
+                                </div>
+                                <div className="rounded-lg border border-border/30 overflow-hidden">
+                                  {step.assertions.map((assertion, aIdx) => {
+                                    const failed = checkAssertionFailed(assertion)
+                                    return (
+                                      <div key={assertion.id} className={cn(
+                                        "grid grid-cols-[1fr_auto_auto] text-[11px] border-b last:border-b-0 border-border/20 px-3 py-2 gap-3 items-center",
+                                        aIdx % 2 === 0 ? "bg-muted/10" : "bg-transparent",
+                                        failed ? "border-l-2 border-l-rose-500" : "border-l-2 border-l-emerald-500"
+                                      )}>
+                                        <div className="flex items-center gap-2 min-w-0 font-mono">
+                                          <span className="text-primary font-bold uppercase text-[9px] shrink-0">{assertion.type}</span>
+                                          <span className="text-muted-foreground truncate">{assertion.target || "body"}</span>
+                                          <span className="text-[9px] font-semibold text-muted-foreground/70 uppercase shrink-0">{assertion.operator}</span>
+                                          <span className="bg-muted px-1 rounded text-foreground/80 shrink-0">{assertion.expected || "(empty)"}</span>
+                                          {assertion.actual !== undefined && (
+                                            <>
+                                              <span className="text-muted-foreground/40 shrink-0">→ got:</span>
+                                              <span className={cn("shrink-0 px-1 rounded", failed ? "bg-rose-500/10 text-rose-600" : "bg-emerald-500/10 text-emerald-600")}>{assertion.actual}</span>
+                                            </>
+                                          )}
+                                        </div>
+                                        <span className={cn("text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded", failed ? "bg-rose-500/10 text-rose-600" : "bg-emerald-500/10 text-emerald-600")}>
+                                          {failed ? "Failed" : "Passed"}
+                                        </span>
+                                        {failed ? <XCircle className="size-4 text-rose-500 shrink-0" /> : <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />}
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Extracted Variables */}
+                            {step.extractedVars && Object.keys(step.extractedVars).length > 0 && (
+                              <div className="space-y-2">
+                                <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+                                  <KeyRound className="size-3" />
+                                  Extracted Variables ({Object.keys(step.extractedVars).length})
+                                </div>
+                                <div className="rounded-lg border border-border/30 overflow-hidden">
+                                  {Object.entries(step.extractedVars).map(([varName, varValue], i) => (
+                                    <div key={varName} className={cn("grid grid-cols-[200px_1fr] text-[11px] border-b last:border-b-0 border-border/20", i % 2 === 0 ? "bg-muted/10" : "bg-transparent")}>
+                                      <div className="font-mono font-semibold text-primary px-3 py-1.5 border-r border-border/20 truncate">
+                                        {"{{variables."}{varName}{"}}"}
+                                      </div>
+                                      <div className={cn("font-mono px-3 py-1.5 break-all", varValue === "********" ? "text-muted-foreground italic" : "text-foreground/80")}>
+                                        {varValue || "(empty)"}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Console Output */}
+                            {step.consoleOutput && step.consoleOutput.length > 0 && (
+                              <div className="space-y-2">
+                                <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+                                  <Terminal className="size-3" />
+                                  Console Output ({step.consoleOutput.length} lines)
+                                </div>
+                                <div className="bg-zinc-950 rounded-lg px-4 py-3 text-[11px] font-mono text-zinc-300 space-y-1 max-h-48 overflow-auto border border-zinc-800">
+                                  {step.consoleOutput.map((line, i) => (
+                                    <div key={i} className="flex gap-2.5">
+                                      <span className="text-zinc-600 select-none shrink-0">{`>`}</span>
+                                      <span className="break-all">{line}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      {step.requestSummary && (
-                        <div>
-                          <span className="text-muted-foreground font-semibold">Request: </span>
-                          <span className="font-mono text-foreground break-all bg-black/5 dark:bg-black/25 px-1 py-0.5 rounded">{step.requestSummary}</span>
-                        </div>
-                      )}
-                      {step.responseSummary && (
-                        <div>
-                          <span className="text-muted-foreground font-semibold">Response: </span>
-                          <span className="text-foreground">{step.responseSummary}</span>
-                        </div>
-                      )}
-                      {step.errorMessage && (
-                        <div className="text-rose-500 font-medium">
-                          Error: {step.errorMessage}
-                        </div>
-                      )}
-                      
-                      {/* Assertions */}
-                      {step.assertions && step.assertions.length > 0 && (
-                        <div className="pt-1.5 border-t border-border/20 space-y-1">
-                          <div className="text-[10px] uppercase font-semibold text-muted-foreground">Assertions Checked:</div>
-                          {step.assertions.map((assertion) => {
-                            const failed = checkAssertionFailed(assertion)
-                            return (
-                              <div key={assertion.id} className="flex justify-between items-center text-[10px]">
-                                <span className="text-muted-foreground truncate max-w-[180px]">
-                                  {assertion.type}({assertion.target}) {assertion.operator} {assertion.expected}
-                                </span>
-                                <span className={cn(
-                                  "font-semibold",
-                                  failed ? "text-rose-500" : "text-emerald-500"
-                                )}>
-                                  {failed ? `Failed (got: ${assertion.actual})` : "Passed"}
-                                </span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-
-                      {/* Console Log */}
-                      {step.consoleOutput && step.consoleOutput.length > 0 && (
-                        <div className="pt-1.5 border-t border-border/20 space-y-1">
-                          <div className="text-[10px] uppercase font-semibold text-muted-foreground flex items-center gap-1">
-                            <Terminal className="size-3" />
-                            Console Output:
-                          </div>
-                          <div className="bg-zinc-950 rounded-md p-2 text-[11px] font-mono text-zinc-300 space-y-0.5 max-h-32 overflow-auto">
-                            {step.consoleOutput.map((line, i) => (
-                              <div key={i} className="flex gap-1.5">
-                                <span className="text-zinc-600 select-none">{">"}</span>
-                                <span>{line}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Secret Safety Alert Dialog */}
+        <AlertDialog open={isSafetyModalOpen} onOpenChange={setIsSafetyModalOpen}>
+          <AlertDialogContent className="sm:max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-base font-bold flex items-center gap-2 text-amber-600 dark:text-amber-500">
+                <AlertTriangle className="size-5" />
+                Security Check: Hardcoded Secrets
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs">
+                Pulse Copilot detected potential raw secrets or API keys in your monitor steps. Storing secrets in plain text is not recommended.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-2 py-2 max-h-48 overflow-y-auto text-xs">
+              {safetyWarnings?.map((warning, idx) => (
+                <div key={idx} className="rounded border bg-muted/40 p-2 space-y-1">
+                  <div className="flex items-center justify-between font-semibold">
+                    <span className="text-foreground">{warning.stepName}</span>
+                    <span className="text-[10px] text-muted-foreground uppercase">{warning.location} ({warning.key})</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">{warning.recommendation}</p>
+                </div>
+              ))}
+            </div>
+            <AlertDialogFooter className="border-t border-border/20 pt-3">
+              <AlertDialogCancel className="h-9 text-xs cursor-pointer" onClick={() => setIsSafetyModalOpen(false)}>
+                Cancel & Edit
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="h-9 text-xs bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+                onClick={async () => {
+                  setIsSafetyModalOpen(false)
+                  await saveDraft()
+                }}
+              >
+                Save Anyway
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <MonitorImportExportDialog
+          open={isImportExportOpen}
+          onOpenChange={setIsImportExportOpen}
+          mode="builder"
+          applications={applications}
+          monitors={[draft]}
+          applicationId={draft.applicationId}
+          onApplyMonitor={(monitor) => {
+            updateDraft({
+              ...draft,
+              ...monitor,
+              id: draft.id,
+              steps: monitor.steps.map((step, index) => ({
+                ...step,
+                order: index + 1,
+              })),
+            })
+            if (monitor.steps[0]) setSelectedStepId(monitor.steps[0].id)
+            setBuilderTab("steps")
+          }}
+          onApplySteps={(steps, replace) => {
+            const merged = replace
+              ? steps.map((step, index) => ({ ...step, order: index + 1 }))
+              : [
+                  ...draft.steps,
+                  ...steps.map((step, index) => ({
+                    ...step,
+                    order: draft.steps.length + index + 1,
+                  })),
+                ]
+            updateDraft({ ...draft, steps: merged })
+            if (merged[0]) setSelectedStepId(merged[merged.length - 1]?.id ?? merged[0].id)
+            setBuilderTab("steps")
+          }}
+        />
+
+        {/* cURL Import Dialog */}
+        <Dialog open={isCurlModalOpen} onOpenChange={setIsCurlModalOpen}>
+          <DialogContent className="sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle className="text-base font-bold flex items-center gap-2">
+                <Sparkles className="size-4 text-primary animate-pulse" />
+                Import HTTP Step from cURL
+              </DialogTitle>
+              <DialogDescription className="text-xs">
+                Paste a standard shell cURL command (e.g. headers, POST body, query strings) and Pulse Copilot will parse it into step settings.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-semibold text-foreground">cURL Command</label>
+                <textarea
+                  value={curlInput}
+                  onChange={(e) => setCurlInput(e.target.value)}
+                  placeholder='curl -X POST "https://api.example.com/v1/users" -H "Content-Type: application/json" -d "{\"name\": \"Alice\"}"'
+                  className="w-full h-32 border border-border rounded p-2 text-xs font-mono bg-background focus:ring-1 focus:ring-primary focus:outline-none resize-none leading-relaxed"
+                />
               </div>
-            ) : null}
-          </Section>
-        </aside>
+
+              {curlConverting && (
+                <div className="flex flex-col items-center justify-center py-4 text-muted-foreground text-xs gap-2">
+                  <Loader2 className="size-5 animate-spin text-primary" />
+                  <span>Copilot is parsing syntax, headers, and credentials...</span>
+                </div>
+              )}
+
+              {curlResult && (
+                <div className="space-y-3 rounded bg-muted/40 p-3 border border-border/40 max-h-40 overflow-y-auto font-mono text-[10px]">
+                  <div className="flex justify-between font-bold border-b border-border/40 pb-1.5 mb-1.5">
+                    <span className="text-foreground">{curlResult.name}</span>
+                    <span className="text-primary">{curlResult.method}</span>
+                  </div>
+                  <div className="text-muted-foreground truncate">URL: {curlResult.url}</div>
+                  {curlResult.warnings && curlResult.warnings.length > 0 && (
+                    <div className="mt-2 p-2 rounded bg-rose-500/5 text-rose-500 border border-rose-500/10 font-sans leading-normal">
+                      <span className="font-bold flex items-center gap-1.5 mb-1">
+                        <AlertTriangle className="size-3 text-rose-500" />
+                        Security Warnings:
+                      </span>
+                      <ul className="list-disc pl-4 space-y-1">
+                        {curlResult.warnings.map((w: string, i: number) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <DialogFooter className="border-t border-border/20 pt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setIsCurlModalOpen(false)
+                  setCurlInput("")
+                  setCurlResult(null)
+                }}
+                className="h-9 text-xs cursor-pointer"
+                disabled={curlConverting}
+              >
+                Cancel
+              </Button>
+              {!curlResult ? (
+                <Button
+                  size="sm"
+                  onClick={async () => {
+                    if (!curlInput.trim() || curlConverting) return
+                    setCurlConverting(true)
+                    setCurlResult(null)
+                    try {
+                      const res = await fetch("/api/copilot/curl-convert", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ curlCommand: curlInput }),
+                      })
+                      if (res.ok) {
+                        const data = await res.json()
+                        setCurlResult(data.result)
+                      }
+                    } catch (e) {
+                      console.error(e)
+                    } finally {
+                      setCurlConverting(false)
+                    }
+                  }}
+                  className="h-9 text-xs bg-primary text-primary-foreground cursor-pointer gap-1.5"
+                  disabled={curlConverting || !curlInput.trim()}
+                >
+                  <Sparkles className="size-3.5" /> Convert to Step
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  onClick={importCurlStep}
+                  className="h-9 text-xs bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                >
+                  Import Step Configuration
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </div>
   )

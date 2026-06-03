@@ -14,17 +14,32 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type MemoryStore struct {
-	mu       sync.RWMutex
-	monitors map[string]domain.Monitor
-	runs     map[string]domain.MonitorRun
-	secrets  map[string]domain.SecretReference
-	alerts   map[string]domain.AlertEvent
+	mu           sync.RWMutex
+	applications map[string]domain.Application
+	monitors     map[string]domain.Monitor
+	drafts       map[string]memoryDraftRecord
+	versions     map[string][]memoryVersionRecord
+	runs         map[string]domain.MonitorRun
+	secrets      map[string]domain.SecretReference
+	alerts       map[string]domain.AlertEvent
 }
 
 func NewMemoryStore() *MemoryStore {
 	now := time.Now().UTC()
+	application := domain.Application{
+		ID:          "app-token-service",
+		Name:        "Token Service",
+		CarID:       "500000272",
+		Description: "Authentication token APIs owned by the SRE team.",
+		Owner:       "SRE",
+		Environment: "production",
+		Tags:        []string{"auth", "critical"},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
 	monitor := domain.Monitor{
 		ID:                  "mon-protected-api",
+		ApplicationID:       application.ID,
 		Name:                "Protected API Synthetic Check",
 		Description:         "Generates JWT, fetches a token, and validates protected API health.",
 		ScheduleMode:        "every-5m",
@@ -114,10 +129,30 @@ func NewMemoryStore() *MemoryStore {
 		},
 	}
 
+	monitor.PublishedVersion = 1
+	seedDraft := cloneMonitorConfig(monitor)
+
 	return &MemoryStore{
-		monitors: map[string]domain.Monitor{monitor.ID: monitor},
-		runs:     map[string]domain.MonitorRun{},
-		alerts:   map[string]domain.AlertEvent{},
+		applications: map[string]domain.Application{application.ID: application},
+		monitors:     map[string]domain.Monitor{monitor.ID: monitor},
+		drafts: map[string]memoryDraftRecord{
+			monitor.ID: {config: seedDraft, updatedAt: now},
+		},
+		versions: map[string][]memoryVersionRecord{
+			monitor.ID: {{
+				summary: domain.MonitorVersionSummary{
+					ID:            "mver-seed",
+					MonitorID:     monitor.ID,
+					VersionNumber: 1,
+					ChangeNote:    "Initial published version",
+					Source:        "initial",
+					CreatedAt:     now,
+				},
+				config: seedDraft,
+			}},
+		},
+		runs:   map[string]domain.MonitorRun{},
+		alerts: map[string]domain.AlertEvent{},
 		secrets: map[string]domain.SecretReference{
 			"sec-client-id": {
 				ID: "sec-client-id", Name: "Demo Client ID", Alias: "clientId", Provider: "encrypted-db",
@@ -135,6 +170,68 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
+func (s *MemoryStore) ListApplications() []domain.Application {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	applications := make([]domain.Application, 0, len(s.applications))
+	for _, application := range s.applications {
+		applications = append(applications, application)
+	}
+	sort.Slice(applications, func(i, j int) bool {
+		return applications[i].Name < applications[j].Name
+	})
+	return applications
+}
+
+func (s *MemoryStore) GetApplication(id string) (domain.Application, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	application, ok := s.applications[id]
+	return application, ok
+}
+
+func (s *MemoryStore) UpsertApplication(application domain.Application) domain.Application {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	if application.ID == "" {
+		application.ID = "app-" + randomID()
+		application.CreatedAt = now
+	}
+	if application.CreatedAt.IsZero() {
+		application.CreatedAt = now
+	}
+	if application.Environment == "" {
+		application.Environment = "production"
+	}
+	if application.Tags == nil {
+		application.Tags = []string{}
+	}
+	application.UpdatedAt = now
+	s.applications[application.ID] = application
+	return application
+}
+
+func (s *MemoryStore) DeleteApplication(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.applications[id]; !ok {
+		return false
+	}
+	delete(s.applications, id)
+	for monitorID, monitor := range s.monitors {
+		if monitor.ApplicationID == id {
+			monitor.ApplicationID = ""
+			s.monitors[monitorID] = monitor
+		}
+	}
+	return true
+}
+
 func (s *MemoryStore) ListMonitors() []domain.Monitor {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -144,6 +241,19 @@ func (s *MemoryStore) ListMonitors() []domain.Monitor {
 		monitors = append(monitors, monitor)
 	}
 
+	return monitors
+}
+
+func (s *MemoryStore) ListMonitorsByApplication(applicationID string) []domain.Monitor {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	monitors := make([]domain.Monitor, 0)
+	for _, monitor := range s.monitors {
+		if monitor.ApplicationID == applicationID {
+			monitors = append(monitors, monitor)
+		}
+	}
 	return monitors
 }
 
@@ -180,6 +290,12 @@ func (s *MemoryStore) UpsertMonitor(monitor domain.Monitor) domain.Monitor {
 	}
 
 	s.monitors[monitor.ID] = monitor
+	if _, ok := s.drafts[monitor.ID]; !ok {
+		s.drafts[monitor.ID] = memoryDraftRecord{config: cloneMonitorConfig(monitor), updatedAt: now}
+	}
+	if len(s.versions[monitor.ID]) == 0 {
+		s.recordVersion(monitor, "Initial published version", "", "initial")
+	}
 	return monitor
 }
 
@@ -233,6 +349,8 @@ func (s *MemoryStore) DeleteMonitor(id string) bool {
 	}
 
 	delete(s.monitors, id)
+	delete(s.drafts, id)
+	delete(s.versions, id)
 	for runID, run := range s.runs {
 		if run.MonitorID == id {
 			delete(s.runs, runID)
@@ -247,6 +365,9 @@ func (s *MemoryStore) SaveRun(run domain.MonitorRun) {
 	defer s.mu.Unlock()
 
 	s.runs[run.ID] = run
+	if run.TriggeredBy == "draft" || run.TriggeredBy == "test" {
+		return
+	}
 	monitor, ok := s.monitors[run.MonitorID]
 	if ok {
 		monitor.Status = run.Status
@@ -407,6 +528,17 @@ func (s *MemoryStore) GetRawSecretValue(alias string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func (s *MemoryStore) DeleteSecret(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.secrets[id]; !ok {
+		return false
+	}
+	delete(s.secrets, id)
+	return true
 }
 
 func randomID() string {

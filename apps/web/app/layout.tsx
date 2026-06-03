@@ -2,6 +2,8 @@ import { DM_Sans, Figtree, Geist_Mono } from "next/font/google"
 
 import "@workspace/ui/globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { SidebarProvider, SidebarInset } from "@workspace/ui/components/sidebar"
+import { AppSidebar } from "@/components/pulse/app-sidebar"
 import { cn } from "@workspace/ui/lib/utils"
 
 const dmSansHeading = DM_Sans({ subsets: ["latin"], variable: "--font-heading" })
@@ -30,7 +32,14 @@ export default function RootLayout({
       )}
     >
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            <SidebarInset className="flex flex-col min-w-0">
+              {children}
+            </SidebarInset>
+          </SidebarProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

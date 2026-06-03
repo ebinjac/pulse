@@ -67,3 +67,17 @@ func TestRunStepIDsAreUniqueAcrossRuns(t *testing.T) {
 		t.Fatalf("step run ID %q should include parent run ID %q", first.Steps[0].ID, first.ID)
 	}
 }
+
+func TestMockRunIncludesTimingOnlyForHTTPSteps(t *testing.T) {
+	store := store.NewMemoryStore()
+	executor := NewMockExecutor(store)
+	monitor, _ := store.GetMonitor("mon-protected-api")
+
+	run := executor.Test(monitor)
+	if run.Steps[0].Timing != (domain.HTTPTiming{}) {
+		t.Fatalf("pre-request timing = %+v, want empty", run.Steps[0].Timing)
+	}
+	if run.Steps[1].Timing.TotalMS <= 0 {
+		t.Fatalf("http timing total = %d, want > 0", run.Steps[1].Timing.TotalMS)
+	}
+}

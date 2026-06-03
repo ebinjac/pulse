@@ -1,0 +1,3 @@
+-- Intentionally empty.
+-- This migration captures forward-only compatibility patches for local MVP databases
+-- that may already exist without sqlc-era alert/run columns.

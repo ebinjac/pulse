@@ -81,3 +81,7 @@ ON CONFLICT (id) DO UPDATE SET
   encrypted_value = EXCLUDED.encrypted_value,
   is_active = EXCLUDED.is_active,
   updated_at = NOW();
+
+-- name: DeleteSecret :execrows
+DELETE FROM secret_references
+WHERE id = $1;

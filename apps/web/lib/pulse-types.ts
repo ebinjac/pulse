@@ -2,7 +2,7 @@ export type MonitorStatus = "success" | "failed" | "timeout" | "error" | "skippe
 
 export type StepType = "http" | "preRequest" | "delay"
 
-export type TriggeredBy = "manual" | "schedule"
+export type TriggeredBy = "manual" | "schedule" | "draft" | "test"
 
 export type ScheduleMode =
   | "manual"
@@ -130,6 +130,7 @@ export interface AlertPolicy {
 
 export interface Monitor {
   id: string
+  applicationId?: string
   name: string
   description: string
   scheduleMode: ScheduleMode
@@ -149,6 +150,54 @@ export interface Monitor {
   lastRunAt: string
   lastDurationMs: number
   successRate24h: number
+  publishedVersion?: number
+  hasUnpublishedDraft?: boolean
+}
+
+export interface MonitorVersionSummary {
+  id: string
+  monitorId: string
+  versionNumber: number
+  changeNote?: string
+  createdBy?: string
+  source: string
+  createdAt: string
+}
+
+export interface MonitorVersion extends MonitorVersionSummary {
+  config: Monitor
+}
+
+export interface MonitorDetail {
+  published: Monitor
+  draft?: Monitor
+  publishedVersion: number
+  hasUnpublishedDraft: boolean
+}
+
+export interface MonitorConfigChange {
+  path: string
+  oldValue: unknown
+  newValue: unknown
+}
+
+export interface Application {
+  id: string
+  name: string
+  carId: string
+  description?: string
+  owner?: string
+  environment?: string
+  tags?: string[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface ApplicationRunSummary {
+  applicationId: string
+  queued: number
+  skipped: number
+  monitorIds: string[]
 }
 
 export interface StepRun {
@@ -158,12 +207,28 @@ export interface StepRun {
   type: StepType
   status: MonitorStatus
   latencyMs: number
+  timing?: HttpTiming
   requestSummary: string
+  requestBody?: string
+  requestHeaders?: Record<string, string>
   responseSummary: string
+  statusCode?: number
+  responseBody?: string
+  responseHeaders?: Record<string, string>
   assertions: PulseAssertion[]
   extractors: PulseExtractor[]
+  extractedVars?: Record<string, string>
   errorMessage?: string
   consoleOutput?: string[]
+}
+
+export interface HttpTiming {
+  dnsLookupMs?: number
+  tcpConnectMs?: number
+  tlsHandshakeMs?: number
+  timeToFirstByteMs?: number
+  downloadMs?: number
+  totalMs?: number
 }
 
 export interface MonitorRun {
@@ -202,4 +267,27 @@ export interface AlertEvent {
   lastTriggeredAt: string
   lastDeliveredAt?: string
   resolvedAt?: string
+}
+
+export interface NotificationSettings {
+  smtp: {
+    addrConfigured: boolean
+    fromConfigured: boolean
+    toConfigured: boolean
+    userConfigured: boolean
+    passwordConfigured: boolean
+  }
+  slack: {
+    webhookConfigured: boolean
+  }
+}
+
+export interface NotificationSettingsInput {
+  smtpHost: string
+  smtpPort: string
+  smtpFrom: string
+  smtpTo: string
+  smtpUser: string
+  smtpPassword: string
+  slackWebhookUrl: string
 }

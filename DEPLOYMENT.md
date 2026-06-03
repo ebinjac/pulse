@@ -49,6 +49,35 @@ Slack can also use an encrypted Pulse secret with alias `slackWebhook`. If neith
 
 For local development, `apps/api/.env` is already created with localhost values.
 
+### Database Migrations
+
+Run database migrations before starting or rolling out the API service. The API image contains both runtime binaries:
+
+```text
+/app/pulse-migrate
+/app/pulse-api
+```
+
+Production deployment order:
+
+1. Build and publish the API image.
+2. Back up the database or confirm managed point-in-time recovery.
+3. Run `/app/pulse-migrate up` once against the target database.
+4. Confirm `/app/pulse-migrate version` reports the expected version with `dirty: false`.
+5. Start or roll out `/app/pulse-api`.
+
+Docker example:
+
+```bash
+docker run --rm \
+  -e DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require' \
+  -e PULSE_MIGRATIONS_PATH='file://migrations' \
+  ensemble-pulse-api \
+  /app/pulse-migrate up
+```
+
+See [MIGRATIONS.md](MIGRATIONS.md) for rollback, dirty migration repair, and sqlc regeneration guidance.
+
 ### Build And Run With Go
 
 ```bash
@@ -71,6 +100,10 @@ From the repository root:
 
 ```bash
 docker build -f apps/api/Dockerfile -t ensemble-pulse-api .
+docker run --rm \
+  -e DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require' \
+  ensemble-pulse-api \
+  /app/pulse-migrate up
 docker run --rm -p 8080:8080 \
   -e PULSE_API_ADDR=:8080 \
   -e DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require' \
@@ -90,7 +123,9 @@ Required environment variables:
 PULSE_API_BASE_URL=https://your-api-service.example.com
 ```
 
-For local development, `apps/web/.env.local` is already created with `http://localhost:8080`.
+The web app does not serve mock data when this variable is unset. Next.js `/api/*` routes return `503` with code `PULSE_API_REQUIRED` instead.
+
+For local development, copy `apps/web/.env.example` to `apps/web/.env.local` and point it at your Go API (for example `http://localhost:8080`).
 
 `PULSE_API_BASE_URL` is intentionally not prefixed with `NEXT_PUBLIC_`. It is read by Next.js Route Handlers on the server and is not exposed to browser JavaScript.
 
@@ -127,6 +162,9 @@ API service, Go, port 8080
   +--> PostgreSQL
   |
   +--> Redis
+        |
+        v
+Worker service, Go
 ```
 
 Expose the web service publicly. Keep the API private if your host supports private networking, then set `PULSE_API_BASE_URL` to the API private URL from the web service. If the API must be public for the MVP, put it behind HTTPS and restrict access at the platform/firewall level where possible.
@@ -134,19 +172,21 @@ Expose the web service publicly. Keep the API private if your host supports priv
 ## Platform Checklist
 
 1. Create PostgreSQL and Redis services.
-2. Run the API service with `DATABASE_URL`, `REDIS_URL`, and `PULSE_SECRET_ENCRYPTION_KEY`.
-3. Confirm `GET /healthz` returns healthy.
-4. Run the web service with `PULSE_API_BASE_URL` pointing to the API base URL.
-5. Open the web URL and create a secret from `/secrets`.
-6. Verify the secret test succeeds and monitor creation/manual runs work.
-7. Force a monitor failure until its threshold is reached and verify `/api/alerts` shows a persisted alert with delivery statuses.
+2. Run database migrations against PostgreSQL.
+3. Run the API service with `DATABASE_URL`, `REDIS_URL`, `PULSE_SECRET_ENCRYPTION_KEY`, `PULSE_SCHEDULER_ENABLED=true`, and `PULSE_WORKER_ENABLED=false`.
+4. Run one or more worker services from the same image with command `/app/pulse-worker` and the same `DATABASE_URL`, `REDIS_URL`, `PULSE_SECRET_ENCRYPTION_KEY`, and alert delivery variables.
+5. Confirm `GET /healthz` returns healthy.
+6. Run the web service with `PULSE_API_BASE_URL` pointing to the API base URL.
+7. Open the web URL and create a secret from `/secrets`.
+8. Verify the secret test succeeds and monitor creation/manual runs work.
+9. Force a monitor failure until its threshold is reached and verify `/api/alerts` shows a persisted alert with delivery statuses.
 
 ## Local Two-Service Development
 
 Start infrastructure and API:
 
 ```bash
-docker compose up -d postgres redis api
+docker compose up -d postgres redis migrate api worker
 ```
 
 Start the web service separately:
@@ -168,6 +208,6 @@ The web app will proxy API route calls to `http://localhost:8080` through `apps/
 - Do not commit `.env` files with real secrets.
 - Rotate `PULSE_SECRET_ENCRYPTION_KEY` only with a planned re-encryption migration.
 - Use HTTPS for both public web traffic and any public API traffic.
-- If you scale the API to multiple instances, all API instances must use the same `PULSE_SECRET_ENCRYPTION_KEY`.
-- If you scale the API to multiple instances, alert cooldown is persisted in PostgreSQL, but duplicate concurrent scheduler executions should still be avoided with a queue/worker lock before production scale-out.
+- If you scale the API to multiple instances, all API and worker instances must use the same `PULSE_SECRET_ENCRYPTION_KEY`.
+- Scheduled monitor jobs use Redis enqueue deduplication plus per-monitor worker run locks. You can scale workers horizontally; duplicate queued jobs for the same monitor are skipped while a lock is active.
 - If you scale the web service to multiple Next.js instances and later add Server Actions, set a shared `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`.

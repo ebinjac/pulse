@@ -116,6 +116,7 @@ INSERT INTO monitor_step_runs (
   assertion_results_json,
   extractor_results_json,
   console_output_json,
+  timing_json,
   latency_ms,
   error_message,
   started_at,
@@ -124,7 +125,7 @@ INSERT INTO monitor_step_runs (
 VALUES (
   $1,
   $2,
-  $16,
+  $17,
   $3,
   $4,
   $5,
@@ -137,7 +138,8 @@ VALUES (
   $12,
   $13,
   $14,
-  $15
+  $15,
+  $16
 )
 ON CONFLICT (id) DO NOTHING
 `
@@ -154,6 +156,7 @@ type InsertMonitorStepRunParams struct {
 	AssertionResultsJson []byte           `json:"assertion_results_json"`
 	ExtractorResultsJson []byte           `json:"extractor_results_json"`
 	ConsoleOutputJson    []byte           `json:"console_output_json"`
+	TimingJson           []byte           `json:"timing_json"`
 	LatencyMs            pgtype.Int4      `json:"latency_ms"`
 	ErrorMessage         pgtype.Text      `json:"error_message"`
 	StartedAt            pgtype.Timestamp `json:"started_at"`
@@ -174,6 +177,7 @@ func (q *Queries) InsertMonitorStepRun(ctx context.Context, arg InsertMonitorSte
 		arg.AssertionResultsJson,
 		arg.ExtractorResultsJson,
 		arg.ConsoleOutputJson,
+		arg.TimingJson,
 		arg.LatencyMs,
 		arg.ErrorMessage,
 		arg.StartedAt,
@@ -257,6 +261,7 @@ SELECT
   assertion_results_json,
   extractor_results_json,
   console_output_json,
+  COALESCE(timing_json, '{}'::jsonb) AS timing_json,
   COALESCE(latency_ms, 0)::int AS latency_ms,
   COALESCE(error_message, '')::text AS error_message
 FROM monitor_step_runs
@@ -275,6 +280,7 @@ type ListStepRunsRow struct {
 	AssertionResultsJson []byte `json:"assertion_results_json"`
 	ExtractorResultsJson []byte `json:"extractor_results_json"`
 	ConsoleOutputJson    []byte `json:"console_output_json"`
+	TimingJson           []byte `json:"timing_json"`
 	LatencyMs            int32  `json:"latency_ms"`
 	ErrorMessage         string `json:"error_message"`
 }
@@ -299,6 +305,7 @@ func (q *Queries) ListStepRuns(ctx context.Context, monitorRunID pgtype.Text) ([
 			&i.AssertionResultsJson,
 			&i.ExtractorResultsJson,
 			&i.ConsoleOutputJson,
+			&i.TimingJson,
 			&i.LatencyMs,
 			&i.ErrorMessage,
 		); err != nil {

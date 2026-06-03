@@ -23,6 +23,10 @@ func (e *MockExecutor) Run(monitor domain.Monitor) domain.MonitorRun {
 	return e.run(monitor, true, "manual")
 }
 
+func (e *MockExecutor) RunDraft(monitor domain.Monitor) domain.MonitorRun {
+	return e.run(monitor, true, "draft")
+}
+
 func (e *MockExecutor) RunScheduled(monitor domain.Monitor) domain.MonitorRun {
 	return e.run(monitor, true, "schedule")
 }
@@ -58,6 +62,7 @@ func (e *MockExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 			Type:            step.Type,
 			Status:          status,
 			LatencyMS:       latency,
+			Timing:          mockTiming(step.Type, latency),
 			RequestSummary:  requestSummary(monitor, step),
 			ResponseSummary: responseSummary(step, status, monitor.ResponseBodyLimitKB),
 			Assertions:      maskAssertions(step.Assertions),
@@ -96,6 +101,37 @@ func (e *MockExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 		e.store.SaveRun(run)
 	}
 	return run
+}
+
+func mockTiming(stepType string, latency int) domain.HTTPTiming {
+	if stepType != "http" {
+		return domain.HTTPTiming{}
+	}
+
+	dns := maxInt(latency/30, 1)
+	tcp := maxInt(latency/12, 1)
+	tls := maxInt(latency/10, 1)
+	download := maxInt(latency/20, 1)
+	waiting := latency - dns - tcp - tls - download
+	if waiting < 0 {
+		waiting = 0
+	}
+
+	return domain.HTTPTiming{
+		DNSLookupMS:       dns,
+		TCPConnectMS:      tcp,
+		TLSHandshakeMS:    tls,
+		TimeToFirstByteMS: waiting,
+		DownloadMS:        download,
+		TotalMS:           latency,
+	}
+}
+
+func maxInt(value int, minimum int) int {
+	if value < minimum {
+		return minimum
+	}
+	return value
 }
 
 func stepHasAssertionFailure(step domain.MonitorStep) bool {

@@ -132,12 +132,7 @@ func (s *Service) deliver(monitor domain.Monitor, run domain.MonitorRun, channel
 }
 
 func (s *Service) deliverSlack(monitor domain.Monitor, run domain.MonitorRun, now time.Time) domain.AlertDelivery {
-	webhookURL := os.Getenv("PULSE_ALERT_SLACK_WEBHOOK_URL")
-	if webhookURL == "" {
-		if value, ok := s.store.GetRawSecretValue("slackWebhook"); ok {
-			webhookURL = value
-		}
-	}
+	webhookURL := s.settingOrEnv("slackWebhook", "PULSE_ALERT_SLACK_WEBHOOK_URL")
 	if webhookURL == "" || strings.Contains(webhookURL, "example") {
 		return domain.AlertDelivery{Channel: "slack", Status: "skipped", Detail: "Slack webhook not configured", SentAt: now}
 	}
@@ -166,9 +161,9 @@ func (s *Service) deliverSlack(monitor domain.Monitor, run domain.MonitorRun, no
 }
 
 func (s *Service) deliverEmail(monitor domain.Monitor, run domain.MonitorRun, now time.Time) domain.AlertDelivery {
-	addr := os.Getenv("PULSE_ALERT_SMTP_ADDR")
-	from := os.Getenv("PULSE_ALERT_EMAIL_FROM")
-	to := splitCSV(os.Getenv("PULSE_ALERT_EMAIL_TO"))
+	addr := s.settingOrEnv("alertSmtpAddr", "PULSE_ALERT_SMTP_ADDR")
+	from := s.settingOrEnv("alertEmailFrom", "PULSE_ALERT_EMAIL_FROM")
+	to := splitCSV(s.settingOrEnv("alertEmailTo", "PULSE_ALERT_EMAIL_TO"))
 	if addr == "" || from == "" || len(to) == 0 {
 		return domain.AlertDelivery{Channel: "email", Status: "skipped", Detail: "SMTP alert email not configured", SentAt: now}
 	}
@@ -178,8 +173,8 @@ func (s *Service) deliverEmail(monitor domain.Monitor, run domain.MonitorRun, no
 		host = strings.Split(addr, ":")[0]
 	}
 	var auth smtp.Auth
-	if user := os.Getenv("PULSE_ALERT_SMTP_USER"); user != "" {
-		auth = smtp.PlainAuth("", user, os.Getenv("PULSE_ALERT_SMTP_PASSWORD"), host)
+	if user := s.settingOrEnv("alertSmtpUser", "PULSE_ALERT_SMTP_USER"); user != "" {
+		auth = smtp.PlainAuth("", user, s.settingOrEnv("alertSmtpPassword", "PULSE_ALERT_SMTP_PASSWORD"), host)
 	}
 
 	subject := fmt.Sprintf("Pulse alert: %s is %s", monitor.Name, run.Status)
@@ -203,6 +198,14 @@ func (s *Service) deliverEmail(monitor domain.Monitor, run domain.MonitorRun, no
 	}
 
 	return domain.AlertDelivery{Channel: "email", Status: "sent", Detail: "SMTP accepted alert", SentAt: now}
+}
+
+func (s *Service) settingOrEnv(alias string, envKey string) string {
+	if value, ok := s.store.GetRawSecretValue(alias); ok && strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+
+	return strings.TrimSpace(os.Getenv(envKey))
 }
 
 func channelsForPolicy(policy domain.AlertPolicy) []string {

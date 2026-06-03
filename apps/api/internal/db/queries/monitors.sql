@@ -1,6 +1,7 @@
 -- name: ListMonitors :many
 SELECT
   id,
+  COALESCE(application_id, '')::text AS application_id,
   name,
   COALESCE(description, '')::text AS description,
   COALESCE(schedule_mode, '')::text AS schedule_mode,
@@ -19,9 +20,41 @@ SELECT
   last_run_at,
   COALESCE(last_duration_ms, 0)::int AS last_duration_ms,
   COALESCE(success_rate_24h, 0)::float8 AS success_rate_24h,
+  COALESCE(published_version, 1)::int AS published_version,
+  COALESCE(has_unpublished_draft, FALSE)::bool AS has_unpublished_draft,
   created_at,
   updated_at
 FROM monitors
+ORDER BY created_at DESC;
+
+-- name: ListMonitorsByApplication :many
+SELECT
+  id,
+  COALESCE(application_id, '')::text AS application_id,
+  name,
+  COALESCE(description, '')::text AS description,
+  COALESCE(schedule_mode, '')::text AS schedule_mode,
+  COALESCE(schedule_label, '')::text AS schedule_label,
+  COALESCE(schedule_cron, '')::text AS schedule_cron,
+  COALESCE(timezone, 'UTC')::text AS timezone,
+  COALESCE(timeout_ms, 30000)::int AS timeout_ms,
+  COALESCE(retry_count, 0)::int AS retry_count,
+  COALESCE(failure_threshold, 3)::int AS failure_threshold,
+  COALESCE(response_body_limit_kb, 32)::int AS response_body_limit_kb,
+  COALESCE(is_active, TRUE)::bool AS is_active,
+  COALESCE(alert_enabled, FALSE)::bool AS alert_enabled,
+  variables_json,
+  alert_policy_json,
+  COALESCE(status, '')::text AS status,
+  last_run_at,
+  COALESCE(last_duration_ms, 0)::int AS last_duration_ms,
+  COALESCE(success_rate_24h, 0)::float8 AS success_rate_24h,
+  COALESCE(published_version, 1)::int AS published_version,
+  COALESCE(has_unpublished_draft, FALSE)::bool AS has_unpublished_draft,
+  created_at,
+  updated_at
+FROM monitors
+WHERE application_id = $1
 ORDER BY created_at DESC;
 
 -- name: CountMonitors :one
@@ -31,6 +64,7 @@ FROM monitors;
 -- name: GetMonitor :one
 SELECT
   id,
+  COALESCE(application_id, '')::text AS application_id,
   name,
   COALESCE(description, '')::text AS description,
   COALESCE(schedule_mode, '')::text AS schedule_mode,
@@ -49,6 +83,8 @@ SELECT
   last_run_at,
   COALESCE(last_duration_ms, 0)::int AS last_duration_ms,
   COALESCE(success_rate_24h, 0)::float8 AS success_rate_24h,
+  COALESCE(published_version, 1)::int AS published_version,
+  COALESCE(has_unpublished_draft, FALSE)::bool AS has_unpublished_draft,
   created_at,
   updated_at
 FROM monitors
@@ -57,6 +93,7 @@ WHERE id = $1;
 -- name: UpsertMonitor :exec
 INSERT INTO monitors (
   id,
+  application_id,
   name,
   description,
   schedule_mode,
@@ -79,11 +116,11 @@ INSERT INTO monitors (
   updated_at
 )
 VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-  sqlc.narg('last_run_at'),
-  $17, $18, $19, $20
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+  $18, $19, $20, $21, $22
 )
 ON CONFLICT (id) DO UPDATE SET
+  application_id = EXCLUDED.application_id,
   name = EXCLUDED.name,
   description = EXCLUDED.description,
   schedule_mode = EXCLUDED.schedule_mode,

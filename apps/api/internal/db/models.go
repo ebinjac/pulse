@@ -27,8 +27,21 @@ type Alert struct {
 	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
 }
 
+type Application struct {
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	CarID       string           `json:"car_id"`
+	Description pgtype.Text      `json:"description"`
+	Owner       pgtype.Text      `json:"owner"`
+	Environment pgtype.Text      `json:"environment"`
+	TagsJson    []byte           `json:"tags_json"`
+	CreatedAt   pgtype.Timestamp `json:"created_at"`
+	UpdatedAt   pgtype.Timestamp `json:"updated_at"`
+}
+
 type Monitor struct {
 	ID                  string           `json:"id"`
+	ApplicationID       pgtype.Text      `json:"application_id"`
 	Name                string           `json:"name"`
 	Description         pgtype.Text      `json:"description"`
 	ScheduleMode        pgtype.Text      `json:"schedule_mode"`
@@ -50,6 +63,14 @@ type Monitor struct {
 	CreatedBy           pgtype.Text      `json:"created_by"`
 	CreatedAt           pgtype.Timestamp `json:"created_at"`
 	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
+	PublishedVersion    int32            `json:"published_version"`
+	HasUnpublishedDraft bool             `json:"has_unpublished_draft"`
+}
+
+type MonitorDraft struct {
+	MonitorID  string           `json:"monitor_id"`
+	ConfigJson []byte           `json:"config_json"`
+	UpdatedAt  pgtype.Timestamp `json:"updated_at"`
 }
 
 type MonitorRun struct {
@@ -104,11 +125,23 @@ type MonitorStepRun struct {
 	AssertionResultsJson []byte           `json:"assertion_results_json"`
 	ExtractorResultsJson []byte           `json:"extractor_results_json"`
 	ConsoleOutputJson    []byte           `json:"console_output_json"`
+	TimingJson           []byte           `json:"timing_json"`
 	LatencyMs            pgtype.Int4      `json:"latency_ms"`
 	ErrorMessage         pgtype.Text      `json:"error_message"`
 	StartedAt            pgtype.Timestamp `json:"started_at"`
 	EndedAt              pgtype.Timestamp `json:"ended_at"`
 	CreatedAt            pgtype.Timestamp `json:"created_at"`
+}
+
+type MonitorVersion struct {
+	ID            string           `json:"id"`
+	MonitorID     string           `json:"monitor_id"`
+	VersionNumber int32            `json:"version_number"`
+	ConfigJson    []byte           `json:"config_json"`
+	ChangeNote    pgtype.Text      `json:"change_note"`
+	CreatedBy     pgtype.Text      `json:"created_by"`
+	Source        string           `json:"source"`
+	CreatedAt     pgtype.Timestamp `json:"created_at"`
 }
 
 type SecretReference struct {

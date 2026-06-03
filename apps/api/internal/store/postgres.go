@@ -32,7 +32,7 @@ func NewPostgresStore(ctx context.Context, databaseURL string, codec *secretcryp
 	}
 
 	store := &PostgresStore{pool: pool, queries: pulsedb.New(pool), codec: codec}
-	if err := store.ensureSchema(ctx); err != nil {
+	if err := store.backfillLegacySecrets(ctx); err != nil {
 		return nil, err
 	}
 	if err := store.seedDefaults(ctx); err != nil {
@@ -40,39 +40,6 @@ func NewPostgresStore(ctx context.Context, databaseURL string, codec *secretcryp
 	}
 
 	return store, nil
-}
-
-func (s *PostgresStore) ensureSchema(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `
-		ALTER TABLE monitor_step_runs
-		ADD COLUMN IF NOT EXISTS console_output_json JSONB DEFAULT '[]'::jsonb
-	`)
-	if err != nil {
-		return err
-	}
-	_, err = s.pool.Exec(ctx, `
-		ALTER TABLE alerts
-		ADD COLUMN IF NOT EXISTS run_id TEXT REFERENCES monitor_runs(id) ON DELETE SET NULL,
-		ADD COLUMN IF NOT EXISTS channels_json JSONB DEFAULT '[]'::jsonb,
-		ADD COLUMN IF NOT EXISTS deliveries_json JSONB DEFAULT '[]'::jsonb,
-		ADD COLUMN IF NOT EXISTS last_delivered_at TIMESTAMP
-	`)
-	if err != nil {
-		return err
-	}
-	_, err = s.pool.Exec(ctx, `
-		ALTER TABLE monitor_step_runs
-		DROP CONSTRAINT IF EXISTS monitor_step_runs_step_id_fkey;
-
-		ALTER TABLE monitor_step_runs
-		ADD CONSTRAINT monitor_step_runs_step_id_fkey
-		FOREIGN KEY (step_id) REFERENCES monitor_steps(id) ON DELETE SET NULL
-	`)
-	if err != nil {
-		return err
-	}
-
-	return s.backfillLegacySecrets(ctx)
 }
 
 func (s *PostgresStore) backfillLegacySecrets(ctx context.Context) error {
@@ -107,6 +74,70 @@ func (s *PostgresStore) backfillLegacySecrets(ctx context.Context) error {
 	return nil
 }
 
+func (s *PostgresStore) ListApplications() []domain.Application {
+	rows, err := s.queries.ListApplications(context.Background())
+	if err != nil {
+		log.Printf("list applications: %v", err)
+		return nil
+	}
+
+	applications := make([]domain.Application, 0, len(rows))
+	for _, row := range rows {
+		applications = append(applications, applicationFromListRow(row))
+	}
+	return applications
+}
+
+func (s *PostgresStore) GetApplication(id string) (domain.Application, bool) {
+	row, err := s.queries.GetApplication(context.Background(), id)
+	if err != nil {
+		return domain.Application{}, false
+	}
+	return applicationFromGetRow(row), true
+}
+
+func (s *PostgresStore) UpsertApplication(application domain.Application) domain.Application {
+	now := time.Now().UTC()
+	if application.ID == "" {
+		application.ID = "app-" + randomID()
+	}
+	if application.CreatedAt.IsZero() {
+		application.CreatedAt = now
+	}
+	if application.Environment == "" {
+		application.Environment = "production"
+	}
+	if application.Tags == nil {
+		application.Tags = []string{}
+	}
+	application.UpdatedAt = now
+
+	if err := s.queries.UpsertApplication(context.Background(), pulsedb.UpsertApplicationParams{
+		ID:          application.ID,
+		Name:        application.Name,
+		CarID:       application.CarID,
+		Description: pgText(application.Description),
+		Owner:       pgText(application.Owner),
+		Environment: pgText(application.Environment),
+		TagsJson:    mustJSON(application.Tags),
+		CreatedAt:   pgTimestamp(application.CreatedAt),
+		UpdatedAt:   pgTimestamp(application.UpdatedAt),
+	}); err != nil {
+		log.Printf("upsert application: %v", err)
+	}
+
+	return application
+}
+
+func (s *PostgresStore) DeleteApplication(id string) bool {
+	count, err := s.queries.DeleteApplication(context.Background(), id)
+	if err != nil {
+		log.Printf("delete application: %v", err)
+		return false
+	}
+	return count > 0
+}
+
 func (s *PostgresStore) ListMonitors() []domain.Monitor {
 	rows, err := s.queries.ListMonitors(context.Background())
 	if err != nil {
@@ -117,6 +148,28 @@ func (s *PostgresStore) ListMonitors() []domain.Monitor {
 	monitors := make([]domain.Monitor, 0, len(rows))
 	for _, row := range rows {
 		monitor, err := monitorFromListRow(row)
+		if err != nil {
+			log.Printf("scan monitor: %v", err)
+			continue
+		}
+		monitor.Steps = s.listSteps(monitor.ID)
+		monitor.SecretAliases = s.listSecretAliases(monitor.ID)
+		monitors = append(monitors, monitor)
+	}
+
+	return monitors
+}
+
+func (s *PostgresStore) ListMonitorsByApplication(applicationID string) []domain.Monitor {
+	rows, err := s.queries.ListMonitorsByApplication(context.Background(), pgText(applicationID))
+	if err != nil {
+		log.Printf("list monitors by application: %v", err)
+		return nil
+	}
+
+	monitors := make([]domain.Monitor, 0, len(rows))
+	for _, row := range rows {
+		monitor, err := monitorFromListByApplicationRow(row)
 		if err != nil {
 			log.Printf("scan monitor: %v", err)
 			continue
@@ -176,6 +229,7 @@ func (s *PostgresStore) UpsertMonitor(monitor domain.Monitor) domain.Monitor {
 
 	if err := qtx.UpsertMonitor(ctx, pulsedb.UpsertMonitorParams{
 		ID:                  monitor.ID,
+		ApplicationID:       pgNullableText(monitor.ApplicationID),
 		Name:                monitor.Name,
 		Description:         pgText(monitor.Description),
 		ScheduleMode:        pgText(monitor.ScheduleMode),
@@ -255,6 +309,8 @@ func (s *PostgresStore) UpsertMonitor(monitor domain.Monitor) domain.Monitor {
 		log.Printf("commit upsert monitor: %v", err)
 	}
 
+	s.ensureInitialVersionSnapshot(monitor)
+
 	return monitor
 }
 
@@ -315,6 +371,7 @@ func (s *PostgresStore) SaveRun(run domain.MonitorRun) {
 			AssertionResultsJson: mustJSON(step.Assertions),
 			ExtractorResultsJson: mustJSON(step.Extractors),
 			ConsoleOutputJson:    mustJSON(step.ConsoleOutput),
+			TimingJson:           mustJSON(step.Timing),
 			LatencyMs:            pgInt4(step.LatencyMS),
 			ErrorMessage:         pgText(step.ErrorMessage),
 			StartedAt:            pgTimestamp(run.StartedAt),
@@ -326,14 +383,16 @@ func (s *PostgresStore) SaveRun(run domain.MonitorRun) {
 		}
 	}
 
-	if err := qtx.UpdateMonitorAfterRun(ctx, pulsedb.UpdateMonitorAfterRunParams{
-		ID:             run.MonitorID,
-		Status:         pgText(string(run.Status)),
-		LastRunAt:      pgTimestamp(run.EndedAt),
-		LastDurationMs: pgInt4(run.DurationMS),
-	}); err != nil {
-		log.Printf("update monitor after run: %v", err)
-		return
+	if run.TriggeredBy != "draft" && run.TriggeredBy != "test" {
+		if err := qtx.UpdateMonitorAfterRun(ctx, pulsedb.UpdateMonitorAfterRunParams{
+			ID:             run.MonitorID,
+			Status:         pgText(string(run.Status)),
+			LastRunAt:      pgTimestamp(run.EndedAt),
+			LastDurationMs: pgInt4(run.DurationMS),
+		}); err != nil {
+			log.Printf("update monitor after run: %v", err)
+			return
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -552,6 +611,7 @@ func (s *PostgresStore) listStepRuns(runID string) []domain.StepRun {
 		_ = json.Unmarshal(row.AssertionResultsJson, &step.Assertions)
 		_ = json.Unmarshal(row.ExtractorResultsJson, &step.Extractors)
 		_ = json.Unmarshal(row.ConsoleOutputJson, &step.ConsoleOutput)
+		_ = json.Unmarshal(row.TimingJson, &step.Timing)
 		steps = append(steps, step)
 	}
 
@@ -559,6 +619,13 @@ func (s *PostgresStore) listStepRuns(runID string) []domain.StepRun {
 }
 
 func (s *PostgresStore) seedDefaults(ctx context.Context) error {
+	memory := NewMemoryStore()
+	if len(s.ListApplications()) == 0 {
+		for _, application := range memory.ListApplications() {
+			s.UpsertApplication(application)
+		}
+	}
+
 	count, err := s.queries.CountMonitors(ctx)
 	if err != nil {
 		return err
@@ -567,7 +634,6 @@ func (s *PostgresStore) seedDefaults(ctx context.Context) error {
 		return nil
 	}
 
-	memory := NewMemoryStore()
 	for _, secret := range memory.ListSecrets() {
 		if _, err := s.UpsertSecret(secret); err != nil {
 			return err
@@ -633,6 +699,15 @@ func (s *PostgresStore) encryptedValueForSecret(secret domain.SecretReference) (
 	return "", pgx.ErrNoRows
 }
 
+func (s *PostgresStore) DeleteSecret(id string) bool {
+	count, err := s.queries.DeleteSecret(context.Background(), id)
+	if err != nil {
+		log.Printf("delete secret: %v", err)
+		return false
+	}
+	return count > 0
+}
+
 func storeDefaults(monitor domain.Monitor) domain.Monitor {
 	monitor = NormalizeMonitor(monitor)
 	if monitor.AlertPolicy.Enabled {
@@ -660,9 +735,46 @@ func summaryFromJSON(value []byte) string {
 	return payload["summary"]
 }
 
+func applicationFromListRow(row pulsedb.ListApplicationsRow) domain.Application {
+	application := domain.Application{
+		ID:          row.ID,
+		Name:        row.Name,
+		CarID:       row.CarID,
+		Description: row.Description,
+		Owner:       row.Owner,
+		Environment: row.Environment,
+		CreatedAt:   pgTime(row.CreatedAt),
+		UpdatedAt:   pgTime(row.UpdatedAt),
+	}
+	_ = json.Unmarshal(row.TagsJson, &application.Tags)
+	if application.Tags == nil {
+		application.Tags = []string{}
+	}
+	return application
+}
+
+func applicationFromGetRow(row pulsedb.GetApplicationRow) domain.Application {
+	application := domain.Application{
+		ID:          row.ID,
+		Name:        row.Name,
+		CarID:       row.CarID,
+		Description: row.Description,
+		Owner:       row.Owner,
+		Environment: row.Environment,
+		CreatedAt:   pgTime(row.CreatedAt),
+		UpdatedAt:   pgTime(row.UpdatedAt),
+	}
+	_ = json.Unmarshal(row.TagsJson, &application.Tags)
+	if application.Tags == nil {
+		application.Tags = []string{}
+	}
+	return application
+}
+
 func monitorFromListRow(row pulsedb.ListMonitorsRow) (domain.Monitor, error) {
 	monitor := domain.Monitor{
 		ID:                  row.ID,
+		ApplicationID:       row.ApplicationID,
 		Name:                row.Name,
 		Description:         row.Description,
 		ScheduleMode:        row.ScheduleMode,
@@ -680,6 +792,8 @@ func monitorFromListRow(row pulsedb.ListMonitorsRow) (domain.Monitor, error) {
 		LastRunAt:           pgTimePtr(row.LastRunAt),
 		LastDurationMS:      int(row.LastDurationMs),
 		SuccessRate24H:      row.SuccessRate24h,
+		PublishedVersion:    int(row.PublishedVersion),
+		HasUnpublishedDraft: row.HasUnpublishedDraft,
 		CreatedAt:           pgTime(row.CreatedAt),
 		UpdatedAt:           pgTime(row.UpdatedAt),
 	}
@@ -693,9 +807,14 @@ func monitorFromListRow(row pulsedb.ListMonitorsRow) (domain.Monitor, error) {
 	return storeDefaults(monitor), nil
 }
 
+func monitorFromListByApplicationRow(row pulsedb.ListMonitorsByApplicationRow) (domain.Monitor, error) {
+	return monitorFromListRow(pulsedb.ListMonitorsRow(row))
+}
+
 func monitorFromGetRow(row pulsedb.GetMonitorRow) (domain.Monitor, error) {
 	monitor := domain.Monitor{
 		ID:                  row.ID,
+		ApplicationID:       row.ApplicationID,
 		Name:                row.Name,
 		Description:         row.Description,
 		ScheduleMode:        row.ScheduleMode,
@@ -713,6 +832,8 @@ func monitorFromGetRow(row pulsedb.GetMonitorRow) (domain.Monitor, error) {
 		LastRunAt:           pgTimePtr(row.LastRunAt),
 		LastDurationMS:      int(row.LastDurationMs),
 		SuccessRate24H:      row.SuccessRate24h,
+		PublishedVersion:    int(row.PublishedVersion),
+		HasUnpublishedDraft: row.HasUnpublishedDraft,
 		CreatedAt:           pgTime(row.CreatedAt),
 		UpdatedAt:           pgTime(row.UpdatedAt),
 	}

@@ -12,9 +12,11 @@ import (
 	"github.com/ensemble-pulse/pulse/apps/api/internal/alerting"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/executor"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/httpapi"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/jobqueue"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/scheduler"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/secretcrypto"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/store"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/worker"
 )
 
 func main() {
@@ -25,12 +27,19 @@ func main() {
 	activeStore := newStore(ctx)
 	alertService := alerting.NewService(activeStore)
 	executor := executor.NewRealExecutor(activeStore, alertService)
+	runQueue := newRunQueue(ctx)
+	defer runQueue.Close()
 
-	// Initialize and start background monitor scheduler
-	bgScheduler := scheduler.NewScheduler(activeStore, executor)
-	bgScheduler.Start(ctx)
+	if envBool("PULSE_SCHEDULER_ENABLED", true) {
+		bgScheduler := scheduler.NewScheduler(activeStore, runQueue)
+		bgScheduler.Start(ctx)
+	}
+	if envBool("PULSE_WORKER_ENABLED", os.Getenv("REDIS_URL") == "") {
+		bgWorker := worker.NewWorker(activeStore, executor, runQueue)
+		bgWorker.Start(ctx)
+	}
 
-	server := httpapi.NewServer(activeStore, executor)
+	server := httpapi.NewServerWithQueue(activeStore, executor, runQueue)
 
 	httpServer := &http.Server{
 		Addr:              addr,
@@ -72,12 +81,30 @@ func newStore(ctx context.Context) store.Store {
 
 	postgresStore, err := store.NewPostgresStore(ctx, databaseURL, secretCodec)
 	if err != nil {
-		log.Printf("postgres unavailable (%v); using in-memory store", err)
-		return store.NewMemoryStore()
+		log.Fatalf("postgres store unavailable: %v; run migrations before starting the API", err)
 	}
 
 	log.Print("using PostgreSQL store")
 	return postgresStore
+}
+
+func newRunQueue(ctx context.Context) jobqueue.Queue {
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		log.Print("REDIS_URL not set; using in-memory monitor run queue")
+		return jobqueue.NewMemoryQueue(256)
+	}
+
+	queue, err := jobqueue.NewRedisQueue(redisURL)
+	if err != nil {
+		log.Fatalf("invalid REDIS_URL: %v", err)
+	}
+	if err := queue.Ping(ctx); err != nil {
+		log.Fatalf("redis queue unavailable: %v", err)
+	}
+
+	log.Print("using Redis monitor run queue")
+	return queue
 }
 
 func newSecretCodec() *secretcrypto.Codec {
@@ -102,4 +129,21 @@ func env(key string, fallback string) string {
 	}
 
 	return value
+}
+
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	switch value {
+	case "1", "true", "TRUE", "yes", "YES", "on", "ON":
+		return true
+	case "0", "false", "FALSE", "no", "NO", "off", "OFF":
+		return false
+	default:
+		log.Printf("invalid boolean value for %s=%q; using %v", key, value, fallback)
+		return fallback
+	}
 }

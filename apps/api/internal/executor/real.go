@@ -5,12 +5,14 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"strconv"
 	"strings"
@@ -25,6 +27,7 @@ import (
 
 type Executor interface {
 	Run(monitor domain.Monitor) domain.MonitorRun
+	RunDraft(monitor domain.Monitor) domain.MonitorRun
 	RunScheduled(monitor domain.Monitor) domain.MonitorRun
 	Test(monitor domain.Monitor) domain.MonitorRun
 }
@@ -44,6 +47,10 @@ func NewRealExecutor(store store.Store, alerts AlertProcessor) *RealExecutor {
 
 func (e *RealExecutor) Run(monitor domain.Monitor) domain.MonitorRun {
 	return e.run(monitor, true, "manual")
+}
+
+func (e *RealExecutor) RunDraft(monitor domain.Monitor) domain.MonitorRun {
+	return e.run(monitor, true, "draft")
 }
 
 func (e *RealExecutor) RunScheduled(monitor domain.Monitor) domain.MonitorRun {
@@ -93,8 +100,15 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 		errorMessage := ""
 		latency := 0
 		var requestSummary string
+		var requestBody string
+		var requestHeaders map[string]string
 		var responseSummary string
+		var responseBody string
+		var responseHeaders map[string]string
+		var statusCode int
 		var consoleOutput []string
+		var timing domain.HTTPTiming
+		extractedVars := make(map[string]string)
 
 		stepOutputs := make(map[string]string)
 		assertions := make([]domain.Assertion, len(step.Assertions))
@@ -110,6 +124,11 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 			latency = int(time.Since(stepStart).Milliseconds())
 			requestSummary = "Executed pre-request actions."
 			responseSummary = "Outputs exported to variables pool."
+			for _, action := range step.Actions {
+				if val, ok := variablesPool[action.Output]; ok {
+					extractedVars[action.Output] = val
+				}
+			}
 		} else if step.Type == "http" {
 			scriptHeaders := make(map[string]string)
 			scriptBodyOverride := ""
@@ -236,10 +255,15 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 							Timeout: timeout,
 						}
 
+						timingRecorder := newHTTPTimingRecorder()
+						timingRecorder.markRequestStart()
+						req = req.WithContext(httptrace.WithClientTrace(req.Context(), timingRecorder.trace()))
+
 						resp, err := client.Do(req)
-						latency = int(time.Since(stepStart).Milliseconds())
 
 						if err != nil {
+							latency = int(time.Since(stepStart).Milliseconds())
+							timing = timingRecorder.breakdown(latency)
 							status = domain.StatusFailed
 							errorMessage = err.Error()
 						} else {
@@ -251,6 +275,9 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 							}
 							limitedReader := io.LimitReader(resp.Body, int64(limitKB*1024))
 							respBytes, _ := io.ReadAll(limitedReader)
+							timingRecorder.markBodyReadDone()
+							latency = int(time.Since(stepStart).Milliseconds())
+							timing = timingRecorder.breakdown(latency)
 							respStr := string(respBytes)
 
 							// 1. Evaluate Assertions
@@ -272,12 +299,30 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 							// 2. Evaluate Extractors
 							for _, extractor := range step.Extractors {
 								extractedVal := getExtractedValue(extractor, resp, respStr)
+								if !extractor.Sensitive {
+									extractedVars[extractor.Name] = extractedVal
+								} else {
+									extractedVars[extractor.Name] = "********"
+								}
 								variablesPool[extractor.Name] = extractedVal
 								stepOutputs[extractor.Name] = extractedVal
 							}
 
 							requestSummary = fmt.Sprintf("%s %s", method, resolvedURL)
 							responseSummary = fmt.Sprintf("%d %s, %d bytes read", resp.StatusCode, resp.Header.Get("Content-Type"), len(respBytes))
+							statusCode = resp.StatusCode
+							responseBody = respStr
+							// Collect all response headers
+							responseHeaders = make(map[string]string)
+							for hk, hvs := range resp.Header {
+								responseHeaders[hk] = strings.Join(hvs, ", ")
+							}
+							// Collect request headers that were sent
+							requestHeaders = make(map[string]string)
+							for hk, hvs := range req.Header {
+								requestHeaders[hk] = strings.Join(hvs, ", ")
+							}
+							requestBody = string(reqBody)
 						}
 					}
 				}
@@ -294,10 +339,17 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 			Type:            step.Type,
 			Status:          status,
 			LatencyMS:       latency,
+			Timing:          timing,
 			RequestSummary:  requestSummary,
+			RequestBody:     requestBody,
+			RequestHeaders:  requestHeaders,
 			ResponseSummary: responseSummary,
+			StatusCode:      statusCode,
+			ResponseBody:    responseBody,
+			ResponseHeaders: responseHeaders,
 			Assertions:      maskAssertionsReal(assertions),
 			Extractors:      step.Extractors,
+			ExtractedVars:   extractedVars,
 			ErrorMessage:    errorMessage,
 			ConsoleOutput:   consoleOutput,
 		}
@@ -335,7 +387,7 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 
 	if saveToStore {
 		e.store.SaveRun(run)
-		if e.alerts != nil {
+		if e.alerts != nil && triggeredBy != "draft" && triggeredBy != "test" {
 			e.alerts.ProcessRun(monitor, run)
 		}
 	}
@@ -390,6 +442,96 @@ func executePreRequestAction(actionType string, configPreview string, resolver v
 	default:
 		return configPreview
 	}
+}
+
+type httpTimingRecorder struct {
+	requestStart         time.Time
+	dnsStart             time.Time
+	dnsDone              time.Time
+	connectStart         time.Time
+	connectDone          time.Time
+	tlsHandshakeStart    time.Time
+	tlsHandshakeDone     time.Time
+	wroteRequest         time.Time
+	gotFirstResponseByte time.Time
+	bodyReadDone         time.Time
+}
+
+func newHTTPTimingRecorder() *httpTimingRecorder {
+	return &httpTimingRecorder{}
+}
+
+func (r *httpTimingRecorder) markRequestStart() {
+	r.requestStart = time.Now().UTC()
+}
+
+func (r *httpTimingRecorder) markBodyReadDone() {
+	r.bodyReadDone = time.Now().UTC()
+}
+
+func (r *httpTimingRecorder) trace() *httptrace.ClientTrace {
+	return &httptrace.ClientTrace{
+		DNSStart: func(_ httptrace.DNSStartInfo) {
+			r.dnsStart = time.Now().UTC()
+		},
+		DNSDone: func(_ httptrace.DNSDoneInfo) {
+			r.dnsDone = time.Now().UTC()
+		},
+		ConnectStart: func(_, _ string) {
+			r.connectStart = time.Now().UTC()
+		},
+		ConnectDone: func(_, _ string, _ error) {
+			r.connectDone = time.Now().UTC()
+		},
+		TLSHandshakeStart: func() {
+			r.tlsHandshakeStart = time.Now().UTC()
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, _ error) {
+			r.tlsHandshakeDone = time.Now().UTC()
+		},
+		WroteRequest: func(_ httptrace.WroteRequestInfo) {
+			r.wroteRequest = time.Now().UTC()
+		},
+		GotFirstResponseByte: func() {
+			r.gotFirstResponseByte = time.Now().UTC()
+		},
+	}
+}
+
+func (r *httpTimingRecorder) breakdown(totalMS int) domain.HTTPTiming {
+	timing := domain.HTTPTiming{
+		DNSLookupMS:    durationMS(r.dnsStart, r.dnsDone),
+		TCPConnectMS:   durationMS(r.connectStart, r.connectDone),
+		TLSHandshakeMS: durationMS(r.tlsHandshakeStart, r.tlsHandshakeDone),
+		TotalMS:        totalMS,
+	}
+
+	if !r.gotFirstResponseByte.IsZero() {
+		waitStart := r.wroteRequest
+		if waitStart.IsZero() {
+			waitStart = r.requestStart
+		}
+		timing.TimeToFirstByteMS = durationMS(waitStart, r.gotFirstResponseByte)
+	}
+	if !r.bodyReadDone.IsZero() && !r.gotFirstResponseByte.IsZero() {
+		timing.DownloadMS = durationMS(r.gotFirstResponseByte, r.bodyReadDone)
+	}
+	if timing.TotalMS <= 0 && !r.requestStart.IsZero() {
+		end := r.bodyReadDone
+		if end.IsZero() {
+			end = time.Now().UTC()
+		}
+		timing.TotalMS = durationMS(r.requestStart, end)
+	}
+
+	return timing
+}
+
+func durationMS(start time.Time, end time.Time) int {
+	if start.IsZero() || end.IsZero() || end.Before(start) {
+		return 0
+	}
+	return int(end.Sub(start).Milliseconds())
 }
 
 func getActualAssertionValue(assertion domain.Assertion, resp *http.Response, body string, latency int) string {

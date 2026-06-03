@@ -11,6 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteSecret = `-- name: DeleteSecret :execrows
+DELETE FROM secret_references
+WHERE id = $1
+`
+
+func (q *Queries) DeleteSecret(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSecret, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getEncryptedSecretByID = `-- name: GetEncryptedSecretByID :one
 SELECT COALESCE(encrypted_value, '')::text AS encrypted_value
 FROM secret_references

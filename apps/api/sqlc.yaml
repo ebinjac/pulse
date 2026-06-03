@@ -1,7 +1,12 @@
 version: "2"
 sql:
   - engine: "postgresql"
-    schema: "migrations/001_initial_schema.sql"
+    schema:
+      - "migrations/000001_initial_schema.up.sql"
+      - "migrations/000002_compatibility_patches.up.sql"
+      - "migrations/000003_applications.up.sql"
+      - "migrations/000004_step_timing.up.sql"
+      - "migrations/000005_monitor_versions.up.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"strings"
+	"time"
+)
 
 type MonitorStatus string
 
@@ -12,6 +16,36 @@ const (
 	StatusSkipped MonitorStatus = "SKIPPED"
 )
 
+func (status MonitorStatus) MarshalJSON() ([]byte, error) {
+	return json.Marshal(strings.ToLower(string(status)))
+}
+
+func (status *MonitorStatus) UnmarshalJSON(value []byte) error {
+	var raw string
+	if err := json.Unmarshal(value, &raw); err != nil {
+		return err
+	}
+	*status = NormalizeMonitorStatus(raw)
+	return nil
+}
+
+func NormalizeMonitorStatus(status string) MonitorStatus {
+	switch strings.ToUpper(strings.TrimSpace(status)) {
+	case string(StatusSuccess):
+		return StatusSuccess
+	case string(StatusFailed):
+		return StatusFailed
+	case string(StatusTimeout):
+		return StatusTimeout
+	case string(StatusError):
+		return StatusError
+	case string(StatusSkipped):
+		return StatusSkipped
+	default:
+		return MonitorStatus(strings.ToUpper(strings.TrimSpace(status)))
+	}
+}
+
 type FailureCategory string
 
 const (
@@ -21,6 +55,7 @@ const (
 
 type Monitor struct {
 	ID                  string            `json:"id"`
+	ApplicationID       string            `json:"applicationId,omitempty"`
 	Name                string            `json:"name"`
 	Description         string            `json:"description"`
 	ScheduleMode        string            `json:"scheduleMode,omitempty"`
@@ -44,6 +79,55 @@ type Monitor struct {
 	SuccessRate24H      float64           `json:"successRate24h,omitempty"`
 	CreatedAt           time.Time         `json:"createdAt"`
 	UpdatedAt           time.Time         `json:"updatedAt"`
+	PublishedVersion    int               `json:"publishedVersion,omitempty"`
+	HasUnpublishedDraft bool              `json:"hasUnpublishedDraft,omitempty"`
+}
+
+type MonitorVersion struct {
+	ID            string    `json:"id"`
+	MonitorID     string    `json:"monitorId"`
+	VersionNumber int       `json:"versionNumber"`
+	Config        Monitor   `json:"config"`
+	ChangeNote    string    `json:"changeNote,omitempty"`
+	CreatedBy     string    `json:"createdBy,omitempty"`
+	Source        string    `json:"source"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+type MonitorVersionSummary struct {
+	ID            string    `json:"id"`
+	MonitorID     string    `json:"monitorId"`
+	VersionNumber int       `json:"versionNumber"`
+	ChangeNote    string    `json:"changeNote,omitempty"`
+	CreatedBy     string    `json:"createdBy,omitempty"`
+	Source        string    `json:"source"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+type MonitorDetail struct {
+	Published           Monitor  `json:"published"`
+	Draft               *Monitor `json:"draft,omitempty"`
+	PublishedVersion    int      `json:"publishedVersion"`
+	HasUnpublishedDraft bool     `json:"hasUnpublishedDraft"`
+}
+
+type Application struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	CarID       string    `json:"carId"`
+	Description string    `json:"description,omitempty"`
+	Owner       string    `json:"owner,omitempty"`
+	Environment string    `json:"environment,omitempty"`
+	Tags        []string  `json:"tags,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type ApplicationRunSummary struct {
+	ApplicationID string   `json:"applicationId"`
+	Queued        int      `json:"queued"`
+	Skipped       int      `json:"skipped"`
+	MonitorIDs    []string `json:"monitorIds"`
 }
 
 type AlertPolicy struct {
@@ -150,18 +234,34 @@ type AlertEvent struct {
 }
 
 type StepRun struct {
-	ID              string        `json:"id"`
-	StepID          string        `json:"stepId"`
-	StepName        string        `json:"stepName"`
-	Type            string        `json:"type"`
-	Status          MonitorStatus `json:"status"`
-	LatencyMS       int           `json:"latencyMs"`
-	RequestSummary  string        `json:"requestSummary"`
-	ResponseSummary string        `json:"responseSummary"`
-	Assertions      []Assertion   `json:"assertions"`
-	Extractors      []Extractor   `json:"extractors"`
-	ErrorMessage    string        `json:"errorMessage,omitempty"`
-	ConsoleOutput   []string      `json:"consoleOutput,omitempty"`
+	ID              string            `json:"id"`
+	StepID          string            `json:"stepId"`
+	StepName        string            `json:"stepName"`
+	Type            string            `json:"type"`
+	Status          MonitorStatus     `json:"status"`
+	LatencyMS       int               `json:"latencyMs"`
+	Timing          HTTPTiming        `json:"timing,omitempty"`
+	RequestSummary  string            `json:"requestSummary"`
+	RequestBody     string            `json:"requestBody,omitempty"`
+	RequestHeaders  map[string]string `json:"requestHeaders,omitempty"`
+	ResponseSummary string            `json:"responseSummary"`
+	StatusCode      int               `json:"statusCode,omitempty"`
+	ResponseBody    string            `json:"responseBody,omitempty"`
+	ResponseHeaders map[string]string `json:"responseHeaders,omitempty"`
+	Assertions      []Assertion       `json:"assertions"`
+	Extractors      []Extractor       `json:"extractors"`
+	ExtractedVars   map[string]string `json:"extractedVars,omitempty"`
+	ErrorMessage    string            `json:"errorMessage,omitempty"`
+	ConsoleOutput   []string          `json:"consoleOutput,omitempty"`
+}
+
+type HTTPTiming struct {
+	DNSLookupMS       int `json:"dnsLookupMs,omitempty"`
+	TCPConnectMS      int `json:"tcpConnectMs,omitempty"`
+	TLSHandshakeMS    int `json:"tlsHandshakeMs,omitempty"`
+	TimeToFirstByteMS int `json:"timeToFirstByteMs,omitempty"`
+	DownloadMS        int `json:"downloadMs,omitempty"`
+	TotalMS           int `json:"totalMs,omitempty"`
 }
 
 type SecretReference struct {

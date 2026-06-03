@@ -12,6 +12,8 @@ import {
   ChevronRight,
   Copy,
 } from "lucide-react"
+import Editor from "@monaco-editor/react"
+import { useTheme } from "next-themes"
 
 import { Button } from "@workspace/ui/components/button"
 import { cn } from "@workspace/ui/lib/utils"
@@ -49,22 +51,115 @@ const apiReference = [
   { signature: "console.log(...)", description: "Log to console output" },
 ] as const
 
+const pmTypes = `
+declare namespace pm {
+  namespace variables {
+    /**
+     * Set a variable.
+     * @param key The variable name.
+     * @param value The variable value.
+     */
+    function set(key: string, value: string): void;
+    /**
+     * Get a variable value.
+     * @param key The variable name.
+     */
+    function get(key: string): string | undefined;
+    /**
+     * Returns all variables as a plain object.
+     */
+    function toObject(): Record<string, string>;
+  }
+
+  namespace secrets {
+    /**
+     * Get an encrypted secret value by alias name.
+     * @param alias The secret alias.
+     */
+    function get(alias: string): string | undefined;
+  }
+
+  namespace request {
+    /** The target URL for the step execution. */
+    let url: string;
+    /** The HTTP request method (e.g. GET, POST, PUT, DELETE). */
+    let method: string;
+    /** The raw request body payload. */
+    let body: string;
+    namespace headers {
+      /**
+       * Add a request header.
+       * @param key Header name.
+       * @param value Header value.
+       */
+      function add(key: string, value: string): void;
+      /**
+       * Get a request header value.
+       * @param key Header name.
+       */
+      function get(key: string): string | undefined;
+      /**
+       * Remove a request header by name.
+       * @param key Header name.
+       */
+      function remove(key: string): void;
+    }
+  }
+}
+`
+
 export function ScriptEditor({ value, onChange, stepName }: ScriptEditorProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorRef = useRef<any>(null)
+  const monacoRef = useRef<any>(null)
   const [showHelp, setShowHelp] = useState(false)
+  const { resolvedTheme } = useTheme()
+
+  const editorTheme = resolvedTheme === "light" ? "light" : "vs-dark"
+
+  function handleEditorBeforeMount(monaco: any) {
+    // Configure Monaco compiler checking options for JavaScript
+    monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+    })
+
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+      target: monaco.languages.typescript.ScriptTarget.ESNext,
+      allowNonTsExtensions: true,
+      checkJs: true,
+    })
+
+    // Inject typings to enable custom IntelliSense autocomplete for the pm.* API
+    const libUri = "ts:filename/pulse-env.d.ts"
+    monaco.languages.typescript.javascriptDefaults.addExtraLib(pmTypes, libUri)
+  }
+
+  function handleEditorDidMount(editor: any, monaco: any) {
+    editorRef.current = editor
+    monacoRef.current = monaco
+  }
 
   function insertSnippet(snippet: string) {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    const newValue = value.substring(0, start) + snippet + value.substring(end)
-    onChange(newValue)
-    // Restore cursor position after the snippet
-    requestAnimationFrame(() => {
-      textarea.selectionStart = textarea.selectionEnd = start + snippet.length
-      textarea.focus()
-    })
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    if (!editor || !monaco) return
+
+    const selection = editor.getSelection()
+    const range = new monaco.Range(
+      selection.startLineNumber,
+      selection.startColumn,
+      selection.endLineNumber,
+      selection.endColumn
+    )
+
+    const op = {
+      range,
+      text: snippet,
+      forceMoveMarkers: true,
+    }
+
+    editor.executeEdits("snippet-insert", [op])
+    editor.focus()
   }
 
   return (
@@ -91,7 +186,7 @@ export function ScriptEditor({ value, onChange, stepName }: ScriptEditorProps) {
               size="sm"
               type="button"
               onClick={() => insertSnippet(snippet.code)}
-              className="h-7 text-[11px] px-2 gap-1"
+              className="h-7 text-[11px] px-2 gap-1 cursor-pointer"
             >
               <Icon className="size-3" />
               {snippet.label}
@@ -100,15 +195,29 @@ export function ScriptEditor({ value, onChange, stepName }: ScriptEditorProps) {
         })}
       </div>
 
-      {/* Code editor textarea */}
-      <textarea
-        ref={textareaRef}
-        className="min-h-[200px] w-full resize-y rounded-md bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100 outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 border border-border/50"
-        spellCheck={false}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={`// Pre-request script for ${stepName ?? "this step"}\n// Use pm.variables, pm.secrets, pm.request to configure the request\n`}
-      />
+      {/* Monaco Code Editor container */}
+      <div className="min-h-[220px] w-full rounded-md border border-border/50 overflow-hidden bg-[#1e1e1e] dark:bg-[#1e1e1e] light:bg-[#fffffe] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+        <Editor
+          height="220px"
+          language="javascript"
+          theme={editorTheme}
+          value={value}
+          onChange={(val) => onChange(val ?? "")}
+          beforeMount={handleEditorBeforeMount}
+          onMount={handleEditorDidMount}
+          options={{
+            minimap: { enabled: false },
+            fontSize: 12,
+            fontFamily: "var(--font-mono), monospace",
+            lineNumbers: "on",
+            scrollBeyondLastLine: false,
+            automaticLayout: true,
+            padding: { top: 8, bottom: 8 },
+            tabSize: 2,
+            fixedOverflowWidgets: true,
+          }}
+        />
+      </div>
 
       {/* Help panel toggle */}
       <div>
@@ -116,7 +225,7 @@ export function ScriptEditor({ value, onChange, stepName }: ScriptEditorProps) {
           type="button"
           onClick={() => setShowHelp(!showHelp)}
           className={cn(
-            "flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors py-1"
+            "flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors py-1 cursor-pointer"
           )}
         >
           {showHelp ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
