@@ -115,6 +115,40 @@ type MonitorRun struct {
 	Steps           []StepRun       `json:"steps"`
 }
 
+type AlertStatus string
+
+const (
+	AlertStatusOpen       AlertStatus = "open"
+	AlertStatusSuppressed AlertStatus = "suppressed"
+	AlertStatusResolved   AlertStatus = "resolved"
+)
+
+type AlertDelivery struct {
+	Channel string    `json:"channel"`
+	Status  string    `json:"status"`
+	Detail  string    `json:"detail,omitempty"`
+	SentAt  time.Time `json:"sentAt,omitempty"`
+}
+
+type AlertEvent struct {
+	ID               string          `json:"id"`
+	MonitorID        string          `json:"monitorId"`
+	RunID            string          `json:"runId,omitempty"`
+	Status           AlertStatus     `json:"status"`
+	Severity         string          `json:"severity"`
+	Title            string          `json:"title"`
+	Description      string          `json:"description"`
+	FailureCategory  FailureCategory `json:"failureCategory,omitempty"`
+	Channels         []string        `json:"channels"`
+	Deliveries       []AlertDelivery `json:"deliveries"`
+	FirstTriggeredAt time.Time       `json:"firstTriggeredAt"`
+	LastTriggeredAt  time.Time       `json:"lastTriggeredAt"`
+	LastDeliveredAt  *time.Time      `json:"lastDeliveredAt,omitempty"`
+	ResolvedAt       *time.Time      `json:"resolvedAt,omitempty"`
+	CreatedAt        time.Time       `json:"createdAt"`
+	UpdatedAt        time.Time       `json:"updatedAt"`
+}
+
 type StepRun struct {
 	ID              string        `json:"id"`
 	StepID          string        `json:"stepId"`

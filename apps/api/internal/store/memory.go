@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ type MemoryStore struct {
 	monitors map[string]domain.Monitor
 	runs     map[string]domain.MonitorRun
 	secrets  map[string]domain.SecretReference
+	alerts   map[string]domain.AlertEvent
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -115,6 +117,7 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		monitors: map[string]domain.Monitor{monitor.ID: monitor},
 		runs:     map[string]domain.MonitorRun{},
+		alerts:   map[string]domain.AlertEvent{},
 		secrets: map[string]domain.SecretReference{
 			"sec-client-id": {
 				ID: "sec-client-id", Name: "Demo Client ID", Alias: "clientId", Provider: "encrypted-db",
@@ -266,6 +269,74 @@ func (s *MemoryStore) ListRuns(monitorID string) []domain.MonitorRun {
 	}
 
 	return runs
+}
+
+func (s *MemoryStore) ListAlerts() []domain.AlertEvent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	alerts := make([]domain.AlertEvent, 0, len(s.alerts))
+	for _, alert := range s.alerts {
+		alerts = append(alerts, alert)
+	}
+	sort.Slice(alerts, func(i, j int) bool {
+		return alerts[i].LastTriggeredAt.After(alerts[j].LastTriggeredAt)
+	})
+
+	return alerts
+}
+
+func (s *MemoryStore) GetOpenAlert(monitorID string) (domain.AlertEvent, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var newest domain.AlertEvent
+	found := false
+	for _, alert := range s.alerts {
+		if alert.MonitorID != monitorID || alert.Status != domain.AlertStatusOpen {
+			continue
+		}
+		if !found || alert.LastTriggeredAt.After(newest.LastTriggeredAt) {
+			newest = alert
+			found = true
+		}
+	}
+
+	return newest, found
+}
+
+func (s *MemoryStore) SaveAlert(alert domain.AlertEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	if alert.ID == "" {
+		alert.ID = "alert-" + randomID()
+	}
+	if alert.CreatedAt.IsZero() {
+		alert.CreatedAt = now
+	}
+	alert.UpdatedAt = now
+	s.alerts[alert.ID] = alert
+}
+
+func (s *MemoryStore) ResolveOpenAlerts(monitorID string, resolvedAt time.Time) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	count := 0
+	for id, alert := range s.alerts {
+		if alert.MonitorID != monitorID || alert.Status != domain.AlertStatusOpen {
+			continue
+		}
+		alert.Status = domain.AlertStatusResolved
+		alert.ResolvedAt = &resolvedAt
+		alert.UpdatedAt = time.Now().UTC()
+		s.alerts[id] = alert
+		count++
+	}
+
+	return count
 }
 
 func (s *MemoryStore) GetRun(id string) (domain.MonitorRun, bool) {

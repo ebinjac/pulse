@@ -179,3 +179,27 @@ export interface MonitorRun {
   failureReason?: string
   steps: StepRun[]
 }
+
+export interface AlertDelivery {
+  channel: string
+  status: "sent" | "failed" | "skipped" | "suppressed" | string
+  detail?: string
+  sentAt?: string
+}
+
+export interface AlertEvent {
+  id: string
+  monitorId: string
+  runId?: string
+  status: "open" | "suppressed" | "resolved" | string
+  severity: "critical" | "warning" | string
+  title: string
+  description: string
+  failureCategory?: FailureCategory
+  channels: string[]
+  deliveries: AlertDelivery[]
+  firstTriggeredAt: string
+  lastTriggeredAt: string
+  lastDeliveredAt?: string
+  resolvedAt?: string
+}

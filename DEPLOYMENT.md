@@ -34,6 +34,19 @@ REDIS_URL=redis://HOST:6379/0
 PULSE_SECRET_ENCRYPTION_KEY=replace-with-base64-32-byte-key
 ```
 
+Optional alert delivery environment variables:
+
+```bash
+PULSE_ALERT_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+PULSE_ALERT_SMTP_ADDR=smtp.example.com:587
+PULSE_ALERT_SMTP_USER=alerts-smtp-user
+PULSE_ALERT_SMTP_PASSWORD=alerts-smtp-password
+PULSE_ALERT_EMAIL_FROM=pulse-alerts@example.com
+PULSE_ALERT_EMAIL_TO=oncall@example.com,platform@example.com
+```
+
+Slack can also use an encrypted Pulse secret with alias `slackWebhook`. If neither Slack nor SMTP is configured, alert events are still persisted, but delivery attempts are marked `skipped`.
+
 For local development, `apps/api/.env` is already created with localhost values.
 
 ### Build And Run With Go
@@ -63,6 +76,7 @@ docker run --rm -p 8080:8080 \
   -e DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require' \
   -e REDIS_URL='redis://HOST:6379/0' \
   -e PULSE_SECRET_ENCRYPTION_KEY='replace-with-base64-32-byte-key' \
+  -e PULSE_ALERT_EMAIL_TO='oncall@example.com' \
   ensemble-pulse-api
 ```
 
@@ -125,6 +139,7 @@ Expose the web service publicly. Keep the API private if your host supports priv
 4. Run the web service with `PULSE_API_BASE_URL` pointing to the API base URL.
 5. Open the web URL and create a secret from `/secrets`.
 6. Verify the secret test succeeds and monitor creation/manual runs work.
+7. Force a monitor failure until its threshold is reached and verify `/api/alerts` shows a persisted alert with delivery statuses.
 
 ## Local Two-Service Development
 
@@ -154,4 +169,5 @@ The web app will proxy API route calls to `http://localhost:8080` through `apps/
 - Rotate `PULSE_SECRET_ENCRYPTION_KEY` only with a planned re-encryption migration.
 - Use HTTPS for both public web traffic and any public API traffic.
 - If you scale the API to multiple instances, all API instances must use the same `PULSE_SECRET_ENCRYPTION_KEY`.
+- If you scale the API to multiple instances, alert cooldown is persisted in PostgreSQL, but duplicate concurrent scheduler executions should still be avoided with a queue/worker lock before production scale-out.
 - If you scale the web service to multiple Next.js instances and later add Server Actions, set a shared `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY`.

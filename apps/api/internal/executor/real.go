@@ -29,12 +29,17 @@ type Executor interface {
 	Test(monitor domain.Monitor) domain.MonitorRun
 }
 
-type RealExecutor struct {
-	store store.Store
+type AlertProcessor interface {
+	ProcessRun(monitor domain.Monitor, run domain.MonitorRun)
 }
 
-func NewRealExecutor(store store.Store) *RealExecutor {
-	return &RealExecutor{store: store}
+type RealExecutor struct {
+	store  store.Store
+	alerts AlertProcessor
+}
+
+func NewRealExecutor(store store.Store, alerts AlertProcessor) *RealExecutor {
+	return &RealExecutor{store: store, alerts: alerts}
 }
 
 func (e *RealExecutor) Run(monitor domain.Monitor) domain.MonitorRun {
@@ -330,6 +335,9 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 
 	if saveToStore {
 		e.store.SaveRun(run)
+		if e.alerts != nil {
+			e.alerts.ProcessRun(monitor, run)
+		}
 	}
 	return run
 }

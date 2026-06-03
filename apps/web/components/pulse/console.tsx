@@ -31,7 +31,7 @@ import {
 import { useTheme } from "next-themes"
 
 import { BuilderWorkbench } from "@/components/pulse/builder-workbench"
-import type { Monitor, MonitorRun, MonitorStatus, SecretReference } from "@/lib/pulse-types"
+import type { AlertEvent, Monitor, MonitorRun, MonitorStatus, SecretReference } from "@/lib/pulse-types"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { cn } from "@workspace/ui/lib/utils"
@@ -616,12 +616,77 @@ function SchedulerStatusCard({ monitors }: { monitors: Monitor[] }) {
 interface DashboardProps {
   monitors: Monitor[]
   runs: MonitorRun[]
+  alerts: AlertEvent[]
   onRunNow: (monitorId: string) => void
   onToggleActive: (monitorId: string, currentActive: boolean) => void
   onDeleteMonitor?: (monitorId: string) => void
 }
 
-function Dashboard({ monitors, runs, onRunNow, onToggleActive, onDeleteMonitor }: DashboardProps) {
+function AlertFeed({ alerts }: { alerts: AlertEvent[] }) {
+  const latestAlerts = alerts.slice(0, 5)
+
+  return (
+    <Card>
+      <CardHeader className="pb-3 border-b">
+        <CardTitle className="text-xs uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
+          <Bell className="size-3.5 text-primary" />
+          Alert Events
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Persisted delivery lifecycle from monitor failures, cooldowns, and recoveries.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-4 text-xs font-semibold text-foreground space-y-3">
+        {latestAlerts.length === 0 ? (
+          <Empty className="border-0 bg-transparent py-4">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Bell className="size-5 text-muted-foreground" />
+              </EmptyMedia>
+              <EmptyTitle className="text-sm font-semibold">No alert events yet</EmptyTitle>
+              <EmptyDescription className="text-xs">
+                Alerts appear after a monitor crosses its failure threshold.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          latestAlerts.map((alert) => {
+            const latestDelivery = alert.deliveries?.[0]
+            return (
+              <div key={alert.id} className="border-b border-border/40 pb-3 last:border-b-0 last:pb-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate font-bold text-foreground">{alert.title}</p>
+                    <p className="mt-0.5 truncate text-[11px] font-normal text-muted-foreground" title={alert.description}>
+                      {alert.description || "Monitor run did not complete successfully."}
+                    </p>
+                  </div>
+                  <span className={cn(
+                    "shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase",
+                    alert.status === "open"
+                      ? "border-rose-500/20 bg-rose-500/5 text-rose-600 dark:text-rose-300"
+                      : alert.status === "resolved"
+                        ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-300"
+                        : "border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300"
+                  )}>
+                    {alert.status}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-semibold text-muted-foreground">
+                  <span>{formatDate(alert.lastTriggeredAt)}</span>
+                  <span>Channels: {alert.channels?.length ? alert.channels.join(", ") : "none"}</span>
+                  {latestDelivery ? <span>Delivery: {latestDelivery.channel} {latestDelivery.status}</span> : null}
+                </div>
+              </div>
+            )
+          })
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function Dashboard({ monitors, runs, alerts, onRunNow, onToggleActive, onDeleteMonitor }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("overview")
   const [monitorSearch, setMonitorSearch] = useState("")
   const [monitorStatusFilter, setMonitorStatusFilter] = useState<"all" | "active" | "inactive" | "failed" | "healthy">("all")
@@ -867,6 +932,8 @@ function Dashboard({ monitors, runs, onRunNow, onToggleActive, onDeleteMonitor }
               </CardContent>
             </Card>
           </div>
+
+          <AlertFeed alerts={alerts} />
         </TabsContent>
 
         <TabsContent value="inventory" className="space-y-4 outline-none">
@@ -2202,7 +2269,7 @@ export function PulseConsole({ view = "dashboard", monitorId, runId }: PulseCons
   const [monitors, setMonitors] = useState<Monitor[]>([])
   const [runs, setRuns] = useState<MonitorRun[]>([])
   const [secrets, setSecrets] = useState<SecretReference[]>([])
-  const [alerts, setAlerts] = useState<any[]>([])
+  const [alerts, setAlerts] = useState<AlertEvent[]>([])
   const [loading, setLoading] = useState(true)
 
   const [activeMonitor, setActiveMonitor] = useState<Monitor | null>(null)
@@ -2557,5 +2624,5 @@ export function PulseConsole({ view = "dashboard", monitorId, runId }: PulseCons
     return <SettingsView />
   }
 
-  return <Dashboard monitors={monitors} runs={runs} onRunNow={handleRunNow} onToggleActive={handleToggleActive} onDeleteMonitor={handleDeleteMonitor} />
+  return <Dashboard monitors={monitors} runs={runs} alerts={alerts} onRunNow={handleRunNow} onToggleActive={handleToggleActive} onDeleteMonitor={handleDeleteMonitor} />
 }

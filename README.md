@@ -5,7 +5,7 @@ Pulse is an MVP synthetic API monitoring platform for simple endpoint checks and
 ## Apps
 
 - `apps/web`: Next.js 16 UI with shadcn-style shared components.
-- `apps/api`: Go API skeleton with in-memory monitor storage and mock execution.
+- `apps/api`: Go API with PostgreSQL persistence, real monitor execution, scheduling, encrypted DB secrets, and persisted alert events.
 
 ## Current MVP Shape
 
@@ -13,14 +13,14 @@ The web app includes:
 
 - Dashboard, monitor inventory, monitor builder, run history, run detail, secrets, and settings pages.
 - Editable monitor builder with form controls and raw JSON config.
-- Mock API route handlers under `apps/web/app/api/**`.
-- Local mocked execution with assertion failure handling and masked/truncated run output.
+- Next.js API route handlers under `apps/web/app/api/**` that proxy to the Go API when `PULSE_API_BASE_URL` is set, with local mock fallbacks for early UI work.
+- Real API-backed draft testing and execution, with masked/truncated run output.
 
 The Go app includes:
 
-- API-shaped monitor CRUD, manual run, run detail, secret test, and alert endpoints.
-- In-memory store for early contract testing.
-- PostgreSQL migration at `apps/api/migrations/001_initial_schema.sql`.
+- Monitor CRUD, draft tests, manual runs, scheduled runs, run details, secret create/edit/test, and persisted alert endpoints.
+- PostgreSQL store with encrypted database-backed secret values.
+- In-memory fallback for local contract testing if PostgreSQL is unavailable.
 
 ## Run Web
 
@@ -31,10 +31,10 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-By default, the Next.js API routes use an in-memory mock store. To proxy those routes to the Go API instead:
+The local web env file points the Next.js API routes at the Go API:
 
 ```bash
-PULSE_API_BASE_URL=http://localhost:8080 npm run dev
+cat apps/web/.env.local
 ```
 
 ## Run Go API
@@ -56,4 +56,8 @@ Requires Docker.
 docker compose up --build
 ```
 
-This starts PostgreSQL, Redis, and the Go API. The Go API still uses its in-memory store in this scaffold; the database is ready for the next persistence step.
+This starts PostgreSQL, Redis, and the Go API. The API uses PostgreSQL when `DATABASE_URL` is available and falls back to memory only if Postgres is unavailable.
+
+## Deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for separate web/API service deployment, required environment variables, and alert delivery configuration.

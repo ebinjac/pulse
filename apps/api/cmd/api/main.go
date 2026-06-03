@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ensemble-pulse/pulse/apps/api/internal/alerting"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/executor"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/httpapi"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/scheduler"
@@ -22,7 +23,8 @@ func main() {
 	defer cancel()
 
 	activeStore := newStore(ctx)
-	executor := executor.NewRealExecutor(activeStore)
+	alertService := alerting.NewService(activeStore)
+	executor := executor.NewRealExecutor(activeStore, alertService)
 
 	// Initialize and start background monitor scheduler
 	bgScheduler := scheduler.NewScheduler(activeStore, executor)

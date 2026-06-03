@@ -2,31 +2,36 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"log"
+	"strconv"
 	"time"
 
+	pulsedb "github.com/ensemble-pulse/pulse/apps/api/internal/db"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/domain"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/secretcrypto"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type PostgresStore struct {
-	db    *sql.DB
-	codec *secretcrypto.Codec
+	pool    *pgxpool.Pool
+	queries *pulsedb.Queries
+	codec   *secretcrypto.Codec
 }
 
 func NewPostgresStore(ctx context.Context, databaseURL string, codec *secretcrypto.Codec) (*PostgresStore, error) {
-	db, err := sql.Open("pgx", databaseURL)
+	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		return nil, err
 	}
-	if err := db.PingContext(ctx); err != nil {
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
 		return nil, err
 	}
 
-	store := &PostgresStore{db: db, codec: codec}
+	store := &PostgresStore{pool: pool, queries: pulsedb.New(pool), codec: codec}
 	if err := store.ensureSchema(ctx); err != nil {
 		return nil, err
 	}
@@ -38,14 +43,24 @@ func NewPostgresStore(ctx context.Context, databaseURL string, codec *secretcryp
 }
 
 func (s *PostgresStore) ensureSchema(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.pool.Exec(ctx, `
 		ALTER TABLE monitor_step_runs
 		ADD COLUMN IF NOT EXISTS console_output_json JSONB DEFAULT '[]'::jsonb
 	`)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = s.pool.Exec(ctx, `
+		ALTER TABLE alerts
+		ADD COLUMN IF NOT EXISTS run_id TEXT REFERENCES monitor_runs(id) ON DELETE SET NULL,
+		ADD COLUMN IF NOT EXISTS channels_json JSONB DEFAULT '[]'::jsonb,
+		ADD COLUMN IF NOT EXISTS deliveries_json JSONB DEFAULT '[]'::jsonb,
+		ADD COLUMN IF NOT EXISTS last_delivered_at TIMESTAMP
+	`)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
 		ALTER TABLE monitor_step_runs
 		DROP CONSTRAINT IF EXISTS monitor_step_runs_step_id_fkey;
 
@@ -67,42 +82,24 @@ func (s *PostgresStore) backfillLegacySecrets(ctx context.Context) error {
 		"slackWebhook": "https://hooks.slack.example/demo",
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, alias
-		FROM secret_references
-		WHERE COALESCE(encrypted_value, '') = '' OR encrypted_value = 'encrypted-placeholder'
-	`)
+	legacy, err := s.queries.ListLegacySecretsForBackfill(ctx)
 	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type legacySecret struct {
-		id    string
-		alias string
-	}
-	legacy := []legacySecret{}
-	for rows.Next() {
-		var item legacySecret
-		if err := rows.Scan(&item.id, &item.alias); err != nil {
-			return err
-		}
-		legacy = append(legacy, item)
-	}
-	if err := rows.Err(); err != nil {
 		return err
 	}
 
 	for _, item := range legacy {
-		raw, ok := defaults[item.alias]
+		raw, ok := defaults[item.Alias]
 		if !ok {
 			continue
 		}
-		encrypted, err := s.codec.Encrypt(raw, secretAssociatedData(item.id))
+		encrypted, err := s.codec.Encrypt(raw, secretAssociatedData(item.ID))
 		if err != nil {
 			return err
 		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE secret_references SET encrypted_value = $2, updated_at = NOW() WHERE id = $1`, item.id, encrypted); err != nil {
+		if err := s.queries.UpdateSecretEncryptedValue(ctx, pulsedb.UpdateSecretEncryptedValueParams{
+			ID:             item.ID,
+			EncryptedValue: pgText(encrypted),
+		}); err != nil {
 			return err
 		}
 	}
@@ -111,24 +108,15 @@ func (s *PostgresStore) backfillLegacySecrets(ctx context.Context) error {
 }
 
 func (s *PostgresStore) ListMonitors() []domain.Monitor {
-	rows, err := s.db.Query(`
-		SELECT id, name, COALESCE(description, ''), COALESCE(schedule_mode, ''), COALESCE(schedule_label, ''),
-		       COALESCE(schedule_cron, ''), COALESCE(timezone, 'UTC'), timeout_ms, retry_count,
-		       failure_threshold, response_body_limit_kb, is_active, alert_enabled, variables_json,
-		       alert_policy_json, COALESCE(status, ''), last_run_at, last_duration_ms,
-		       COALESCE(success_rate_24h, 0), created_at, updated_at
-		FROM monitors
-		ORDER BY created_at DESC
-	`)
+	rows, err := s.queries.ListMonitors(context.Background())
 	if err != nil {
 		log.Printf("list monitors: %v", err)
 		return nil
 	}
-	defer rows.Close()
 
-	monitors := []domain.Monitor{}
-	for rows.Next() {
-		monitor, err := s.scanMonitor(rows)
+	monitors := make([]domain.Monitor, 0, len(rows))
+	for _, row := range rows {
+		monitor, err := monitorFromListRow(row)
 		if err != nil {
 			log.Printf("scan monitor: %v", err)
 			continue
@@ -142,17 +130,13 @@ func (s *PostgresStore) ListMonitors() []domain.Monitor {
 }
 
 func (s *PostgresStore) GetMonitor(id string) (domain.Monitor, bool) {
-	row := s.db.QueryRow(`
-		SELECT id, name, COALESCE(description, ''), COALESCE(schedule_mode, ''), COALESCE(schedule_label, ''),
-		       COALESCE(schedule_cron, ''), COALESCE(timezone, 'UTC'), timeout_ms, retry_count,
-		       failure_threshold, response_body_limit_kb, is_active, alert_enabled, variables_json,
-		       alert_policy_json, COALESCE(status, ''), last_run_at, last_duration_ms,
-		       COALESCE(success_rate_24h, 0), created_at, updated_at
-		FROM monitors
-		WHERE id = $1
-	`, id)
-	monitor, err := s.scanMonitor(row)
+	row, err := s.queries.GetMonitor(context.Background(), id)
 	if err != nil {
+		return domain.Monitor{}, false
+	}
+	monitor, err := monitorFromGetRow(row)
+	if err != nil {
+		log.Printf("scan monitor: %v", err)
 		return domain.Monitor{}, false
 	}
 	monitor.Steps = s.listSteps(monitor.ID)
@@ -181,54 +165,43 @@ func (s *PostgresStore) UpsertMonitor(monitor domain.Monitor) domain.Monitor {
 		}
 	}
 
-	tx, err := s.db.Begin()
+	ctx := context.Background()
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		log.Printf("begin upsert monitor: %v", err)
 		return monitor
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
+	qtx := s.queries.WithTx(tx)
 
-	variablesJSON := mustJSON(monitor.Variables)
-	alertPolicyJSON := mustJSON(monitor.AlertPolicy)
-	_, err = tx.Exec(`
-		INSERT INTO monitors (
-			id, name, description, schedule_mode, schedule_label, schedule_cron, timezone,
-			timeout_ms, retry_count, failure_threshold, response_body_limit_kb, is_active,
-			alert_enabled, variables_json, alert_policy_json, status, last_run_at,
-			last_duration_ms, success_rate_24h, created_at, updated_at
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-		ON CONFLICT (id) DO UPDATE SET
-			name = EXCLUDED.name,
-			description = EXCLUDED.description,
-			schedule_mode = EXCLUDED.schedule_mode,
-			schedule_label = EXCLUDED.schedule_label,
-			schedule_cron = EXCLUDED.schedule_cron,
-			timezone = EXCLUDED.timezone,
-			timeout_ms = EXCLUDED.timeout_ms,
-			retry_count = EXCLUDED.retry_count,
-			failure_threshold = EXCLUDED.failure_threshold,
-			response_body_limit_kb = EXCLUDED.response_body_limit_kb,
-			is_active = EXCLUDED.is_active,
-			alert_enabled = EXCLUDED.alert_enabled,
-			variables_json = EXCLUDED.variables_json,
-			alert_policy_json = EXCLUDED.alert_policy_json,
-			status = EXCLUDED.status,
-			last_run_at = EXCLUDED.last_run_at,
-			last_duration_ms = EXCLUDED.last_duration_ms,
-			success_rate_24h = EXCLUDED.success_rate_24h,
-			updated_at = EXCLUDED.updated_at
-	`, monitor.ID, monitor.Name, monitor.Description, monitor.ScheduleMode, monitor.ScheduleLabel,
-		monitor.ScheduleCron, monitor.Timezone, monitor.TimeoutMS, monitor.RetryCount,
-		monitor.FailureThreshold, monitor.ResponseBodyLimitKB, monitor.IsActive, monitor.AlertEnabled,
-		variablesJSON, alertPolicyJSON, string(monitor.Status), monitor.LastRunAt, monitor.LastDurationMS,
-		monitor.SuccessRate24H, monitor.CreatedAt, monitor.UpdatedAt)
-	if err != nil {
+	if err := qtx.UpsertMonitor(ctx, pulsedb.UpsertMonitorParams{
+		ID:                  monitor.ID,
+		Name:                monitor.Name,
+		Description:         pgText(monitor.Description),
+		ScheduleMode:        pgText(monitor.ScheduleMode),
+		ScheduleLabel:       pgText(monitor.ScheduleLabel),
+		ScheduleCron:        pgText(monitor.ScheduleCron),
+		Timezone:            pgText(monitor.Timezone),
+		TimeoutMs:           pgInt4(monitor.TimeoutMS),
+		RetryCount:          pgInt4(monitor.RetryCount),
+		FailureThreshold:    pgInt4(monitor.FailureThreshold),
+		ResponseBodyLimitKb: pgInt4(monitor.ResponseBodyLimitKB),
+		IsActive:            pgBool(monitor.IsActive),
+		AlertEnabled:        pgBool(monitor.AlertEnabled),
+		VariablesJson:       mustJSON(monitor.Variables),
+		AlertPolicyJson:     mustJSON(monitor.AlertPolicy),
+		Status:              pgText(string(monitor.Status)),
+		LastDurationMs:      pgInt4(monitor.LastDurationMS),
+		SuccessRate24h:      pgNumeric(monitor.SuccessRate24H),
+		CreatedAt:           pgTimestamp(monitor.CreatedAt),
+		UpdatedAt:           pgTimestamp(monitor.UpdatedAt),
+		LastRunAt:           pgTimestampPtr(monitor.LastRunAt),
+	}); err != nil {
 		log.Printf("upsert monitor: %v", err)
 		return monitor
 	}
 
-	if _, err := tx.Exec(`DELETE FROM monitor_steps WHERE monitor_id = $1`, monitor.ID); err != nil {
+	if err := qtx.DeleteMonitorSteps(ctx, pgText(monitor.ID)); err != nil {
 		log.Printf("delete monitor steps: %v", err)
 		return monitor
 	}
@@ -239,40 +212,46 @@ func (s *PostgresStore) UpsertMonitor(monitor domain.Monitor) domain.Monitor {
 			"config":           step.Config,
 			"preRequestScript": step.PreRequestScript,
 		}
-		if _, err := tx.Exec(`
-			INSERT INTO monitor_steps (
-				id, monitor_id, step_order, name, step_type, config_json, actions_json,
-				assertions_json, extractors_json, timeout_ms, retry_count, continue_on_failure, updated_at
-			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
-		`, step.ID, monitor.ID, step.Order, step.Name, step.Type, mustJSON(config),
-			mustJSON(step.Actions), mustJSON(step.Assertions), mustJSON(step.Extractors),
-			step.TimeoutMS, step.RetryCount, step.ContinueOnFailure); err != nil {
+		if err := qtx.InsertMonitorStep(ctx, pulsedb.InsertMonitorStepParams{
+			ID:                step.ID,
+			MonitorID:         pgText(monitor.ID),
+			StepOrder:         int32(step.Order),
+			Name:              step.Name,
+			StepType:          step.Type,
+			ConfigJson:        mustJSON(config),
+			ActionsJson:       mustJSON(step.Actions),
+			AssertionsJson:    mustJSON(step.Assertions),
+			ExtractorsJson:    mustJSON(step.Extractors),
+			TimeoutMs:         pgInt4(step.TimeoutMS),
+			RetryCount:        pgInt4(step.RetryCount),
+			ContinueOnFailure: pgBool(step.ContinueOnFailure),
+		}); err != nil {
 			log.Printf("insert monitor step: %v", err)
 			return monitor
 		}
 	}
 
-	if _, err := tx.Exec(`DELETE FROM monitor_secret_bindings WHERE monitor_id = $1`, monitor.ID); err != nil {
+	if err := qtx.DeleteMonitorSecretBindings(ctx, pgText(monitor.ID)); err != nil {
 		log.Printf("delete secret bindings: %v", err)
 		return monitor
 	}
 	for _, alias := range monitor.SecretAliases {
-		secretID := s.secretIDForAliasTx(tx, alias)
-		if secretID == "" {
+		secretID, err := qtx.GetSecretIDForAlias(ctx, alias)
+		if err != nil {
 			continue
 		}
-		if _, err := tx.Exec(`
-			INSERT INTO monitor_secret_bindings (id, monitor_id, secret_reference_id, alias)
-			VALUES ($1,$2,$3,$4)
-			ON CONFLICT (monitor_id, alias) DO UPDATE SET secret_reference_id = EXCLUDED.secret_reference_id
-		`, "binding-"+monitor.ID+"-"+alias, monitor.ID, secretID, alias); err != nil {
+		if err := qtx.UpsertMonitorSecretBinding(ctx, pulsedb.UpsertMonitorSecretBindingParams{
+			ID:                "binding-" + monitor.ID + "-" + alias,
+			MonitorID:         pgText(monitor.ID),
+			SecretReferenceID: pgText(secretID),
+			Alias:             alias,
+		}); err != nil {
 			log.Printf("insert secret binding: %v", err)
 			return monitor
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		log.Printf("commit upsert monitor: %v", err)
 	}
 
@@ -280,112 +259,98 @@ func (s *PostgresStore) UpsertMonitor(monitor domain.Monitor) domain.Monitor {
 }
 
 func (s *PostgresStore) stepIDBelongsToOtherMonitor(stepID string, monitorID string) bool {
-	var existingMonitorID string
-	err := s.db.QueryRow(`SELECT monitor_id FROM monitor_steps WHERE id = $1`, stepID).Scan(&existingMonitorID)
+	existingMonitorID, err := s.queries.GetStepMonitorID(context.Background(), stepID)
 	if err != nil {
 		return false
 	}
 
-	return existingMonitorID != monitorID
+	return pgTextString(existingMonitorID) != monitorID
 }
 
 func (s *PostgresStore) DeleteMonitor(id string) bool {
-	result, err := s.db.Exec(`DELETE FROM monitors WHERE id = $1`, id)
+	count, err := s.queries.DeleteMonitor(context.Background(), id)
 	if err != nil {
 		log.Printf("delete monitor: %v", err)
 		return false
 	}
-	count, _ := result.RowsAffected()
 
 	return count > 0
 }
 
 func (s *PostgresStore) SaveRun(run domain.MonitorRun) {
-	tx, err := s.db.Begin()
+	ctx := context.Background()
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		log.Printf("begin save run: %v", err)
 		return
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(ctx)
+	qtx := s.queries.WithTx(tx)
 
-	_, err = tx.Exec(`
-		INSERT INTO monitor_runs (
-			id, monitor_id, status, failure_category, failure_reason, triggered_by,
-			started_at, ended_at, duration_ms
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		ON CONFLICT (id) DO NOTHING
-	`, run.ID, run.MonitorID, string(run.Status), string(run.FailureCategory), run.FailureReason,
-		run.TriggeredBy, run.StartedAt, run.EndedAt, run.DurationMS)
-	if err != nil {
+	if err := qtx.InsertMonitorRun(ctx, pulsedb.InsertMonitorRunParams{
+		ID:              run.ID,
+		MonitorID:       pgText(run.MonitorID),
+		Status:          pgText(string(run.Status)),
+		FailureCategory: pgText(string(run.FailureCategory)),
+		FailureReason:   pgText(run.FailureReason),
+		TriggeredBy:     pgText(run.TriggeredBy),
+		StartedAt:       pgTimestamp(run.StartedAt),
+		EndedAt:         pgTimestamp(run.EndedAt),
+		DurationMs:      pgInt4(run.DurationMS),
+	}); err != nil {
 		log.Printf("insert monitor run: %v", err)
 		return
 	}
 
 	for index, step := range run.Steps {
-		_, err := tx.Exec(`
-			INSERT INTO monitor_step_runs (
-				id, monitor_run_id, step_id, step_order, step_name, step_type, status,
-				request_summary_json, response_summary_json, assertion_results_json,
-				extractor_results_json, console_output_json, latency_ms, error_message, started_at, ended_at
-			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-			ON CONFLICT (id) DO NOTHING
-		`, step.ID, run.ID, step.StepID, index+1, step.StepName, step.Type, string(step.Status),
-			mustJSON(map[string]string{"summary": step.RequestSummary}),
-			mustJSON(map[string]string{"summary": step.ResponseSummary}),
-			mustJSON(step.Assertions), mustJSON(step.Extractors), mustJSON(step.ConsoleOutput), step.LatencyMS,
-			step.ErrorMessage, run.StartedAt, run.EndedAt)
-		if err != nil {
+		if err := qtx.InsertMonitorStepRun(ctx, pulsedb.InsertMonitorStepRunParams{
+			ID:                   step.ID,
+			MonitorRunID:         pgText(run.ID),
+			StepOrder:            pgInt4(index + 1),
+			StepName:             pgText(step.StepName),
+			StepType:             pgText(step.Type),
+			Status:               pgText(string(step.Status)),
+			RequestSummaryJson:   mustJSON(map[string]string{"summary": step.RequestSummary}),
+			ResponseSummaryJson:  mustJSON(map[string]string{"summary": step.ResponseSummary}),
+			AssertionResultsJson: mustJSON(step.Assertions),
+			ExtractorResultsJson: mustJSON(step.Extractors),
+			ConsoleOutputJson:    mustJSON(step.ConsoleOutput),
+			LatencyMs:            pgInt4(step.LatencyMS),
+			ErrorMessage:         pgText(step.ErrorMessage),
+			StartedAt:            pgTimestamp(run.StartedAt),
+			EndedAt:              pgTimestamp(run.EndedAt),
+			StepID:               pgNullableText(step.StepID),
+		}); err != nil {
 			log.Printf("insert step run: %v", err)
 			return
 		}
 	}
 
-	_, err = tx.Exec(`
-		UPDATE monitors
-		SET status = $2, last_run_at = $3, last_duration_ms = $4, updated_at = NOW()
-		WHERE id = $1
-	`, run.MonitorID, string(run.Status), run.EndedAt, run.DurationMS)
-	if err != nil {
+	if err := qtx.UpdateMonitorAfterRun(ctx, pulsedb.UpdateMonitorAfterRunParams{
+		ID:             run.MonitorID,
+		Status:         pgText(string(run.Status)),
+		LastRunAt:      pgTimestamp(run.EndedAt),
+		LastDurationMs: pgInt4(run.DurationMS),
+	}); err != nil {
 		log.Printf("update monitor after run: %v", err)
 		return
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		log.Printf("commit save run: %v", err)
 	}
 }
 
 func (s *PostgresStore) ListRuns(monitorID string) []domain.MonitorRun {
-	query := `
-		SELECT r.id, r.monitor_id, COALESCE(m.name, ''), r.status, COALESCE(r.failure_category, ''),
-		       COALESCE(r.failure_reason, ''), COALESCE(r.triggered_by, ''), r.started_at,
-		       r.ended_at, r.duration_ms
-		FROM monitor_runs r
-		LEFT JOIN monitors m ON m.id = r.monitor_id
-	`
-	args := []any{}
-	if monitorID != "" {
-		query += ` WHERE r.monitor_id = $1`
-		args = append(args, monitorID)
-	}
-	query += ` ORDER BY r.started_at DESC`
-
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.queries.ListRuns(context.Background(), pgNullableText(monitorID))
 	if err != nil {
 		log.Printf("list runs: %v", err)
 		return nil
 	}
-	defer rows.Close()
 
-	runs := []domain.MonitorRun{}
-	for rows.Next() {
-		run, err := s.scanRun(rows)
-		if err != nil {
-			log.Printf("scan run: %v", err)
-			continue
-		}
+	runs := make([]domain.MonitorRun, 0, len(rows))
+	for _, row := range rows {
+		run := runFromListRow(row)
 		run.Steps = s.listStepRuns(run.ID)
 		runs = append(runs, run)
 	}
@@ -394,156 +359,160 @@ func (s *PostgresStore) ListRuns(monitorID string) []domain.MonitorRun {
 }
 
 func (s *PostgresStore) GetRun(id string) (domain.MonitorRun, bool) {
-	row := s.db.QueryRow(`
-		SELECT r.id, r.monitor_id, COALESCE(m.name, ''), r.status, COALESCE(r.failure_category, ''),
-		       COALESCE(r.failure_reason, ''), COALESCE(r.triggered_by, ''), r.started_at,
-		       r.ended_at, r.duration_ms
-		FROM monitor_runs r
-		LEFT JOIN monitors m ON m.id = r.monitor_id
-		WHERE r.id = $1
-	`, id)
-	run, err := s.scanRun(row)
+	row, err := s.queries.GetRun(context.Background(), id)
 	if err != nil {
 		return domain.MonitorRun{}, false
 	}
+	run := runFromGetRow(row)
 	run.Steps = s.listStepRuns(run.ID)
 
 	return run, true
 }
 
+func (s *PostgresStore) ListAlerts() []domain.AlertEvent {
+	rows, err := s.queries.ListAlerts(context.Background())
+	if err != nil {
+		log.Printf("list alerts: %v", err)
+		return nil
+	}
+
+	alerts := make([]domain.AlertEvent, 0, len(rows))
+	for _, row := range rows {
+		alerts = append(alerts, alertFromListRow(row))
+	}
+
+	return alerts
+}
+
+func (s *PostgresStore) GetOpenAlert(monitorID string) (domain.AlertEvent, bool) {
+	row, err := s.queries.GetOpenAlert(context.Background(), pulsedb.GetOpenAlertParams{
+		MonitorID: pgText(monitorID),
+		Status:    pgText(string(domain.AlertStatusOpen)),
+	})
+	if err != nil {
+		return domain.AlertEvent{}, false
+	}
+
+	return alertFromOpenRow(row), true
+}
+
+func (s *PostgresStore) SaveAlert(alert domain.AlertEvent) {
+	now := time.Now().UTC()
+	if alert.ID == "" {
+		alert.ID = "alert-" + randomID()
+	}
+	if alert.CreatedAt.IsZero() {
+		alert.CreatedAt = now
+	}
+	alert.UpdatedAt = now
+	if err := s.queries.UpsertAlert(context.Background(), pulsedb.UpsertAlertParams{
+		ID:               alert.ID,
+		MonitorID:        pgText(alert.MonitorID),
+		Status:           pgText(string(alert.Status)),
+		Severity:         pgText(alert.Severity),
+		Title:            pgText(alert.Title),
+		Description:      pgText(alert.Description),
+		FailureCategory:  pgText(string(alert.FailureCategory)),
+		ChannelsJson:     mustJSON(alert.Channels),
+		DeliveriesJson:   mustJSON(alert.Deliveries),
+		FirstTriggeredAt: pgTimestamp(alert.FirstTriggeredAt),
+		LastTriggeredAt:  pgTimestamp(alert.LastTriggeredAt),
+		CreatedAt:        pgTimestamp(alert.CreatedAt),
+		UpdatedAt:        pgTimestamp(alert.UpdatedAt),
+		RunID:            pgNullableText(alert.RunID),
+		LastDeliveredAt:  pgTimestampPtr(alert.LastDeliveredAt),
+		ResolvedAt:       pgTimestampPtr(alert.ResolvedAt),
+	}); err != nil {
+		log.Printf("save alert: %v", err)
+	}
+}
+
+func (s *PostgresStore) ResolveOpenAlerts(monitorID string, resolvedAt time.Time) int {
+	count, err := s.queries.ResolveOpenAlerts(context.Background(), pulsedb.ResolveOpenAlertsParams{
+		MonitorID:  pgText(monitorID),
+		Status:     pgText(string(domain.AlertStatusResolved)),
+		ResolvedAt: pgTimestamp(resolvedAt),
+		Status_2:   pgText(string(domain.AlertStatusOpen)),
+	})
+	if err != nil {
+		log.Printf("resolve alerts: %v", err)
+		return 0
+	}
+
+	return int(count)
+}
+
 func (s *PostgresStore) ListSecrets() []domain.SecretReference {
-	rows, err := s.db.Query(`
-		SELECT id, name, alias, provider, COALESCE(description, ''), COALESCE(secret_path, ''),
-		       COALESCE(secret_key, ''), is_active, created_at
-		FROM secret_references
-		ORDER BY created_at DESC
-	`)
+	rows, err := s.queries.ListSecrets(context.Background())
 	if err != nil {
 		log.Printf("list secrets: %v", err)
 		return nil
 	}
-	defer rows.Close()
 
-	secrets := []domain.SecretReference{}
-	for rows.Next() {
-		secret, err := scanSecret(rows)
-		if err != nil {
-			log.Printf("scan secret: %v", err)
-			continue
-		}
-		secrets = append(secrets, secret)
+	secrets := make([]domain.SecretReference, 0, len(rows))
+	for _, row := range rows {
+		secrets = append(secrets, secretFromListRow(row))
 	}
 
 	return secrets
 }
 
 func (s *PostgresStore) GetSecret(id string) (domain.SecretReference, bool) {
-	row := s.db.QueryRow(`
-		SELECT id, name, alias, provider, COALESCE(description, ''), COALESCE(secret_path, ''),
-		       COALESCE(secret_key, ''), is_active, created_at
-		FROM secret_references
-		WHERE id = $1
-	`, id)
-	secret, err := scanSecret(row)
+	row, err := s.queries.GetSecret(context.Background(), id)
 	if err != nil {
 		return domain.SecretReference{}, false
 	}
 
-	return secret, true
+	return secretFromGetRow(row), true
 }
 
 func (s *PostgresStore) GetRawSecretValue(alias string) (string, bool) {
-	var id string
-	var val string
-	err := s.db.QueryRow(`SELECT id, COALESCE(encrypted_value, '') FROM secret_references WHERE alias = $1 AND is_active = TRUE`, alias).Scan(&id, &val)
+	row, err := s.queries.GetRawSecretByAlias(context.Background(), alias)
 	if err != nil {
 		return "", false
 	}
-	plaintext, err := s.codec.Decrypt(val, secretAssociatedData(id))
+	plaintext, err := s.codec.Decrypt(row.EncryptedValue, secretAssociatedData(row.ID))
 	if err != nil {
-		log.Printf("decrypt secret %s: %v", id, err)
+		log.Printf("decrypt secret %s: %v", row.ID, err)
 		return "", false
 	}
 
 	return plaintext, true
 }
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-func (s *PostgresStore) scanMonitor(row rowScanner) (domain.Monitor, error) {
-	var monitor domain.Monitor
-	var variablesJSON []byte
-	var alertPolicyJSON []byte
-	var status string
-	var lastRunAt sql.NullTime
-
-	err := row.Scan(&monitor.ID, &monitor.Name, &monitor.Description, &monitor.ScheduleMode,
-		&monitor.ScheduleLabel, &monitor.ScheduleCron, &monitor.Timezone, &monitor.TimeoutMS,
-		&monitor.RetryCount, &monitor.FailureThreshold, &monitor.ResponseBodyLimitKB,
-		&monitor.IsActive, &monitor.AlertEnabled, &variablesJSON, &alertPolicyJSON,
-		&status, &lastRunAt, &monitor.LastDurationMS, &monitor.SuccessRate24H,
-		&monitor.CreatedAt, &monitor.UpdatedAt)
-	if err != nil {
-		return monitor, err
-	}
-	if err := json.Unmarshal(variablesJSON, &monitor.Variables); err != nil {
-		monitor.Variables = map[string]string{}
-	}
-	if err := json.Unmarshal(alertPolicyJSON, &monitor.AlertPolicy); err != nil {
-		monitor.AlertPolicy = domain.AlertPolicy{}
-	}
-	monitor.Status = domain.MonitorStatus(status)
-	if lastRunAt.Valid {
-		monitor.LastRunAt = &lastRunAt.Time
-	}
-	monitor.Cron = monitor.ScheduleCron
-
-	return storeDefaults(monitor), nil
-}
-
 func (s *PostgresStore) listSteps(monitorID string) []domain.MonitorStep {
-	rows, err := s.db.Query(`
-		SELECT id, monitor_id, step_order, name, step_type, config_json, actions_json,
-		       assertions_json, extractors_json, COALESCE(timeout_ms, 0), retry_count, continue_on_failure
-		FROM monitor_steps
-		WHERE monitor_id = $1
-		ORDER BY step_order
-	`, monitorID)
+	rows, err := s.queries.ListSteps(context.Background(), pgText(monitorID))
 	if err != nil {
 		log.Printf("list steps: %v", err)
 		return nil
 	}
-	defer rows.Close()
 
-	steps := []domain.MonitorStep{}
-	for rows.Next() {
-		var step domain.MonitorStep
-		var configJSON []byte
-		var actionsJSON []byte
-		var assertionsJSON []byte
-		var extractorsJSON []byte
-		if err := rows.Scan(&step.ID, &step.MonitorID, &step.Order, &step.Name, &step.Type,
-			&configJSON, &actionsJSON, &assertionsJSON, &extractorsJSON, &step.TimeoutMS,
-			&step.RetryCount, &step.ContinueOnFailure); err != nil {
-			log.Printf("scan step: %v", err)
-			continue
-		}
+	steps := make([]domain.MonitorStep, 0, len(rows))
+	for _, row := range rows {
 		var config struct {
 			Method           string         `json:"method"`
 			URL              string         `json:"url"`
 			Config           map[string]any `json:"config"`
 			PreRequestScript string         `json:"preRequestScript"`
 		}
-		_ = json.Unmarshal(configJSON, &config)
-		step.Method = config.Method
-		step.URL = config.URL
-		step.Config = config.Config
-		step.PreRequestScript = config.PreRequestScript
-		_ = json.Unmarshal(actionsJSON, &step.Actions)
-		_ = json.Unmarshal(assertionsJSON, &step.Assertions)
-		_ = json.Unmarshal(extractorsJSON, &step.Extractors)
+		_ = json.Unmarshal(row.ConfigJson, &config)
+		step := domain.MonitorStep{
+			ID:                row.ID,
+			MonitorID:         pgTextString(row.MonitorID),
+			Order:             int(row.StepOrder),
+			Name:              row.Name,
+			Type:              row.StepType,
+			Method:            config.Method,
+			URL:               config.URL,
+			Config:            config.Config,
+			PreRequestScript:  config.PreRequestScript,
+			TimeoutMS:         int(row.TimeoutMs),
+			RetryCount:        int(row.RetryCount),
+			ContinueOnFailure: row.ContinueOnFailure,
+		}
+		_ = json.Unmarshal(row.ActionsJson, &step.Actions)
+		_ = json.Unmarshal(row.AssertionsJson, &step.Assertions)
+		_ = json.Unmarshal(row.ExtractorsJson, &step.Extractors)
 		steps = append(steps, step)
 	}
 
@@ -551,95 +520,47 @@ func (s *PostgresStore) listSteps(monitorID string) []domain.MonitorStep {
 }
 
 func (s *PostgresStore) listSecretAliases(monitorID string) []string {
-	rows, err := s.db.Query(`
-		SELECT alias
-		FROM monitor_secret_bindings
-		WHERE monitor_id = $1
-		ORDER BY created_at
-	`, monitorID)
+	aliases, err := s.queries.ListSecretAliases(context.Background(), pgText(monitorID))
 	if err != nil {
 		log.Printf("list secret aliases: %v", err)
 		return nil
-	}
-	defer rows.Close()
-
-	aliases := []string{}
-	for rows.Next() {
-		var alias string
-		if err := rows.Scan(&alias); err == nil {
-			aliases = append(aliases, alias)
-		}
 	}
 
 	return aliases
 }
 
-func (s *PostgresStore) scanRun(row rowScanner) (domain.MonitorRun, error) {
-	var run domain.MonitorRun
-	var status string
-	var failureCategory string
-	err := row.Scan(&run.ID, &run.MonitorID, &run.MonitorName, &status, &failureCategory,
-		&run.FailureReason, &run.TriggeredBy, &run.StartedAt, &run.EndedAt, &run.DurationMS)
-	run.Status = domain.MonitorStatus(status)
-	run.FailureCategory = domain.FailureCategory(failureCategory)
-
-	return run, err
-}
-
 func (s *PostgresStore) listStepRuns(runID string) []domain.StepRun {
-	rows, err := s.db.Query(`
-		SELECT id, COALESCE(step_id, ''), step_name, step_type, status, request_summary_json,
-		       response_summary_json, assertion_results_json, extractor_results_json,
-		       console_output_json, latency_ms, COALESCE(error_message, '')
-		FROM monitor_step_runs
-		WHERE monitor_run_id = $1
-		ORDER BY step_order
-	`, runID)
+	rows, err := s.queries.ListStepRuns(context.Background(), pgText(runID))
 	if err != nil {
 		log.Printf("list step runs: %v", err)
 		return nil
 	}
-	defer rows.Close()
 
-	steps := []domain.StepRun{}
-	for rows.Next() {
-		var step domain.StepRun
-		var status string
-		var requestSummaryJSON []byte
-		var responseSummaryJSON []byte
-		var assertionsJSON []byte
-		var extractorsJSON []byte
-		var consoleOutputJSON []byte
-		if err := rows.Scan(&step.ID, &step.StepID, &step.StepName, &step.Type, &status,
-			&requestSummaryJSON, &responseSummaryJSON, &assertionsJSON, &extractorsJSON,
-			&consoleOutputJSON, &step.LatencyMS, &step.ErrorMessage); err != nil {
-			log.Printf("scan step run: %v", err)
-			continue
+	steps := make([]domain.StepRun, 0, len(rows))
+	for _, row := range rows {
+		step := domain.StepRun{
+			ID:              row.ID,
+			StepID:          row.StepID,
+			StepName:        row.StepName,
+			Type:            row.StepType,
+			Status:          domain.MonitorStatus(row.Status),
+			RequestSummary:  summaryFromJSON(row.RequestSummaryJson),
+			ResponseSummary: summaryFromJSON(row.ResponseSummaryJson),
+			LatencyMS:       int(row.LatencyMs),
+			ErrorMessage:    row.ErrorMessage,
 		}
-		step.Status = domain.MonitorStatus(status)
-		step.RequestSummary = summaryFromJSON(requestSummaryJSON)
-		step.ResponseSummary = summaryFromJSON(responseSummaryJSON)
-		_ = json.Unmarshal(assertionsJSON, &step.Assertions)
-		_ = json.Unmarshal(extractorsJSON, &step.Extractors)
-		_ = json.Unmarshal(consoleOutputJSON, &step.ConsoleOutput)
+		_ = json.Unmarshal(row.AssertionResultsJson, &step.Assertions)
+		_ = json.Unmarshal(row.ExtractorResultsJson, &step.Extractors)
+		_ = json.Unmarshal(row.ConsoleOutputJson, &step.ConsoleOutput)
 		steps = append(steps, step)
 	}
 
 	return steps
 }
 
-func scanSecret(row rowScanner) (domain.SecretReference, error) {
-	var secret domain.SecretReference
-	err := row.Scan(&secret.ID, &secret.Name, &secret.Alias, &secret.Provider, &secret.Description,
-		&secret.SecretPath, &secret.SecretKey, &secret.IsActive, &secret.LastTestedAt)
-	secret.MaskedValue = "********"
-
-	return secret, err
-}
-
 func (s *PostgresStore) seedDefaults(ctx context.Context) error {
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM monitors`).Scan(&count); err != nil {
+	count, err := s.queries.CountMonitors(ctx)
+	if err != nil {
 		return err
 	}
 	if count > 0 {
@@ -674,30 +595,23 @@ func (s *PostgresStore) UpsertSecret(secret domain.SecretReference) (domain.Secr
 		return domain.SecretReference{}, err
 	}
 
-	_, err = s.db.Exec(`
-		INSERT INTO secret_references (
-			id, name, alias, description, provider, secret_path, secret_key, encrypted_value, is_active, updated_at
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
-		ON CONFLICT (id) DO UPDATE SET
-			name = EXCLUDED.name,
-			alias = EXCLUDED.alias,
-			description = EXCLUDED.description,
-			provider = EXCLUDED.provider,
-			secret_path = EXCLUDED.secret_path,
-			secret_key = EXCLUDED.secret_key,
-			encrypted_value = EXCLUDED.encrypted_value,
-			is_active = EXCLUDED.is_active,
-			updated_at = NOW()
-	`, secret.ID, secret.Name, secret.Alias, secret.Description, secret.Provider,
-		nullIfEmpty(secret.SecretPath), nullIfEmpty(secret.SecretKey), encryptedValue, secret.IsActive)
-	if err != nil {
+	if err := s.queries.UpsertSecret(context.Background(), pulsedb.UpsertSecretParams{
+		ID:             secret.ID,
+		Name:           secret.Name,
+		Alias:          secret.Alias,
+		Description:    pgText(secret.Description),
+		Provider:       secret.Provider,
+		EncryptedValue: pgText(encryptedValue),
+		IsActive:       pgBool(secret.IsActive),
+		SecretPath:     pgNullableText(secret.SecretPath),
+		SecretKey:      pgNullableText(secret.SecretKey),
+	}); err != nil {
 		return domain.SecretReference{}, err
 	}
 
 	saved, ok := s.GetSecret(secret.ID)
 	if !ok {
-		return domain.SecretReference{}, sql.ErrNoRows
+		return domain.SecretReference{}, pgx.ErrNoRows
 	}
 
 	return saved, nil
@@ -708,25 +622,15 @@ func (s *PostgresStore) encryptedValueForSecret(secret domain.SecretReference) (
 		return s.codec.Encrypt(secret.RawValue, secretAssociatedData(secret.ID))
 	}
 
-	var existing string
-	err := s.db.QueryRow(`SELECT COALESCE(encrypted_value, '') FROM secret_references WHERE id = $1`, secret.ID).Scan(&existing)
+	existing, err := s.queries.GetEncryptedSecretByID(context.Background(), secret.ID)
 	if err == nil && existing != "" {
 		return existing, nil
 	}
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && err != pgx.ErrNoRows {
 		return "", err
 	}
 
-	return "", sql.ErrNoRows
-}
-
-func (s *PostgresStore) secretIDForAliasTx(tx *sql.Tx, alias string) string {
-	var id string
-	if err := tx.QueryRow(`SELECT id FROM secret_references WHERE alias = $1`, alias).Scan(&id); err != nil {
-		return ""
-	}
-
-	return id
+	return "", pgx.ErrNoRows
 }
 
 func storeDefaults(monitor domain.Monitor) domain.Monitor {
@@ -756,12 +660,254 @@ func summaryFromJSON(value []byte) string {
 	return payload["summary"]
 }
 
-func nullIfEmpty(value string) any {
-	if value == "" {
-		return nil
+func monitorFromListRow(row pulsedb.ListMonitorsRow) (domain.Monitor, error) {
+	monitor := domain.Monitor{
+		ID:                  row.ID,
+		Name:                row.Name,
+		Description:         row.Description,
+		ScheduleMode:        row.ScheduleMode,
+		ScheduleLabel:       row.ScheduleLabel,
+		ScheduleCron:        row.ScheduleCron,
+		Cron:                row.ScheduleCron,
+		Timezone:            row.Timezone,
+		TimeoutMS:           int(row.TimeoutMs),
+		RetryCount:          int(row.RetryCount),
+		FailureThreshold:    int(row.FailureThreshold),
+		ResponseBodyLimitKB: int(row.ResponseBodyLimitKb),
+		IsActive:            row.IsActive,
+		AlertEnabled:        row.AlertEnabled,
+		Status:              domain.MonitorStatus(row.Status),
+		LastRunAt:           pgTimePtr(row.LastRunAt),
+		LastDurationMS:      int(row.LastDurationMs),
+		SuccessRate24H:      row.SuccessRate24h,
+		CreatedAt:           pgTime(row.CreatedAt),
+		UpdatedAt:           pgTime(row.UpdatedAt),
+	}
+	if err := json.Unmarshal(row.VariablesJson, &monitor.Variables); err != nil {
+		monitor.Variables = map[string]string{}
+	}
+	if err := json.Unmarshal(row.AlertPolicyJson, &monitor.AlertPolicy); err != nil {
+		monitor.AlertPolicy = domain.AlertPolicy{}
 	}
 
-	return value
+	return storeDefaults(monitor), nil
+}
+
+func monitorFromGetRow(row pulsedb.GetMonitorRow) (domain.Monitor, error) {
+	monitor := domain.Monitor{
+		ID:                  row.ID,
+		Name:                row.Name,
+		Description:         row.Description,
+		ScheduleMode:        row.ScheduleMode,
+		ScheduleLabel:       row.ScheduleLabel,
+		ScheduleCron:        row.ScheduleCron,
+		Cron:                row.ScheduleCron,
+		Timezone:            row.Timezone,
+		TimeoutMS:           int(row.TimeoutMs),
+		RetryCount:          int(row.RetryCount),
+		FailureThreshold:    int(row.FailureThreshold),
+		ResponseBodyLimitKB: int(row.ResponseBodyLimitKb),
+		IsActive:            row.IsActive,
+		AlertEnabled:        row.AlertEnabled,
+		Status:              domain.MonitorStatus(row.Status),
+		LastRunAt:           pgTimePtr(row.LastRunAt),
+		LastDurationMS:      int(row.LastDurationMs),
+		SuccessRate24H:      row.SuccessRate24h,
+		CreatedAt:           pgTime(row.CreatedAt),
+		UpdatedAt:           pgTime(row.UpdatedAt),
+	}
+	if err := json.Unmarshal(row.VariablesJson, &monitor.Variables); err != nil {
+		monitor.Variables = map[string]string{}
+	}
+	if err := json.Unmarshal(row.AlertPolicyJson, &monitor.AlertPolicy); err != nil {
+		monitor.AlertPolicy = domain.AlertPolicy{}
+	}
+
+	return storeDefaults(monitor), nil
+}
+
+func runFromListRow(row pulsedb.ListRunsRow) domain.MonitorRun {
+	return domain.MonitorRun{
+		ID:              row.ID,
+		MonitorID:       pgTextString(row.MonitorID),
+		MonitorName:     row.MonitorName,
+		Status:          domain.MonitorStatus(row.Status),
+		FailureCategory: domain.FailureCategory(row.FailureCategory),
+		FailureReason:   row.FailureReason,
+		TriggeredBy:     row.TriggeredBy,
+		StartedAt:       pgTime(row.StartedAt),
+		EndedAt:         pgTime(row.EndedAt),
+		DurationMS:      int(row.DurationMs),
+	}
+}
+
+func runFromGetRow(row pulsedb.GetRunRow) domain.MonitorRun {
+	return domain.MonitorRun{
+		ID:              row.ID,
+		MonitorID:       pgTextString(row.MonitorID),
+		MonitorName:     row.MonitorName,
+		Status:          domain.MonitorStatus(row.Status),
+		FailureCategory: domain.FailureCategory(row.FailureCategory),
+		FailureReason:   row.FailureReason,
+		TriggeredBy:     row.TriggeredBy,
+		StartedAt:       pgTime(row.StartedAt),
+		EndedAt:         pgTime(row.EndedAt),
+		DurationMS:      int(row.DurationMs),
+	}
+}
+
+func alertFromListRow(row pulsedb.ListAlertsRow) domain.AlertEvent {
+	alert := domain.AlertEvent{
+		ID:               row.ID,
+		MonitorID:        pgTextString(row.MonitorID),
+		RunID:            row.RunID,
+		Status:           domain.AlertStatus(row.Status),
+		Severity:         row.Severity,
+		Title:            row.Title,
+		Description:      row.Description,
+		FailureCategory:  domain.FailureCategory(row.FailureCategory),
+		FirstTriggeredAt: pgTime(row.FirstTriggeredAt),
+		LastTriggeredAt:  pgTime(row.LastTriggeredAt),
+		CreatedAt:        pgTime(row.CreatedAt),
+		UpdatedAt:        pgTime(row.UpdatedAt),
+	}
+	alert.LastDeliveredAt = pgTimePtr(row.LastDeliveredAt)
+	alert.ResolvedAt = pgTimePtr(row.ResolvedAt)
+	_ = json.Unmarshal(row.ChannelsJson, &alert.Channels)
+	_ = json.Unmarshal(row.DeliveriesJson, &alert.Deliveries)
+	if alert.Channels == nil {
+		alert.Channels = []string{}
+	}
+	if alert.Deliveries == nil {
+		alert.Deliveries = []domain.AlertDelivery{}
+	}
+
+	return alert
+}
+
+func alertFromOpenRow(row pulsedb.GetOpenAlertRow) domain.AlertEvent {
+	alert := domain.AlertEvent{
+		ID:               row.ID,
+		MonitorID:        pgTextString(row.MonitorID),
+		RunID:            row.RunID,
+		Status:           domain.AlertStatus(row.Status),
+		Severity:         row.Severity,
+		Title:            row.Title,
+		Description:      row.Description,
+		FailureCategory:  domain.FailureCategory(row.FailureCategory),
+		FirstTriggeredAt: pgTime(row.FirstTriggeredAt),
+		LastTriggeredAt:  pgTime(row.LastTriggeredAt),
+		CreatedAt:        pgTime(row.CreatedAt),
+		UpdatedAt:        pgTime(row.UpdatedAt),
+	}
+	alert.LastDeliveredAt = pgTimePtr(row.LastDeliveredAt)
+	alert.ResolvedAt = pgTimePtr(row.ResolvedAt)
+	_ = json.Unmarshal(row.ChannelsJson, &alert.Channels)
+	_ = json.Unmarshal(row.DeliveriesJson, &alert.Deliveries)
+	if alert.Channels == nil {
+		alert.Channels = []string{}
+	}
+	if alert.Deliveries == nil {
+		alert.Deliveries = []domain.AlertDelivery{}
+	}
+
+	return alert
+}
+
+func secretFromListRow(row pulsedb.ListSecretsRow) domain.SecretReference {
+	return domain.SecretReference{
+		ID:           row.ID,
+		Name:         row.Name,
+		Alias:        row.Alias,
+		Provider:     row.Provider,
+		Description:  row.Description,
+		SecretPath:   row.SecretPath,
+		SecretKey:    row.SecretKey,
+		MaskedValue:  "********",
+		IsActive:     row.IsActive.Bool,
+		LastTestedAt: pgTime(row.CreatedAt),
+	}
+}
+
+func secretFromGetRow(row pulsedb.GetSecretRow) domain.SecretReference {
+	return domain.SecretReference{
+		ID:           row.ID,
+		Name:         row.Name,
+		Alias:        row.Alias,
+		Provider:     row.Provider,
+		Description:  row.Description,
+		SecretPath:   row.SecretPath,
+		SecretKey:    row.SecretKey,
+		MaskedValue:  "********",
+		IsActive:     row.IsActive.Bool,
+		LastTestedAt: pgTime(row.CreatedAt),
+	}
+}
+
+func pgText(value string) pgtype.Text {
+	return pgtype.Text{String: value, Valid: true}
+}
+
+func pgInt4(value int) pgtype.Int4 {
+	return pgtype.Int4{Int32: int32(value), Valid: true}
+}
+
+func pgNullableText(value string) pgtype.Text {
+	if value == "" {
+		return pgtype.Text{}
+	}
+
+	return pgText(value)
+}
+
+func pgBool(value bool) pgtype.Bool {
+	return pgtype.Bool{Bool: value, Valid: true}
+}
+
+func pgNumeric(value float64) pgtype.Numeric {
+	var numeric pgtype.Numeric
+	if err := numeric.Scan(strconv.FormatFloat(value, 'f', -1, 64)); err != nil {
+		return pgtype.Numeric{}
+	}
+
+	return numeric
+}
+
+func pgTimestamp(value time.Time) pgtype.Timestamp {
+	return pgtype.Timestamp{Time: value, Valid: true}
+}
+
+func pgTimestampPtr(value *time.Time) pgtype.Timestamp {
+	if value == nil {
+		return pgtype.Timestamp{}
+	}
+
+	return pgTimestamp(*value)
+}
+
+func pgTextString(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+
+	return value.String
+}
+
+func pgTime(value pgtype.Timestamp) time.Time {
+	if !value.Valid {
+		return time.Time{}
+	}
+
+	return value.Time
+}
+
+func pgTimePtr(value pgtype.Timestamp) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	timeValue := value.Time
+
+	return &timeValue
 }
 
 func secretAssociatedData(id string) string {

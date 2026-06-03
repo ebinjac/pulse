@@ -238,24 +238,7 @@ func (s *Server) secretRoutes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listAlerts(w http.ResponseWriter, _ *http.Request) {
-	alerts := []map[string]any{}
-	for _, run := range s.store.ListRuns("") {
-		if run.Status == domain.StatusSuccess {
-			continue
-		}
-		alerts = append(alerts, map[string]any{
-			"id":              "alert-" + run.ID,
-			"monitorId":       run.MonitorID,
-			"status":          "open",
-			"severity":        "critical",
-			"title":           run.MonitorName + " is failing",
-			"description":     run.FailureReason,
-			"failureCategory": run.FailureCategory,
-			"channels":        []string{"email", "slack"},
-		})
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"alerts": alerts})
+	writeJSON(w, http.StatusOK, map[string]any{"alerts": s.store.ListAlerts()})
 }
 
 func (s *Server) listAllRuns(w http.ResponseWriter, _ *http.Request) {

@@ -101,13 +101,17 @@ CREATE TABLE IF NOT EXISTS monitor_step_runs (
 CREATE TABLE IF NOT EXISTS alerts (
     id TEXT PRIMARY KEY,
     monitor_id TEXT REFERENCES monitors(id) ON DELETE CASCADE,
+    run_id TEXT REFERENCES monitor_runs(id) ON DELETE SET NULL,
     status VARCHAR(50),
     severity VARCHAR(50),
     title VARCHAR(255),
     description TEXT,
     failure_category VARCHAR(100),
+    channels_json JSONB DEFAULT '[]'::jsonb,
+    deliveries_json JSONB DEFAULT '[]'::jsonb,
     first_triggered_at TIMESTAMP,
     last_triggered_at TIMESTAMP,
+    last_delivered_at TIMESTAMP,
     resolved_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()

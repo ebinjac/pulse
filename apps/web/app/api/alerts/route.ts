@@ -17,7 +17,12 @@ export async function GET(request: Request) {
       failureCategory: run.failureCategory ?? "UNKNOWN_ERROR",
       firstTriggeredAt: run.endedAt,
       lastTriggeredAt: run.endedAt,
+      lastDeliveredAt: run.endedAt,
       channels: ["email", "slack"],
+      deliveries: [
+        { channel: "email", status: "skipped", detail: "Mock fallback delivery", sentAt: run.endedAt },
+        { channel: "slack", status: "skipped", detail: "Mock fallback delivery", sentAt: run.endedAt },
+      ],
     }))
 
   return Response.json({ alerts })

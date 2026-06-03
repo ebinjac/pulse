@@ -35,6 +35,12 @@ services:
       DATABASE_URL: postgres://pulse:pulse@postgres:5432/pulse?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       PULSE_SECRET_ENCRYPTION_KEY: ZW5zZW1ibGUtcHVsc2UtbG9jYWwtZGV2LWtleS0wMSE=
+      PULSE_ALERT_SLACK_WEBHOOK_URL: ""
+      PULSE_ALERT_SMTP_ADDR: ""
+      PULSE_ALERT_SMTP_USER: ""
+      PULSE_ALERT_SMTP_PASSWORD: ""
+      PULSE_ALERT_EMAIL_FROM: ""
+      PULSE_ALERT_EMAIL_TO: ""
     ports:
       - "8080:8080"
     depends_on:
