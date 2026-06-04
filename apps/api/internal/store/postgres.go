@@ -454,26 +454,26 @@ func (s *PostgresStore) SaveAlert(alert domain.AlertEvent) {
 	}
 	alert.UpdatedAt = now
 	if err := s.queries.UpsertAlert(context.Background(), pulsedb.UpsertAlertParams{
-		ID:               alert.ID,
-		MonitorID:        pgText(alert.MonitorID),
-		Status:           pgText(string(alert.Status)),
-		Severity:         pgText(alert.Severity),
-		Title:            pgText(alert.Title),
-		Description:      pgText(alert.Description),
-		FailureCategory:  pgText(string(alert.FailureCategory)),
-		ChannelsJson:     mustJSON(alert.Channels),
-		DeliveriesJson:   mustJSON(alert.Deliveries),
-		FirstTriggeredAt: pgTimestamp(alert.FirstTriggeredAt),
-		LastTriggeredAt:  pgTimestamp(alert.LastTriggeredAt),
-		CreatedAt:        pgTimestamp(alert.CreatedAt),
-		UpdatedAt:        pgTimestamp(alert.UpdatedAt),
-		RunID:              pgNullableText(alert.RunID),
-		LastDeliveredAt:    pgTimestampPtr(alert.LastDeliveredAt),
-		ResolvedAt:         pgTimestampPtr(alert.ResolvedAt),
-		AcknowledgedBy:     pgNullableText(alert.AcknowledgedBy),
-		AcknowledgedAt:     pgTimestampPtr(alert.AcknowledgedAt),
-		SnoozedUntil:       pgTimestampPtr(alert.SnoozedUntil),
-		SuppressionReason:  pgNullableText(alert.SuppressionReason),
+		ID:                alert.ID,
+		MonitorID:         pgText(alert.MonitorID),
+		Status:            pgText(string(alert.Status)),
+		Severity:          pgText(alert.Severity),
+		Title:             pgText(alert.Title),
+		Description:       pgText(alert.Description),
+		FailureCategory:   pgText(string(alert.FailureCategory)),
+		ChannelsJson:      mustJSON(alert.Channels),
+		DeliveriesJson:    mustJSON(alert.Deliveries),
+		FirstTriggeredAt:  pgTimestamp(alert.FirstTriggeredAt),
+		LastTriggeredAt:   pgTimestamp(alert.LastTriggeredAt),
+		CreatedAt:         pgTimestamp(alert.CreatedAt),
+		UpdatedAt:         pgTimestamp(alert.UpdatedAt),
+		RunID:             pgNullableText(alert.RunID),
+		LastDeliveredAt:   pgTimestampPtr(alert.LastDeliveredAt),
+		ResolvedAt:        pgTimestampPtr(alert.ResolvedAt),
+		AcknowledgedBy:    pgNullableText(alert.AcknowledgedBy),
+		AcknowledgedAt:    pgTimestampPtr(alert.AcknowledgedAt),
+		SnoozedUntil:      pgTimestampPtr(alert.SnoozedUntil),
+		SuppressionReason: pgNullableText(alert.SuppressionReason),
 	}); err != nil {
 		log.Printf("save alert: %v", err)
 	}
@@ -612,7 +612,7 @@ func (s *PostgresStore) seedDefaults(ctx context.Context) error {
 		return nil
 	}
 
-	for _, secret := range memory.ListSecrets() {
+	for _, secret := range memory.secrets {
 		if _, err := s.UpsertSecret(secret); err != nil {
 			return err
 		}
