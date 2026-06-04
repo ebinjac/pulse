@@ -55,6 +55,24 @@ type Application struct {
 	AlertRoutingJson []byte           `json:"alert_routing_json"`
 }
 
+type CertificateProfile struct {
+	ID                    string           `json:"id"`
+	Name                  string           `json:"name"`
+	Host                  string           `json:"host"`
+	Port                  int32            `json:"port"`
+	CertType              string           `json:"cert_type"`
+	CertSecretAlias       pgtype.Text      `json:"cert_secret_alias"`
+	KeySecretAlias        pgtype.Text      `json:"key_secret_alias"`
+	PfxSecretAlias        pgtype.Text      `json:"pfx_secret_alias"`
+	CaCertSecretAlias     pgtype.Text      `json:"ca_cert_secret_alias"`
+	PassphraseSecretAlias pgtype.Text      `json:"passphrase_secret_alias"`
+	InsecureSkipVerify    pgtype.Bool      `json:"insecure_skip_verify"`
+	IsActive              pgtype.Bool      `json:"is_active"`
+	LastTestedAt          pgtype.Timestamp `json:"last_tested_at"`
+	CreatedAt             pgtype.Timestamp `json:"created_at"`
+	UpdatedAt             pgtype.Timestamp `json:"updated_at"`
+}
+
 type Monitor struct {
 	ID                  string           `json:"id"`
 	ApplicationID       pgtype.Text      `json:"application_id"`

@@ -22,6 +22,7 @@ type MemoryStore struct {
 	versions     map[string][]memoryVersionRecord
 	runs         map[string]domain.MonitorRun
 	secrets      map[string]domain.SecretReference
+	certificates map[string]domain.CertificateProfile
 	alerts       map[string]domain.AlertEvent
 	maintenance  map[string]domain.MaintenanceWindow
 	retention    domain.RetentionSettings
@@ -154,9 +155,10 @@ func NewMemoryStore() *MemoryStore {
 				config: seedDraft,
 			}},
 		},
-		runs:   map[string]domain.MonitorRun{},
-		alerts:      map[string]domain.AlertEvent{},
-		maintenance: map[string]domain.MaintenanceWindow{},
+		runs:         map[string]domain.MonitorRun{},
+		certificates: map[string]domain.CertificateProfile{},
+		alerts:       map[string]domain.AlertEvent{},
+		maintenance:  map[string]domain.MaintenanceWindow{},
 		secrets: map[string]domain.SecretReference{
 			"sec-client-id": {
 				ID: "sec-client-id", Name: "Demo Client ID", Alias: "clientId", Provider: "encrypted-db",
@@ -508,6 +510,64 @@ func (s *MemoryStore) GetRun(id string) (domain.MonitorRun, bool) {
 
 	run, ok := s.runs[id]
 	return run, ok
+}
+
+func (s *MemoryStore) ListCertificateProfiles() []domain.CertificateProfile {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	profiles := make([]domain.CertificateProfile, 0, len(s.certificates))
+	for _, profile := range s.certificates {
+		profiles = append(profiles, profile)
+	}
+	sort.Slice(profiles, func(i, j int) bool {
+		return profiles[i].UpdatedAt.After(profiles[j].UpdatedAt)
+	})
+	return profiles
+}
+
+func (s *MemoryStore) GetCertificateProfile(id string) (domain.CertificateProfile, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	profile, ok := s.certificates[id]
+	return profile, ok
+}
+
+func (s *MemoryStore) UpsertCertificateProfile(profile domain.CertificateProfile) (domain.CertificateProfile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	if profile.ID == "" {
+		profile.ID = "cert-" + randomID()
+	}
+	if profile.Port <= 0 {
+		profile.Port = 443
+	}
+	if profile.CertType == "" {
+		profile.CertType = "pem"
+	}
+	if existing, ok := s.certificates[profile.ID]; ok && !existing.CreatedAt.IsZero() {
+		profile.CreatedAt = existing.CreatedAt
+	}
+	if profile.CreatedAt.IsZero() {
+		profile.CreatedAt = now
+	}
+	profile.UpdatedAt = now
+	s.certificates[profile.ID] = profile
+	return profile, nil
+}
+
+func (s *MemoryStore) DeleteCertificateProfile(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.certificates[id]; !ok {
+		return false
+	}
+	delete(s.certificates, id)
+	return true
 }
 
 func (s *MemoryStore) ListSecrets() []domain.SecretReference {

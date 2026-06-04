@@ -90,6 +90,87 @@ export interface PreRequestAction {
   configPreview: string
 }
 
+export type RequestAuthType = "noAuth" | "apiKey" | "bearer" | "basic" | "jwtBearer"
+
+export interface RequestAuthConfig {
+  type?: RequestAuthType
+  key?: string
+  value?: string
+  addTo?: "header" | "query"
+  token?: string
+  username?: string
+  password?: string
+  algorithm?: "HS256" | "HS384" | "HS512"
+  secret?: string
+  secretBase64Encoded?: boolean
+  payload?: string
+  headers?: string
+  headerPrefix?: string
+  headerName?: string
+  queryKey?: string
+}
+
+export interface RequestCookieConfig {
+  enabled?: boolean
+  mode?: "jar"
+  manual?: Array<{
+    name: string
+    value: string
+    domain?: string
+    path?: string
+  }>
+}
+
+export interface RequestMTLSConfig {
+  mode?: "global" | "none" | "profile" | "custom"
+  profileId?: string
+  enabled?: boolean
+  certSecretAlias?: string
+  keySecretAlias?: string
+  caCertSecretAlias?: string
+  insecureSkipVerify?: boolean
+}
+
+export interface RequestProxyConfig {
+  enabled?: boolean
+  url?: string
+  username?: string
+  password?: string
+}
+
+export interface CertificateProfile {
+  id: string
+  name: string
+  host: string
+  port: number
+  certType: "pem" | "pfx"
+  certSecretAlias?: string
+  keySecretAlias?: string
+  pfxSecretAlias?: string
+  caCertSecretAlias?: string
+  passphraseSecretAlias?: string
+  insecureSkipVerify: boolean
+  isActive: boolean
+  lastTestedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CertificateProfileInput {
+  id?: string
+  name: string
+  host: string
+  port: number
+  certType: "pem" | "pfx"
+  certFile?: string
+  keyFile?: string
+  pfxFile?: string
+  caCertFile?: string
+  passphrase?: string
+  insecureSkipVerify: boolean
+  isActive: boolean
+}
+
 export interface MonitorStep {
   id: string
   order: number
@@ -104,7 +185,12 @@ export interface MonitorStep {
   assertions: PulseAssertion[]
   extractors: PulseExtractor[]
   preRequestScript?: string
-  config?: Record<string, any>
+  config?: Record<string, any> & {
+    auth?: RequestAuthConfig
+    cookies?: RequestCookieConfig
+    mtls?: RequestMTLSConfig
+    proxy?: RequestProxyConfig
+  }
 }
 
 export interface SecretReference {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   Code2,
   Variable,
@@ -17,11 +17,13 @@ import { useTheme } from "next-themes"
 
 import { Button } from "@workspace/ui/components/button"
 import { cn } from "@workspace/ui/lib/utils"
+import type { TemplateSuggestion } from "./template-intelligence"
 
 interface ScriptEditorProps {
   value: string
   onChange: (value: string) => void
   stepName?: string
+  suggestions?: TemplateSuggestion[]
 }
 
 const snippets = [
@@ -35,6 +37,8 @@ const snippets = [
   { label: "UUID", icon: Copy, code: `const uuid = crypto.randomUUID();\npm.variables.set("uuid", uuid);` },
   { label: "Timestamp", icon: Terminal, code: `const timestamp = new Date().toISOString();\npm.variables.set("timestamp", timestamp);` },
   { label: "Base64", icon: Code2, code: `const encoded = btoa("value");\npm.variables.set("encoded", encoded);` },
+  { label: "HMAC SHA-256", icon: Code2, code: `const secretBytes = CryptoJS.enc.Base64.parse(pm.secrets.get("clientSecret"));\nconst signatureBytes = CryptoJS.HmacSHA256("payload", secretBytes);\nlet signature = CryptoJS.enc.Base64.stringify(signatureBytes).replace(/=+$/, "");\nsignature = signature.split("+").join("-").split("/").join("_");\npm.variables.set("signature", signature);` },
+  { label: "Send Request", icon: FileJson, code: `pm.sendRequest({\n  url: pm.variables.get("tokenUrl"),\n  method: "POST",\n  header: {\n    "Content-Type": "application/json"\n  },\n  body: {\n    mode: "raw",\n    raw: JSON.stringify({ scope: ["example::POST"] })\n  }\n}, function (err, response) {\n  if (err) {\n    console.log("request failed:", err.message);\n    return;\n  }\n\n  const payload = response.json();\n  pm.environment.set("auth_token", payload.authorization_token);\n});` },
 ] as const
 
 const apiReference = [
@@ -48,6 +52,10 @@ const apiReference = [
   { signature: "pm.request.headers.add(k, v)", description: "Add a header" },
   { signature: "pm.request.headers.get(k)", description: "Get a header" },
   { signature: "pm.request.headers.remove(k)", description: "Remove a header" },
+  { signature: "pm.sendRequest(options, callback)", description: "Run a nested HTTP request and capture it in diagnostics" },
+  { signature: "CryptoJS.HmacSHA256(input, keyBytes)", description: "Generate an HMAC SHA-256 signature" },
+  { signature: "CryptoJS.enc.Base64.parse(value)", description: "Parse a Base64 secret for crypto operations" },
+  { signature: "CryptoJS.enc.Base64.stringify(bytes)", description: "Base64 encode crypto output" },
   { signature: "console.log(...)", description: "Log to console output" },
 ] as const
 
@@ -105,16 +113,58 @@ declare namespace pm {
       function remove(key: string): void;
     }
   }
+
+  interface SendRequestOptions {
+    url: string;
+    method?: string;
+    header?: Record<string, string>;
+    headers?: Record<string, string>;
+    body?: string | {
+      mode?: "raw";
+      raw?: string;
+    };
+  }
+
+  interface SendRequestResponse {
+    code: number;
+    status: number;
+    headers: Record<string, string>;
+    text(): string;
+    json(): any;
+  }
+
+  function sendRequest(
+    options: string | SendRequestOptions,
+    callback: (err: { message: string } | null, response: SendRequestResponse) => void
+  ): void;
+}
+
+declare namespace CryptoJS {
+  namespace enc {
+    namespace Base64 {
+      function parse(value: string): any;
+      function stringify(value: any): string;
+    }
+  }
+
+  function HmacSHA256(input: string, key: any): any;
 }
 `
 
-export function ScriptEditor({ value, onChange, stepName }: ScriptEditorProps) {
+export function ScriptEditor({ value, onChange, stepName, suggestions = [] }: ScriptEditorProps) {
   const editorRef = useRef<any>(null)
   const monacoRef = useRef<any>(null)
+  const suggestionsRef = useRef<TemplateSuggestion[]>(suggestions)
+  const completionProviderRef = useRef<{ dispose: () => void } | null>(null)
   const [showHelp, setShowHelp] = useState(false)
   const { resolvedTheme } = useTheme()
+  suggestionsRef.current = suggestions
 
   const editorTheme = resolvedTheme === "light" ? "light" : "vs-dark"
+
+  useEffect(() => {
+    return () => completionProviderRef.current?.dispose()
+  }, [])
 
   function handleEditorBeforeMount(monaco: any) {
     // Configure Monaco compiler checking options for JavaScript
@@ -137,6 +187,12 @@ export function ScriptEditor({ value, onChange, stepName }: ScriptEditorProps) {
   function handleEditorDidMount(editor: any, monaco: any) {
     editorRef.current = editor
     monacoRef.current = monaco
+    completionProviderRef.current?.dispose()
+    completionProviderRef.current = monaco.languages.registerCompletionItemProvider("javascript", {
+      triggerCharacters: ["{", ".", "\"", "'"],
+      provideCompletionItems: (model: any, position: any) =>
+        scriptCompletionItems(monaco, model, position, suggestionsRef.current),
+    })
   }
 
   function insertSnippet(snippet: string) {
@@ -253,4 +309,46 @@ export function ScriptEditor({ value, onChange, stepName }: ScriptEditorProps) {
       </div>
     </div>
   )
+}
+
+function scriptCompletionItems(monaco: any, model: any, position: any, suggestions: TemplateSuggestion[]) {
+  const lineUntilCursor = model.getValueInRange({
+    startLineNumber: position.lineNumber,
+    startColumn: 1,
+    endLineNumber: position.lineNumber,
+    endColumn: position.column,
+  })
+  const variableStringMatch = lineUntilCursor.match(/pm\.(?:variables|environment)\.(?:get|set)\(\s*["']([^"']*)$/)
+  const secretStringMatch = lineUntilCursor.match(/pm\.secrets\.get\(\s*["']([^"']*)$/)
+  const templateMatch = lineUntilCursor.match(/\{\{[^}]*$/)
+
+  if (!variableStringMatch && !secretStringMatch && !templateMatch) {
+    return { suggestions: [] }
+  }
+
+  const replacementStart = templateMatch
+    ? position.column - templateMatch[0].length
+    : variableStringMatch
+      ? position.column - variableStringMatch[1].length
+      : secretStringMatch
+        ? position.column - secretStringMatch[1].length
+        : position.column
+
+  const range = new monaco.Range(position.lineNumber, replacementStart, position.lineNumber, position.column)
+  const filtered = suggestions.filter((suggestion) => {
+    if (secretStringMatch) return suggestion.kind === "secret"
+    if (variableStringMatch) return suggestion.kind !== "secret"
+    return true
+  })
+
+  return {
+    suggestions: filtered.map((suggestion) => ({
+      label: templateMatch ? suggestion.label : suggestion.key,
+      kind: suggestion.kind === "secret" ? monaco.languages.CompletionItemKind.Value : monaco.languages.CompletionItemKind.Variable,
+      detail: suggestion.detail,
+      documentation: templateMatch ? suggestion.scriptAccessor : suggestion.token,
+      insertText: templateMatch ? suggestion.token : suggestion.key,
+      range,
+    })),
+  }
 }

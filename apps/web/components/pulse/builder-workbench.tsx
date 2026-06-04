@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react"
 import {
   ArrowDown,
   ArrowUp,
@@ -31,15 +31,23 @@ import {
   Upload,
   History,
   Rocket,
+  Cookie,
+  FileKey,
+  Globe,
+  Settings,
+  Braces,
+  ListFilter,
+  Hash,
 } from "lucide-react"
 
 import { MonitorImportExportDialog } from "./monitor-import-export-dialog"
 import { MonitorVersionsPanel } from "./monitor-versions-panel"
 import { ScriptEditor } from "./script-editor"
 import { SyntheticStepEditor } from "./synthetic-step-editor"
+import { buildTemplateSuggestions, type TemplateSuggestion } from "./template-intelligence"
 import Editor from "@monaco-editor/react"
 import { useTheme } from "next-themes"
-import type { Application, Monitor, MonitorRun, MonitorStatus, MonitorStep, PulseAssertion, PulseExtractor, PreRequestAction } from "@/lib/pulse-types"
+import type { Application, CertificateProfile, Monitor, MonitorRun, MonitorStatus, MonitorStep, PulseAssertion, PulseExtractor, PreRequestAction } from "@/lib/pulse-types"
 import { Button } from "@workspace/ui/components/button"
 import { Card } from "@workspace/ui/components/card"
 import {
@@ -72,6 +80,7 @@ import { cn } from "@workspace/ui/lib/utils"
 interface BuilderWorkbenchProps {
   monitor: Monitor
   applications?: Application[]
+  certificateProfiles?: CertificateProfile[]
 }
 
 type ExecutionState = "idle" | "running" | "complete"
@@ -175,6 +184,61 @@ function checkAssertionFailed(assertion: PulseAssertion) {
   }
 }
 
+function normalizeStepOrder(steps: MonitorStep[]) {
+  return steps.map((step, index) => ({
+    ...step,
+    order: index + 1,
+  }))
+}
+
+function queryParamsFromUrl(url: string | undefined) {
+  const raw = url ?? ""
+  const queryStart = raw.indexOf("?")
+  if (queryStart === -1) return []
+  const hashStart = raw.indexOf("#", queryStart)
+  const query = raw.slice(queryStart + 1, hashStart === -1 ? raw.length : hashStart)
+  if (!query) return []
+
+  return query
+    .split("&")
+    .filter(Boolean)
+    .map((part) => {
+      const [rawKey = "", ...rest] = part.split("=")
+      return {
+        key: decodeParamPart(rawKey),
+        value: decodeParamPart(rest.join("=")),
+      }
+    })
+}
+
+function urlWithQueryParams(url: string | undefined, params: Array<{ key: string; value: string }>) {
+  const raw = url ?? ""
+  const hashStart = raw.indexOf("#")
+  const hash = hashStart === -1 ? "" : raw.slice(hashStart)
+  const withoutHash = hashStart === -1 ? raw : raw.slice(0, hashStart)
+  const queryStart = withoutHash.indexOf("?")
+  const base = queryStart === -1 ? withoutHash : withoutHash.slice(0, queryStart)
+  const query = params
+    .filter((param) => param.key.trim())
+    .map((param) => `${encodeParamPart(param.key.trim())}=${encodeParamPart(param.value)}`)
+    .join("&")
+  return `${base}${query ? `?${query}` : ""}${hash}`
+}
+
+function decodeParamPart(value: string) {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, " "))
+  } catch {
+    return value
+  }
+}
+
+function encodeParamPart(value: string) {
+  return encodeURIComponent(value)
+    .replace(/%7B/g, "{")
+    .replace(/%7D/g, "}")
+}
+
 function applyJsonToMonitor(current: Monitor, raw: string): { draft?: Monitor; error?: string } {
   try {
     const parsed = JSON.parse(raw) as Partial<Monitor> & {
@@ -276,6 +340,8 @@ interface StepCardProps {
   index: number
   totalSteps: number
   mockRun: MonitorRun | null
+  suggestions: TemplateSuggestion[]
+  certificateProfiles: CertificateProfile[]
   onUpdate: (patch: Partial<MonitorStep>) => void
   onDelete: () => void
   onMoveUp: () => void
@@ -292,11 +358,212 @@ const methodColors: Record<string, string> = {
   OPTIONS: "text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
 }
 
-function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMoveUp, onMoveDown }: StepCardProps) {
+function defaultHttpConfig(): NonNullable<MonitorStep["config"]> {
+  return {
+    headers: {},
+    body: "",
+    auth: { type: "noAuth" as const },
+    cookies: { enabled: true, mode: "jar" as const, manual: [] },
+    mtls: { mode: "global" as const, enabled: false, insecureSkipVerify: false },
+    proxy: { enabled: false },
+  }
+}
+
+function TemplateInput({
+  value,
+  onChange,
+  suggestions,
+  className,
+  containerClassName,
+  placeholder,
+}: {
+  value: string
+  onChange: (value: string) => void
+  suggestions: TemplateSuggestion[]
+  className?: string
+  containerClassName?: string
+  placeholder?: string
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [activeRange, setActiveRange] = useState<{ start: number; end: number; query: string } | null>(null)
+
+  const visibleSuggestions = useMemo(() => {
+    if (!activeRange) return []
+    const query = normalizeTemplateQuery(activeRange.query)
+    return suggestions
+      .filter((suggestion) => suggestionMatchesQuery(suggestion, query))
+      .slice(0, 8)
+  }, [activeRange, suggestions])
+
+  function updateTemplateContext(nextValue: string, caret: number | null) {
+    if (caret === null) {
+      setActiveRange(null)
+      return
+    }
+    const beforeCaret = nextValue.slice(0, caret)
+    const start = beforeCaret.lastIndexOf("{{")
+    if (start === -1) {
+      setActiveRange(null)
+      return
+    }
+    const closedAfterStart = beforeCaret.indexOf("}}", start)
+    if (closedAfterStart !== -1) {
+      setActiveRange(null)
+      return
+    }
+    setActiveRange({ start, end: caret, query: nextValue.slice(start + 2, caret) })
+  }
+
+  function insertSuggestion(suggestion: TemplateSuggestion) {
+    if (!activeRange) return
+    const nextValue = `${value.slice(0, activeRange.start)}${suggestion.token}${value.slice(activeRange.end)}`
+    onChange(nextValue)
+    setActiveRange(null)
+    window.requestAnimationFrame(() => {
+      const nextCursor = activeRange.start + suggestion.token.length
+      inputRef.current?.focus()
+      inputRef.current?.setSelectionRange(nextCursor, nextCursor)
+    })
+  }
+
+  return (
+    <div className={cn("relative min-w-0 flex-1", containerClassName)}>
+      <input
+        ref={inputRef}
+        placeholder={placeholder}
+        className={className}
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value)
+          updateTemplateContext(event.target.value, event.target.selectionStart)
+        }}
+        onClick={(event) => updateTemplateContext(event.currentTarget.value, event.currentTarget.selectionStart)}
+        onKeyUp={(event) => updateTemplateContext(event.currentTarget.value, event.currentTarget.selectionStart)}
+        onBlur={() => window.setTimeout(() => setActiveRange(null), 120)}
+      />
+      {visibleSuggestions.length > 0 ? (
+        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-40 max-h-64 overflow-auto rounded-md border border-border bg-popover p-1 shadow-lg">
+          {visibleSuggestions.map((suggestion) => (
+            <button
+              key={`${suggestion.kind}-${suggestion.key}`}
+              type="button"
+              onMouseDown={(event) => {
+                event.preventDefault()
+                insertSuggestion(suggestion)
+              }}
+              className="flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-mono font-semibold text-foreground">{suggestion.token}</span>
+                <span className="block truncate text-[10px] text-muted-foreground">{suggestion.detail}</span>
+              </span>
+              <span className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[9px] font-bold uppercase text-muted-foreground">
+                {suggestion.kind}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function TemplateBodyEditor({
+  value,
+  onChange,
+  theme,
+  suggestions,
+}: {
+  value: string
+  onChange: (value: string) => void
+  theme: string
+  suggestions: TemplateSuggestion[]
+}) {
+  const suggestionsRef = useRef(suggestions)
+  const providerRef = useRef<{ dispose: () => void } | null>(null)
+  suggestionsRef.current = suggestions
+
+  useEffect(() => {
+    return () => providerRef.current?.dispose()
+  }, [])
+
+  return (
+    <Editor
+      height="180px"
+      language="json"
+      theme={theme}
+      value={value}
+      onChange={(val) => onChange(val ?? "")}
+      onMount={(_editor, monaco) => {
+        providerRef.current?.dispose()
+        providerRef.current = monaco.languages.registerCompletionItemProvider("json", {
+          triggerCharacters: ["{"],
+          provideCompletionItems: (model: any, position: any) => templateCompletionItems(monaco, model, position, suggestionsRef.current),
+        })
+      }}
+      options={{
+        minimap: { enabled: false },
+        fontSize: 12,
+        fontFamily: "var(--font-mono), monospace",
+        lineNumbers: "on",
+        scrollBeyondLastLine: false,
+        automaticLayout: true,
+        padding: { top: 8, bottom: 8 },
+        tabSize: 2,
+        fixedOverflowWidgets: true,
+      }}
+    />
+  )
+}
+
+function templateCompletionItems(monaco: any, model: any, position: any, suggestions: TemplateSuggestion[]) {
+  const lineUntilCursor = model.getValueInRange({
+    startLineNumber: position.lineNumber,
+    startColumn: 1,
+    endLineNumber: position.lineNumber,
+    endColumn: position.column,
+  })
+  const templateMatch = lineUntilCursor.match(/\{\{[^}]*$/)
+  if (!templateMatch) return { suggestions: [] }
+  const range = new monaco.Range(position.lineNumber, position.column - templateMatch[0].length, position.lineNumber, position.column)
+
+  return {
+    suggestions: suggestions
+      .filter((suggestion) => suggestionMatchesQuery(suggestion, normalizeTemplateQuery(templateMatch[0].slice(2))))
+      .map((suggestion) => ({
+      label: suggestion.label,
+      kind: suggestion.kind === "secret" ? monaco.languages.CompletionItemKind.Value : monaco.languages.CompletionItemKind.Variable,
+      detail: suggestion.detail,
+      documentation: suggestion.scriptAccessor,
+      insertText: suggestion.token,
+      range,
+    })),
+  }
+}
+
+function normalizeTemplateQuery(query: string) {
+  return query
+    .replace(/^\{\{/, "")
+    .replace(/^variables\./, "")
+    .replace(/^secrets\./, "")
+    .replace(/[}\s]/g, "")
+    .toLowerCase()
+}
+
+function suggestionMatchesQuery(suggestion: TemplateSuggestion, query: string) {
+  if (!query) return true
+  return (
+    suggestion.key.toLowerCase().includes(query) ||
+    suggestion.label.toLowerCase().includes(query) ||
+    suggestion.token.toLowerCase().includes(query)
+  )
+}
+
+function StepCard({ step, index, totalSteps, mockRun, suggestions, certificateProfiles, onUpdate, onDelete, onMoveUp, onMoveDown }: StepCardProps) {
   const { resolvedTheme } = useTheme()
   const editorTheme = resolvedTheme === "light" ? "light" : "vs-dark"
   // Tabs State
-  const [activeTab, setActiveTab] = useState<"headers" | "body" | "scripts" | "tests" | "settings">("headers")
+  const [activeTab, setActiveTab] = useState<"params" | "auth" | "headers" | "body" | "cookies" | "certificates" | "proxy" | "scripts" | "tests" | "settings">("params")
 
   // Copilot AI Suggestions States
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([])
@@ -484,6 +751,105 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
     })
   }
 
+  // Query Params Local Form State
+  const [localParams, setLocalParams] = useState<{ key: string; value: string }[]>(() => queryParamsFromUrl(step.url))
+
+  useEffect(() => {
+    const nextParams = queryParamsFromUrl(step.url)
+    if (JSON.stringify(nextParams) !== JSON.stringify(localParams)) {
+      setLocalParams(nextParams)
+    }
+  }, [step.url])
+
+  const updateLocalParam = (idx: number, field: "key" | "value", val: string) => {
+    const next = [...localParams]
+    const item = next[idx]
+    if (!item) return
+    item[field] = val
+    setLocalParams(next)
+    onUpdate({ url: urlWithQueryParams(step.url, next) })
+  }
+
+  const addLocalParam = () => {
+    setLocalParams([...localParams, { key: "", value: "" }])
+  }
+
+  const removeLocalParam = (idx: number) => {
+    const next = localParams.filter((_, i) => i !== idx)
+    setLocalParams(next)
+    onUpdate({ url: urlWithQueryParams(step.url, next) })
+  }
+
+  const authConfig = step.config?.auth ?? { type: "noAuth" as const }
+  const cookieConfig = step.config?.cookies ?? { enabled: true, mode: "jar" as const, manual: [] }
+  const manualCookies = cookieConfig.manual ?? []
+  const mtlsConfig = step.config?.mtls ?? { mode: "global" as const, enabled: false, insecureSkipVerify: false }
+  const proxyConfig = step.config?.proxy ?? { enabled: false }
+
+  const updateAuthConfig = (patch: Record<string, any>) => {
+    onUpdate({
+      config: {
+        ...step.config,
+        auth: {
+          ...authConfig,
+          ...patch,
+        },
+      },
+    })
+  }
+
+  const updateCookieConfig = (patch: Record<string, any>) => {
+    onUpdate({
+      config: {
+        ...step.config,
+        cookies: {
+          ...cookieConfig,
+          ...patch,
+        },
+      },
+    })
+  }
+
+  const updateManualCookie = (idx: number, field: "name" | "value" | "domain" | "path", value: string) => {
+    const next = [...manualCookies]
+    const item = next[idx]
+    if (!item) return
+    next[idx] = { ...item, [field]: value }
+    updateCookieConfig({ manual: next })
+  }
+
+  const addManualCookie = () => {
+    updateCookieConfig({ manual: [...manualCookies, { name: "", value: "", domain: "", path: "/" }] })
+  }
+
+  const removeManualCookie = (idx: number) => {
+    updateCookieConfig({ manual: manualCookies.filter((_, i) => i !== idx) })
+  }
+
+  const updateMTLSConfig = (patch: Record<string, any>) => {
+    onUpdate({
+      config: {
+        ...step.config,
+        mtls: {
+          ...mtlsConfig,
+          ...patch,
+        },
+      },
+    })
+  }
+
+  const updateProxyConfig = (patch: Record<string, any>) => {
+    onUpdate({
+      config: {
+        ...step.config,
+        proxy: {
+          ...proxyConfig,
+          ...patch,
+        },
+      },
+    })
+  }
+
   // Assertions Local Form State
   const [assertType, setAssertType] = useState<string>("statusCode")
   const [assertTarget, setAssertTarget] = useState<string>("status")
@@ -654,49 +1020,330 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
                   </SelectContent>
                 </Select>
               </div>
-              <input
-                className="flex-1 bg-transparent px-3 py-2 text-sm outline-none border-none h-9 w-full min-w-0 font-mono text-xs"
+              <TemplateInput
+                className="bg-transparent px-3 py-2 text-sm outline-none border-none h-9 w-full min-w-0 font-mono text-xs"
                 value={step.url ?? ""}
                 placeholder="https://{{variables.baseUrl}}/health"
-                onChange={(event) => onUpdate({ url: event.target.value })}
+                onChange={(value) => onUpdate({ url: value })}
+                suggestions={suggestions}
               />
             </div>
           </div>
 
           {/* Sub-Tabs Navigation */}
-          <div className="flex gap-1 border-b border-border/40 pb-0 pt-2">
-            {([
-              { key: "headers", label: "Headers", count: Object.keys(step.config?.headers || {}).length },
-              { key: "body", label: "Body", hasIndicator: !!step.config?.body },
-              { key: "scripts", label: "Pre-request Script", hasIndicator: !!step.preRequestScript },
-              { key: "tests", label: "Tests & Extractors", count: step.assertions.length + step.extractors.length },
-              { key: "settings", label: "Settings" },
-            ] as const).map((tab) => (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setActiveTab(tab.key)}
-                className={cn(
-                  "px-3 py-2 text-xs font-semibold rounded-t-md transition-all -mb-px border-b-2 border-transparent flex items-center gap-1.5",
-                  activeTab === tab.key
-                    ? "bg-background text-foreground border-b-primary font-bold shadow-xs"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <span>{tab.label}</span>
-                {"count" in tab && tab.count > 0 && (
-                  <span className="bg-muted px-1.5 py-0.5 rounded-[4px] text-[10px] font-mono font-medium text-muted-foreground border border-border/20">
-                    {tab.count}
-                  </span>
-                )}
-                {"hasIndicator" in tab && tab.hasIndicator && (
-                  <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
-                )}
-              </button>
-            ))}
+          <div className="flex gap-1 border-b border-border/40 pb-0 pt-2 overflow-x-auto scrollbar-none">
+            {(
+              [
+                { key: "params", label: "Params", icon: ListFilter, count: localParams.filter((param) => param.key.trim()).length },
+                { key: "auth", label: "Authorization", icon: KeyRound, hasIndicator: (step.config?.auth?.type ?? "noAuth") !== "noAuth" },
+                { key: "headers", label: "Headers", icon: Hash, count: Object.keys(step.config?.headers || {}).length },
+                { key: "body", label: "Body", icon: Braces, hasIndicator: !!step.config?.body },
+                { key: "scripts", label: "Pre-request", icon: Terminal, hasIndicator: !!step.preRequestScript },
+                { key: "tests", label: "Tests & Extractors", icon: CheckCircle2, count: step.assertions.length + step.extractors.length },
+                { key: "settings", label: "Settings", icon: Settings },
+                { key: "cookies", label: "Cookies", icon: Cookie, count: manualCookies.filter((cookie) => cookie.name.trim()).length, hasIndicator: cookieConfig.enabled === false },
+              { key: "certificates", label: "Certificates", icon: FileKey, hasIndicator: (mtlsConfig.mode ?? "global") !== "global" || !!mtlsConfig.enabled },
+                { key: "proxy", label: "Proxy", icon: Globe, hasIndicator: !!proxyConfig.enabled },
+              ] as Array<{
+                key: "params" | "auth" | "headers" | "body" | "cookies" | "certificates" | "proxy" | "scripts" | "tests" | "settings"
+                label: string
+                icon: ComponentType<{ className?: string }>
+                count?: number
+                hasIndicator?: boolean
+              }>
+            ).flatMap((tab) => {
+              const Icon = tab.icon
+              const elements = []
+              
+              if (tab.key === "cookies") {
+                elements.push(
+                  <div key="sep-advanced" className="w-px h-5 bg-border/40 self-center mx-2 shrink-0" />
+                )
+              }
+              
+              elements.push(
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveTab(tab.key)}
+                  className={cn(
+                    "px-3 py-2 text-xs font-semibold rounded-t-md transition-all -mb-px border-b-2 border-transparent flex items-center gap-1.5 cursor-pointer select-none whitespace-nowrap shrink-0",
+                    activeTab === tab.key
+                      ? "bg-background text-foreground border-b-primary font-bold shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Icon className={cn("size-3.5", activeTab === tab.key ? "text-primary" : "text-muted-foreground/80")} />
+                  <span>{tab.label}</span>
+                  {"count" in tab && typeof tab.count === "number" && tab.count > 0 && (
+                    <span className="bg-muted px-1.5 py-0.5 rounded-[4px] text-[10px] font-mono font-medium text-muted-foreground border border-border/20">
+                      {tab.count}
+                    </span>
+                  )}
+                  {"hasIndicator" in tab && tab.hasIndicator && (
+                    <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  )}
+                </button>
+              )
+              return elements
+            })}
           </div>
 
           {/* Sub-Tab Contents */}
+          {activeTab === "params" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
+                <span>Query Params</span>
+                <span className="font-mono text-[10px]">({localParams.filter((param) => param.key.trim()).length} active)</span>
+              </div>
+              <div className="space-y-2 rounded-lg border border-border/40 bg-muted/5 p-3">
+                {localParams.length > 0 ? (
+                  <div className="space-y-2">
+                    {localParams.map((param, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <TemplateInput
+                          placeholder="Param key"
+                          className={cn(inputClass, "font-mono text-xs bg-background")}
+                          value={param.key}
+                          onChange={(value) => updateLocalParam(idx, "key", value)}
+                          suggestions={suggestions}
+                        />
+                        <span className="text-muted-foreground text-xs">=</span>
+                        <TemplateInput
+                          placeholder="Value"
+                          className={cn(inputClass, "font-mono text-xs bg-background")}
+                          containerClassName="flex-[2]"
+                          value={param.value}
+                          onChange={(value) => updateLocalParam(idx, "value", value)}
+                          suggestions={suggestions}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          type="button"
+                          onClick={() => removeLocalParam(idx)}
+                          className="size-8 shrink-0 text-rose-500 hover:text-rose-700"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-4 text-center text-xs italic text-muted-foreground">
+                    No query params. Add one here or type a query string in the URL.
+                  </div>
+                )}
+                <div className="mt-1 flex justify-start border-t border-border/40 pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    onClick={addLocalParam}
+                    className="h-8 gap-1 text-xs"
+                  >
+                    <Plus className="size-3.5" /> Add Param
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "auth" && (
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-[220px_1fr]">
+                <div>
+                  <span className={labelClass}>Auth Type</span>
+                  <Select
+                    value={authConfig.type ?? "noAuth"}
+                    onValueChange={(value) => updateAuthConfig({ type: value })}
+                  >
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="noAuth">No Auth</SelectItem>
+                      <SelectItem value="apiKey">API Key</SelectItem>
+                      <SelectItem value="bearer">Bearer Token</SelectItem>
+                      <SelectItem value="basic">Basic Auth</SelectItem>
+                      <SelectItem value="jwtBearer">JWT Bearer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="rounded-md border border-border/40 bg-muted/10 p-3 text-xs text-muted-foreground">
+                  Authorization is applied after custom headers, so the selected auth type controls the final auth header or query parameter.
+                </div>
+              </div>
+
+              {(authConfig.type ?? "noAuth") === "apiKey" && (
+                <div className="grid gap-3 md:grid-cols-[1fr_1fr_160px]">
+                  <div>
+                    <span className={labelClass}>Key</span>
+                    <TemplateInput
+                      value={authConfig.key ?? ""}
+                      onChange={(value) => updateAuthConfig({ key: value })}
+                      suggestions={suggestions}
+                      placeholder="X-API-Key"
+                      className={cn(inputClass, "font-mono text-xs")}
+                    />
+                  </div>
+                  <div>
+                    <span className={labelClass}>Value</span>
+                    <TemplateInput
+                      value={authConfig.value ?? ""}
+                      onChange={(value) => updateAuthConfig({ value })}
+                      suggestions={suggestions}
+                      placeholder="{{secrets.apiKey}}"
+                      className={cn(inputClass, "font-mono text-xs")}
+                    />
+                  </div>
+                  <div>
+                    <span className={labelClass}>Add To</span>
+                    <Select value={authConfig.addTo ?? "header"} onValueChange={(value) => updateAuthConfig({ addTo: value })}>
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="header">Header</SelectItem>
+                        <SelectItem value="query">Query Param</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              {(authConfig.type ?? "noAuth") === "bearer" && (
+                <div>
+                  <span className={labelClass}>Token</span>
+                  <TemplateInput
+                    value={authConfig.token ?? ""}
+                    onChange={(value) => updateAuthConfig({ token: value })}
+                    suggestions={suggestions}
+                    placeholder="{{variables.auth_token}}"
+                    className={cn(inputClass, "font-mono text-xs")}
+                  />
+                </div>
+              )}
+
+              {(authConfig.type ?? "noAuth") === "basic" && (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <span className={labelClass}>Username</span>
+                    <TemplateInput
+                      value={authConfig.username ?? ""}
+                      onChange={(value) => updateAuthConfig({ username: value })}
+                      suggestions={suggestions}
+                      placeholder="{{variables.username}}"
+                      className={cn(inputClass, "font-mono text-xs")}
+                    />
+                  </div>
+                  <div>
+                    <span className={labelClass}>Password</span>
+                    <TemplateInput
+                      value={authConfig.password ?? ""}
+                      onChange={(value) => updateAuthConfig({ password: value })}
+                      suggestions={suggestions}
+                      placeholder="{{secrets.password}}"
+                      className={cn(inputClass, "font-mono text-xs")}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {(authConfig.type ?? "noAuth") === "jwtBearer" && (
+                <div className="space-y-3">
+                  <div className="grid gap-3 md:grid-cols-[160px_1fr_180px]">
+                    <div>
+                      <span className={labelClass}>Algorithm</span>
+                      <Select value={authConfig.algorithm ?? "HS256"} onValueChange={(value) => updateAuthConfig({ algorithm: value })}>
+                        <SelectTrigger className="h-9 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="HS256">HS256</SelectItem>
+                          <SelectItem value="HS384">HS384</SelectItem>
+                          <SelectItem value="HS512">HS512</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <span className={labelClass}>Secret</span>
+                      <TemplateInput
+                        value={authConfig.secret ?? ""}
+                        onChange={(value) => updateAuthConfig({ secret: value })}
+                        suggestions={suggestions}
+                        placeholder="{{secrets.jwtSecret}}"
+                        className={cn(inputClass, "font-mono text-xs")}
+                      />
+                    </div>
+                    <label className="flex items-end gap-2 pb-2 text-xs font-medium text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={!!authConfig.secretBase64Encoded}
+                        onChange={(event) => updateAuthConfig({ secretBase64Encoded: event.target.checked })}
+                        className="size-4 rounded border-input"
+                      />
+                      Secret is Base64 encoded
+                    </label>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <span className={labelClass}>Payload JSON</span>
+                      <textarea
+                        value={authConfig.payload ?? "{\n  \"sub\": \"{{variables.clientId}}\"\n}"}
+                        onChange={(event) => updateAuthConfig({ payload: event.target.value })}
+                        className={cn(inputClass, "min-h-28 font-mono text-xs")}
+                      />
+                    </div>
+                    <div>
+                      <span className={labelClass}>JWT Headers JSON</span>
+                      <textarea
+                        value={authConfig.headers ?? ""}
+                        onChange={(event) => updateAuthConfig({ headers: event.target.value })}
+                        placeholder={'{\n  "kid": "key-id"\n}'}
+                        className={cn(inputClass, "min-h-28 font-mono text-xs")}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[160px_1fr_1fr]">
+                    <div>
+                      <span className={labelClass}>Add To</span>
+                      <Select value={authConfig.addTo ?? "header"} onValueChange={(value) => updateAuthConfig({ addTo: value })}>
+                        <SelectTrigger className="h-9 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="header">Header</SelectItem>
+                          <SelectItem value="query">Query Param</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <span className={labelClass}>Header Prefix</span>
+                      <input
+                        value={authConfig.headerPrefix ?? "Bearer"}
+                        onChange={(event) => updateAuthConfig({ headerPrefix: event.target.value })}
+                        className={cn(inputClass, "font-mono text-xs")}
+                      />
+                    </div>
+                    <div>
+                      <span className={labelClass}>{authConfig.addTo === "query" ? "Query Key" : "Header Name"}</span>
+                      <input
+                        value={authConfig.addTo === "query" ? authConfig.queryKey ?? "jwt" : authConfig.headerName ?? "Authorization"}
+                        onChange={(event) =>
+                          authConfig.addTo === "query"
+                            ? updateAuthConfig({ queryKey: event.target.value })
+                            : updateAuthConfig({ headerName: event.target.value })
+                        }
+                        className={cn(inputClass, "font-mono text-xs")}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === "headers" && (
             <div className="space-y-3">
               <div className="text-xs font-semibold text-muted-foreground flex items-center justify-between">
@@ -715,11 +1362,13 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
                           onChange={(e) => updateLocalHeader(idx, "key", e.target.value)}
                         />
                         <span className="text-muted-foreground text-xs">:</span>
-                        <input
+                        <TemplateInput
                           placeholder="Value"
-                          className={cn(inputClass, "font-mono text-xs flex-[2] bg-background")}
+                          className={cn(inputClass, "font-mono text-xs bg-background")}
+                          containerClassName="flex-[2]"
                           value={header.value}
-                          onChange={(e) => updateLocalHeader(idx, "value", e.target.value)}
+                          onChange={(value) => updateLocalHeader(idx, "value", value)}
+                          suggestions={suggestions}
                         />
                         <Button
                           variant="ghost"
@@ -757,31 +1406,248 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
             <div className="space-y-2">
               <span className={labelClass}>Raw Request Body</span>
               <div className="min-h-[180px] w-full rounded-md border border-border/50 overflow-hidden bg-[#1e1e1e] dark:bg-[#1e1e1e] light:bg-[#fffffe] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
-                <Editor
-                  height="180px"
-                  language="json"
-                  theme={editorTheme}
+                <TemplateBodyEditor
                   value={step.config?.body ?? ""}
+                  theme={editorTheme}
+                  suggestions={suggestions}
                   onChange={(val) => {
                     onUpdate({
                       config: {
                         ...step.config,
-                        body: val ?? "",
+                        body: val,
                       },
                     })
                   }}
-                  options={{
-                    minimap: { enabled: false },
-                    fontSize: 12,
-                    fontFamily: "var(--font-mono), monospace",
-                    lineNumbers: "on",
-                    scrollBeyondLastLine: false,
-                    automaticLayout: true,
-                    padding: { top: 8, bottom: 8 },
-                    tabSize: 2,
-                    fixedOverflowWidgets: true,
-                  }}
                 />
+              </div>
+            </div>
+          )}
+
+          {activeTab === "cookies" && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border/40 bg-muted/5 p-3">
+                <label className="flex items-start gap-3 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={cookieConfig.enabled !== false}
+                    onChange={(event) => updateCookieConfig({ enabled: event.target.checked, mode: "jar" })}
+                    className="mt-0.5 size-4 rounded border-input"
+                  />
+                  <span>
+                    <span className="block text-foreground">Use per-run cookie jar</span>
+                    <span className="block text-xs font-normal text-muted-foreground">
+                      Cookies set by earlier HTTP steps are sent to later matching requests in the same run.
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-border/40 bg-muted/5 p-3">
+                <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
+                  <span>Manual Cookies</span>
+                  <span className="font-mono text-[10px]">({manualCookies.filter((cookie) => cookie.name.trim()).length} active)</span>
+                </div>
+                {manualCookies.length > 0 ? (
+                  <div className="space-y-2">
+                    {manualCookies.map((cookie, idx) => (
+                      <div key={idx} className="grid gap-2 md:grid-cols-[1fr_1.4fr_1fr_100px_36px] items-center">
+                        <TemplateInput
+                          placeholder="Name"
+                          className={cn(inputClass, "font-mono text-xs bg-background")}
+                          value={cookie.name}
+                          onChange={(value) => updateManualCookie(idx, "name", value)}
+                          suggestions={suggestions}
+                        />
+                        <TemplateInput
+                          placeholder="{{variables.sessionId}}"
+                          className={cn(inputClass, "font-mono text-xs bg-background")}
+                          value={cookie.value}
+                          onChange={(value) => updateManualCookie(idx, "value", value)}
+                          suggestions={suggestions}
+                        />
+                        <TemplateInput
+                          placeholder="Domain optional"
+                          className={cn(inputClass, "font-mono text-xs bg-background")}
+                          value={cookie.domain ?? ""}
+                          onChange={(value) => updateManualCookie(idx, "domain", value)}
+                          suggestions={suggestions}
+                        />
+                        <TemplateInput
+                          placeholder="/"
+                          className={cn(inputClass, "font-mono text-xs bg-background")}
+                          value={cookie.path ?? "/"}
+                          onChange={(value) => updateManualCookie(idx, "path", value)}
+                          suggestions={suggestions}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          type="button"
+                          onClick={() => removeManualCookie(idx)}
+                          className="size-8 text-rose-500 hover:text-rose-700"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-4 text-center text-xs italic text-muted-foreground">No manual cookies configured.</div>
+                )}
+                <div className="border-t border-border/40 pt-2">
+                  <Button type="button" variant="outline" size="sm" onClick={addManualCookie} className="h-8 gap-1 text-xs">
+                    <Plus className="size-3.5" /> Add Cookie
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "certificates" && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border/40 bg-muted/5 p-3">
+                <label className="flex items-start gap-3 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={(mtlsConfig.mode ?? "global") === "global"}
+                    onChange={(event) => updateMTLSConfig({ mode: event.target.checked ? "global" : "none", enabled: false })}
+                    className="mt-0.5 size-4 rounded border-input"
+                  />
+                  <span>
+                    <span className="block text-foreground">Use global matching certificate</span>
+                    <span className="block text-xs font-normal text-muted-foreground">
+                      Pulse will apply the active certificate profile matching this request host and port.
+                    </span>
+                  </span>
+                </label>
+              </div>
+              <div>
+                <span className={labelClass}>Certificate Mode</span>
+                <Select value={mtlsConfig.mode ?? "global"} onValueChange={(value) => updateMTLSConfig({ mode: value, enabled: value === "custom" })}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="global">Use global host match</SelectItem>
+                    <SelectItem value="none">No client certificate</SelectItem>
+                    <SelectItem value="profile">Use specific profile</SelectItem>
+                    <SelectItem value="custom">Custom aliases</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {(mtlsConfig.mode ?? "global") === "profile" && (
+                <div>
+                  <span className={labelClass}>Certificate Profile</span>
+                  <Select value={mtlsConfig.profileId ?? "none"} onValueChange={(value) => updateMTLSConfig({ profileId: value === "none" ? "" : value })}>
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue placeholder="Select profile" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Select profile</SelectItem>
+                      {certificateProfiles.map((profile) => (
+                        <SelectItem key={profile.id} value={profile.id}>
+                          {profile.name} · {profile.host}:{profile.port}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {(mtlsConfig.mode ?? "global") === "custom" && (
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div>
+                    <span className={labelClass}>Client Cert Secret Alias</span>
+                    <TemplateInput
+                      value={mtlsConfig.certSecretAlias ?? ""}
+                      onChange={(value) => updateMTLSConfig({ certSecretAlias: value, enabled: true })}
+                      suggestions={suggestions}
+                      placeholder="clientCertPem"
+                      className={cn(inputClass, "font-mono text-xs")}
+                    />
+                  </div>
+                  <div>
+                    <span className={labelClass}>Client Key Secret Alias</span>
+                    <TemplateInput
+                      value={mtlsConfig.keySecretAlias ?? ""}
+                      onChange={(value) => updateMTLSConfig({ keySecretAlias: value, enabled: true })}
+                      suggestions={suggestions}
+                      placeholder="clientKeyPem"
+                      className={cn(inputClass, "font-mono text-xs")}
+                    />
+                  </div>
+                  <div>
+                    <span className={labelClass}>Custom CA Secret Alias</span>
+                    <TemplateInput
+                      value={mtlsConfig.caCertSecretAlias ?? ""}
+                      onChange={(value) => updateMTLSConfig({ caCertSecretAlias: value, enabled: true })}
+                      suggestions={suggestions}
+                      placeholder="privateCaPem"
+                      className={cn(inputClass, "font-mono text-xs")}
+                    />
+                  </div>
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={!!mtlsConfig.insecureSkipVerify}
+                  onChange={(event) => updateMTLSConfig({ insecureSkipVerify: event.target.checked })}
+                  className="size-4 rounded border-input"
+                />
+                Skip server certificate verification for this request
+              </label>
+            </div>
+          )}
+
+          {activeTab === "proxy" && (
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border/40 bg-muted/5 p-3">
+                <label className="flex items-start gap-3 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={!!proxyConfig.enabled}
+                    onChange={(event) => updateProxyConfig({ enabled: event.target.checked })}
+                    className="mt-0.5 size-4 rounded border-input"
+                  />
+                  <span>
+                    <span className="block text-foreground">Use a proxy for this request</span>
+                    <span className="block text-xs font-normal text-muted-foreground">
+                      Useful for private networks, controlled egress paths, or endpoint-specific routing.
+                    </span>
+                  </span>
+                </label>
+              </div>
+              <div className="grid gap-3 md:grid-cols-[1.5fr_1fr_1fr]">
+                <div>
+                  <span className={labelClass}>Proxy URL</span>
+                  <TemplateInput
+                    value={proxyConfig.url ?? ""}
+                    onChange={(value) => updateProxyConfig({ url: value })}
+                    suggestions={suggestions}
+                    placeholder="http://proxy.internal:8080"
+                    className={cn(inputClass, "font-mono text-xs")}
+                  />
+                </div>
+                <div>
+                  <span className={labelClass}>Username</span>
+                  <TemplateInput
+                    value={proxyConfig.username ?? ""}
+                    onChange={(value) => updateProxyConfig({ username: value })}
+                    suggestions={suggestions}
+                    placeholder="{{variables.proxyUser}}"
+                    className={cn(inputClass, "font-mono text-xs")}
+                  />
+                </div>
+                <div>
+                  <span className={labelClass}>Password</span>
+                  <TemplateInput
+                    value={proxyConfig.password ?? ""}
+                    onChange={(value) => updateProxyConfig({ password: value })}
+                    suggestions={suggestions}
+                    placeholder="{{secrets.proxyPassword}}"
+                    className={cn(inputClass, "font-mono text-xs")}
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -791,6 +1657,7 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
               value={step.preRequestScript ?? ""}
               onChange={(script) => onUpdate({ preRequestScript: script })}
               stepName={step.name}
+              suggestions={suggestions}
             />
           )}
 
@@ -1240,11 +2107,12 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
             </div>
             <div className="mt-2">
               <span className={labelClass}>Config Parameters</span>
-              <input
+              <TemplateInput
                 placeholder="iss/sub={{secrets.clientId}}, aud={{variables.audience}}"
                 className={cn(inputClass, "h-8 text-xs")}
                 value={actionConfig}
-                onChange={(e) => setActionConfig(e.target.value)}
+                onChange={setActionConfig}
+                suggestions={suggestions}
               />
             </div>
             <Button variant="outline" size="sm" type="button" onClick={handleAddAction} className="w-full h-8 text-xs mt-1">
@@ -1272,7 +2140,7 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
   )
 }
 
-export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenchProps) {
+export function BuilderWorkbench({ monitor, applications = [], certificateProfiles = [] }: BuilderWorkbenchProps) {
   const { resolvedTheme } = useTheme()
   const editorTheme = resolvedTheme === "light" ? "light" : "vs-dark"
   const [draft, setDraft] = useState(monitor)
@@ -1333,6 +2201,8 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
   const selectedStep = useMemo(() => {
     return draft.steps.find((s) => s.id === selectedStepId) || draft.steps[0] || null
   }, [draft.steps, selectedStepId])
+
+  const templateSuggestions = useMemo(() => buildTemplateSuggestions(draft, mockRun), [draft, mockRun])
 
   // Local add form states
   const [newVarKey, setNewVarKey] = useState("")
@@ -1424,7 +2294,7 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
       ],
       extractors: [],
       preRequestScript: "",
-      config: { headers: {}, body: "" },
+      config: defaultHttpConfig(),
     }
     updateDraft({
       ...draft,
@@ -1434,11 +2304,25 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
   }
 
   function addPreRequestStep() {
+    const existing = draft.steps.find((step) => step.type === "preRequest")
+    if (existing) {
+      const reordered = normalizeStepOrder([
+        existing,
+        ...draft.steps.filter((step) => step.id !== existing.id),
+      ])
+      updateDraft({
+        ...draft,
+        steps: reordered,
+      })
+      setSelectedStepId(existing.id)
+      return
+    }
+
     const newId = `step-${crypto.randomUUID()}`
     const newStep: MonitorStep = {
       id: newId,
-      order: draft.steps.length + 1,
-      name: `Step ${draft.steps.length + 1}: Pre-Request Script Actions`,
+      order: 1,
+      name: "Step 1: Pre-Request Script",
       type: "preRequest",
       timeoutMs: 5000,
       retryCount: 0,
@@ -1446,10 +2330,12 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
       actions: [],
       assertions: [],
       extractors: [],
+      preRequestScript: "",
+      config: {},
     }
     updateDraft({
       ...draft,
-      steps: [...draft.steps, newStep],
+      steps: normalizeStepOrder([newStep, ...draft.steps]),
     })
     setSelectedStepId(newId)
   }
@@ -1753,6 +2639,7 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
       extractors: [],
       preRequestScript: "",
       config: {
+        ...defaultHttpConfig(),
         headers: curlResult.headers || {},
         body: curlResult.body || "",
       },
@@ -2101,6 +2988,8 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
                       index={draft.steps.findIndex(s => s.id === selectedStep.id)}
                       totalSteps={draft.steps.length}
                       mockRun={mockRun}
+                      suggestions={templateSuggestions}
+                      certificateProfiles={certificateProfiles}
                       onUpdate={(patch) => updateStep(selectedStep.id, patch)}
                       onDelete={() => deleteStep(selectedStep.id)}
                       onMoveUp={() => moveStep(draft.steps.findIndex(s => s.id === selectedStep.id), "up")}
@@ -2717,7 +3606,7 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
                               target: e.target,
                             })),
                             preRequestScript: "",
-                            config: { headers: {}, body: "" },
+                            config: defaultHttpConfig(),
                           }))
 
                           updateDraft({

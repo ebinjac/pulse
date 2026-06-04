@@ -49,6 +49,8 @@ import { SettingsView } from "@/components/pulse/settings-view"
 import type {
   Application,
   AlertEvent,
+  CertificateProfile,
+  CertificateProfileInput,
   Monitor,
   MonitorRun,
   NotificationSettings,
@@ -1565,13 +1567,13 @@ function Dashboard({
   )
 }
 
-function Builder({ monitor, applications }: { monitor: Monitor; applications: Application[] }) {
+function Builder({ monitor, applications, certificateProfiles }: { monitor: Monitor; applications: Application[]; certificateProfiles: CertificateProfile[] }) {
   return (
     <PageShell
       eyebrow="Monitor builder"
       title={monitor.id ? `Edit ${monitor.name}` : "Create monitor"}
     >
-      <BuilderWorkbench monitor={monitor} applications={applications} />
+      <BuilderWorkbench monitor={monitor} applications={applications} certificateProfiles={certificateProfiles} />
     </PageShell>
   )
 }
@@ -2304,6 +2306,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
   const [monitors, setMonitors] = useState<Monitor[]>([])
   const [runs, setRuns] = useState<MonitorRun[]>([])
   const [secrets, setSecrets] = useState<SecretReference[]>([])
+  const [certificateProfiles, setCertificateProfiles] = useState<CertificateProfile[]>([])
   const [alerts, setAlerts] = useState<AlertEvent[]>([])
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null)
   const [retentionSettings, setRetentionSettings] = useState<RetentionSettings | null>(null)
@@ -2400,6 +2403,18 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
     }
   }
 
+  const fetchCertificateProfiles = async () => {
+    try {
+      const res = await fetch("/api/settings/certificates")
+      if (res.ok) {
+        const data = await res.json()
+        setCertificateProfiles(data.profiles || [])
+      }
+    } catch (err) {
+      console.error("Failed to fetch certificate profiles:", err)
+    }
+  }
+
   const fetchAlerts = async () => {
     try {
       const res = await fetch("/api/alerts")
@@ -2490,6 +2505,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
       fetchApplications(),
       fetchMonitors(),
       fetchSecrets(),
+      fetchCertificateProfiles(),
       fetchAlerts(),
       fetchRuns(),
       fetchNotificationSettings(),
@@ -2768,6 +2784,42 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
     return data as RetentionPurgeResult
   }
 
+  const handleSaveCertificateProfile = async (input: CertificateProfileInput) => {
+    const url = input.id ? `/api/settings/certificates/${input.id}` : "/api/settings/certificates"
+    const res = await fetch(url, {
+      method: input.id ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to save certificate profile.")
+    }
+    await Promise.all([fetchCertificateProfiles(), fetchSecrets()])
+  }
+
+  const handleTestCertificateProfile = async (profile: CertificateProfile): Promise<boolean> => {
+    const res = await fetch(`/api/settings/certificates/${profile.id}/test`, { method: "POST" })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to test certificate profile.")
+    }
+    await fetchCertificateProfiles()
+    if (data.error) {
+      throw new Error(data.error)
+    }
+    return Boolean(data.ok)
+  }
+
+  const handleDeleteCertificateProfile = async (profileId: string) => {
+    const res = await fetch(`/api/settings/certificates/${profileId}`, { method: "DELETE" })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to delete certificate profile.")
+    }
+    await fetchCertificateProfiles()
+  }
+
   if (loading && ((applicationId && !activeApplication) || (monitorId && !activeMonitor) || (runId && !activeRun) || (alertId && alerts.length === 0) || (!applicationId && !monitorId && !runId && !alertId))) {
     return (
       <div className="flex min-h-svh items-center justify-center bg-background text-foreground">
@@ -2943,7 +2995,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
       lastDurationMs: 0,
       successRate24h: 100,
     }
-    viewContent = <Builder monitor={activeMonitor || defaultNewMonitor} applications={applications} />
+    viewContent = <Builder monitor={activeMonitor || defaultNewMonitor} applications={applications} certificateProfiles={certificateProfiles} />
   } else if (view === "runs") {
     if (!activeMonitor) {
       viewContent = (
@@ -2995,6 +3047,10 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
         retentionSettings={retentionSettings}
         onSaveRetention={handleSaveRetentionSettings}
         onPurgeRetention={handlePurgeRetention}
+        certificateProfiles={certificateProfiles}
+        onSaveCertificateProfile={handleSaveCertificateProfile}
+        onTestCertificateProfile={handleTestCertificateProfile}
+        onDeleteCertificateProfile={handleDeleteCertificateProfile}
         applications={applications}
         monitors={monitors}
       />

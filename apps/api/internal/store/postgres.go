@@ -517,6 +517,73 @@ func (s *PostgresStore) GetRawSecretValue(alias string) (string, bool) {
 	return plaintext, true
 }
 
+func (s *PostgresStore) ListCertificateProfiles() []domain.CertificateProfile {
+	rows, err := s.queries.ListCertificateProfiles(context.Background())
+	if err != nil {
+		log.Printf("list certificate profiles: %v", err)
+		return nil
+	}
+
+	profiles := make([]domain.CertificateProfile, 0, len(rows))
+	for _, row := range rows {
+		profiles = append(profiles, certificateProfileFromListRow(row))
+	}
+	return profiles
+}
+
+func (s *PostgresStore) GetCertificateProfile(id string) (domain.CertificateProfile, bool) {
+	row, err := s.queries.GetCertificateProfile(context.Background(), id)
+	if err != nil {
+		return domain.CertificateProfile{}, false
+	}
+
+	return certificateProfileFromGetRow(row), true
+}
+
+func (s *PostgresStore) UpsertCertificateProfile(profile domain.CertificateProfile) (domain.CertificateProfile, error) {
+	if profile.ID == "" {
+		profile.ID = "cert-" + randomID()
+	}
+	if profile.Port <= 0 {
+		profile.Port = 443
+	}
+	if profile.CertType == "" {
+		profile.CertType = "pem"
+	}
+	if err := s.queries.UpsertCertificateProfile(context.Background(), pulsedb.UpsertCertificateProfileParams{
+		ID:                    profile.ID,
+		Name:                  profile.Name,
+		Host:                  profile.Host,
+		Port:                  int32(profile.Port),
+		CertType:              profile.CertType,
+		CertSecretAlias:       pgNullableText(profile.CertSecretAlias),
+		KeySecretAlias:        pgNullableText(profile.KeySecretAlias),
+		PfxSecretAlias:        pgNullableText(profile.PFXSecretAlias),
+		CaCertSecretAlias:     pgNullableText(profile.CACertSecretAlias),
+		PassphraseSecretAlias: pgNullableText(profile.PassphraseSecretAlias),
+		InsecureSkipVerify:    pgBool(profile.InsecureSkipVerify),
+		IsActive:              pgBool(profile.IsActive),
+		LastTestedAt:          pgTimestampPtr(profile.LastTestedAt),
+	}); err != nil {
+		return domain.CertificateProfile{}, err
+	}
+
+	saved, ok := s.GetCertificateProfile(profile.ID)
+	if !ok {
+		return domain.CertificateProfile{}, pgx.ErrNoRows
+	}
+	return saved, nil
+}
+
+func (s *PostgresStore) DeleteCertificateProfile(id string) bool {
+	count, err := s.queries.DeleteCertificateProfile(context.Background(), id)
+	if err != nil {
+		log.Printf("delete certificate profile: %v", err)
+		return false
+	}
+	return count > 0
+}
+
 func (s *PostgresStore) listSteps(monitorID string) []domain.MonitorStep {
 	rows, err := s.queries.ListSteps(context.Background(), pgText(monitorID))
 	if err != nil {
@@ -956,6 +1023,46 @@ func secretFromGetRow(row pulsedb.GetSecretRow) domain.SecretReference {
 		MaskedValue:  "********",
 		IsActive:     row.IsActive.Bool,
 		LastTestedAt: pgTime(row.CreatedAt),
+	}
+}
+
+func certificateProfileFromListRow(row pulsedb.ListCertificateProfilesRow) domain.CertificateProfile {
+	return domain.CertificateProfile{
+		ID:                    row.ID,
+		Name:                  row.Name,
+		Host:                  row.Host,
+		Port:                  int(row.Port),
+		CertType:              row.CertType,
+		CertSecretAlias:       row.CertSecretAlias,
+		KeySecretAlias:        row.KeySecretAlias,
+		PFXSecretAlias:        row.PfxSecretAlias,
+		CACertSecretAlias:     row.CaCertSecretAlias,
+		PassphraseSecretAlias: row.PassphraseSecretAlias,
+		InsecureSkipVerify:    row.InsecureSkipVerify.Bool,
+		IsActive:              row.IsActive.Bool,
+		LastTestedAt:          pgTimePtr(row.LastTestedAt),
+		CreatedAt:             pgTime(row.CreatedAt),
+		UpdatedAt:             pgTime(row.UpdatedAt),
+	}
+}
+
+func certificateProfileFromGetRow(row pulsedb.GetCertificateProfileRow) domain.CertificateProfile {
+	return domain.CertificateProfile{
+		ID:                    row.ID,
+		Name:                  row.Name,
+		Host:                  row.Host,
+		Port:                  int(row.Port),
+		CertType:              row.CertType,
+		CertSecretAlias:       row.CertSecretAlias,
+		KeySecretAlias:        row.KeySecretAlias,
+		PFXSecretAlias:        row.PfxSecretAlias,
+		CACertSecretAlias:     row.CaCertSecretAlias,
+		PassphraseSecretAlias: row.PassphraseSecretAlias,
+		InsecureSkipVerify:    row.InsecureSkipVerify.Bool,
+		IsActive:              row.IsActive.Bool,
+		LastTestedAt:          pgTimePtr(row.LastTestedAt),
+		CreatedAt:             pgTime(row.CreatedAt),
+		UpdatedAt:             pgTime(row.UpdatedAt),
 	}
 }
 

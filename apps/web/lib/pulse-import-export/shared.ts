@@ -68,6 +68,10 @@ export function createHttpStep(input: {
         Object.entries(input.headers ?? {}).map(([k, v]) => [k, convertTemplateSyntax(v)])
       ),
       body: input.body ? convertTemplateSyntax(input.body) : "",
+      auth: { type: "noAuth" },
+      cookies: { enabled: true, mode: "jar", manual: [] },
+      mtls: { enabled: false, insecureSkipVerify: false },
+      proxy: { enabled: false },
     },
   }
 }

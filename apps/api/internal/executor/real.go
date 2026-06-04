@@ -5,14 +5,19 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptrace"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,6 +28,7 @@ import (
 	"github.com/ensemble-pulse/pulse/apps/api/internal/scripting"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/store"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/variables"
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
 type Executor interface {
@@ -81,6 +87,8 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 
 	stepsPool := make(map[string]map[string]string)
 	uuidVal := generateUUID()
+	cookieJar, _ := cookiejar.New(nil)
+	certificateProfiles := e.store.ListCertificateProfiles()
 
 	stepRuns := make([]domain.StepRun, 0, len(monitor.Steps))
 	var failedStep *domain.StepRun
@@ -109,6 +117,7 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 		var statusCode int
 		var consoleOutput []string
 		var timing domain.HTTPTiming
+		var scriptSubRequests []scripting.SubRequestTrace
 		extractedVars := make(map[string]string)
 
 		stepOutputs := make(map[string]string)
@@ -123,6 +132,25 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 				val := executePreRequestAction(action.Type, resolvedPreview, resolver)
 				variablesPool[action.Output] = val
 				stepOutputs[action.Output] = val
+			}
+			if step.PreRequestScript != "" {
+				scriptCtx := &scripting.ScriptContext{
+					Variables: variablesPool,
+					Secrets:   secretsPool,
+					Steps:     stepsPool,
+					Request: &scripting.RequestOverrides{
+						Headers: map[string]string{},
+					},
+					Console:             []string{},
+					ResponseBodyLimitKB: monitor.ResponseBodyLimitKB,
+				}
+				if err := scripting.Execute(step.PreRequestScript, scriptCtx); err != nil {
+					status = domain.StatusError
+					errorMessage = "Pre-request script error: " + err.Error()
+					stepFailureCategory = domain.FailureUnknown
+				}
+				consoleOutput = scriptCtx.Console
+				scriptSubRequests = scriptCtx.SubRequests
 			}
 			latency = int(time.Since(stepStart).Milliseconds())
 			requestSummary = "Executed pre-request actions."
@@ -222,7 +250,8 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 						Headers: initialHeaders,
 						Body:    initialBody,
 					},
-					Console: []string{},
+					Console:             []string{},
+					ResponseBodyLimitKB: monitor.ResponseBodyLimitKB,
 				}
 
 				if err := scripting.Execute(step.PreRequestScript, scriptCtx); err != nil {
@@ -236,6 +265,7 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 					scriptHeaders = scriptCtx.Request.Headers
 				}
 				consoleOutput = scriptCtx.Console
+				scriptSubRequests = scriptCtx.SubRequests
 			}
 
 			if !hasScriptError {
@@ -297,82 +327,106 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 							}
 						}
 
-						timeout := 10 * time.Second
-						if step.TimeoutMS > 0 {
-							timeout = time.Duration(step.TimeoutMS) * time.Millisecond
-						}
-						client := &http.Client{
-							Timeout: timeout,
-						}
-
-						timingRecorder := newHTTPTimingRecorder()
-						timingRecorder.markRequestStart()
-						req = req.WithContext(httptrace.WithClientTrace(req.Context(), timingRecorder.trace()))
-
-						resp, err := client.Do(req)
-
-						if err != nil {
+						if err := applyAuthConfig(req, step.Config, resolver); err != nil {
+							status = domain.StatusError
+							errorMessage = "Authorization configuration error: " + err.Error()
 							latency = int(time.Since(stepStart).Milliseconds())
-							timing = timingRecorder.breakdown(latency)
-							status = domain.StatusFailed
-							errorMessage = err.Error()
-						} else {
-							defer resp.Body.Close()
+						}
 
-							limitKB := monitor.ResponseBodyLimitKB
-							if limitKB <= 0 {
-								limitKB = 32
+						if status != domain.StatusError {
+							if err := applyCookieConfig(req, step.Config, resolver); err != nil {
+								status = domain.StatusError
+								errorMessage = "Cookie configuration error: " + err.Error()
+								latency = int(time.Since(stepStart).Milliseconds())
 							}
-							limitedReader := io.LimitReader(resp.Body, int64(limitKB*1024))
-							respBytes, _ := io.ReadAll(limitedReader)
-							timingRecorder.markBodyReadDone()
-							latency = int(time.Since(stepStart).Milliseconds())
-							timing = timingRecorder.breakdown(latency)
-							respStr := string(respBytes)
+						}
 
-							// 1. Evaluate Assertions
-							hasFailure := false
-							for assertIdx, assertion := range assertions {
-								actualVal := getActualAssertionValue(assertion, resp, respStr, latency)
-								assertions[assertIdx].Actual = actualVal
-
-								if assertionFails(assertion.Operator, actualVal, assertion.Expected) {
-									hasFailure = true
+						if status != domain.StatusError {
+							transport, err := transportForStep(step.Config, resolver, secretsPool, req.URL, certificateProfiles, e.store.GetRawSecretValue)
+							if err != nil {
+								status = domain.StatusError
+								errorMessage = "Network security configuration error: " + err.Error()
+								latency = int(time.Since(stepStart).Milliseconds())
+							} else {
+								timeout := 10 * time.Second
+								if step.TimeoutMS > 0 {
+									timeout = time.Duration(step.TimeoutMS) * time.Millisecond
 								}
-							}
+								client := &http.Client{
+									Timeout: timeout,
+									Jar:     jarForStep(step.Config, cookieJar),
+								}
+								if transport != nil {
+									client.Transport = transport
+								}
 
-							if hasFailure {
-								status = domain.StatusFailed
-								errorMessage = "One or more assertions failed."
-							}
+								timingRecorder := newHTTPTimingRecorder()
+								timingRecorder.markRequestStart()
+								req = req.WithContext(httptrace.WithClientTrace(req.Context(), timingRecorder.trace()))
 
-							// 2. Evaluate Extractors
-							for _, extractor := range step.Extractors {
-								extractedVal := getExtractedValue(extractor, resp, respStr)
-								if !extractor.Sensitive {
-									extractedVars[extractor.Name] = extractedVal
+								resp, err := client.Do(req)
+
+								if err != nil {
+									latency = int(time.Since(stepStart).Milliseconds())
+									timing = timingRecorder.breakdown(latency)
+									status = domain.StatusFailed
+									errorMessage = err.Error()
 								} else {
-									extractedVars[extractor.Name] = "********"
-								}
-								variablesPool[extractor.Name] = extractedVal
-								stepOutputs[extractor.Name] = extractedVal
-							}
+									defer resp.Body.Close()
 
-							requestSummary = fmt.Sprintf("%s %s", method, resolvedURL)
-							responseSummary = fmt.Sprintf("%d %s, %d bytes read", resp.StatusCode, resp.Header.Get("Content-Type"), len(respBytes))
-							statusCode = resp.StatusCode
-							responseBody = respStr
-							// Collect all response headers
-							responseHeaders = make(map[string]string)
-							for hk, hvs := range resp.Header {
-								responseHeaders[hk] = strings.Join(hvs, ", ")
+									limitKB := monitor.ResponseBodyLimitKB
+									if limitKB <= 0 {
+										limitKB = 32
+									}
+									limitedReader := io.LimitReader(resp.Body, int64(limitKB*1024))
+									respBytes, _ := io.ReadAll(limitedReader)
+									timingRecorder.markBodyReadDone()
+									latency = int(time.Since(stepStart).Milliseconds())
+									timing = timingRecorder.breakdown(latency)
+									respStr := string(respBytes)
+
+									// 1. Evaluate Assertions
+									hasFailure := false
+									for assertIdx, assertion := range assertions {
+										actualVal := getActualAssertionValue(assertion, resp, respStr, latency)
+										assertions[assertIdx].Actual = actualVal
+
+										if assertionFails(assertion.Operator, actualVal, assertion.Expected) {
+											hasFailure = true
+										}
+									}
+
+									if hasFailure {
+										status = domain.StatusFailed
+										errorMessage = "One or more assertions failed."
+									}
+
+									// 2. Evaluate Extractors
+									for _, extractor := range step.Extractors {
+										extractedVal := getExtractedValue(extractor, resp, respStr)
+										if !extractor.Sensitive {
+											extractedVars[extractor.Name] = extractedVal
+										} else {
+											extractedVars[extractor.Name] = "********"
+										}
+										variablesPool[extractor.Name] = extractedVal
+										stepOutputs[extractor.Name] = extractedVal
+									}
+
+									requestSummary = fmt.Sprintf("%s %s", method, resolvedURL)
+									responseSummary = fmt.Sprintf("%d %s, %d bytes read", resp.StatusCode, resp.Header.Get("Content-Type"), len(respBytes))
+									statusCode = resp.StatusCode
+									responseBody = respStr
+									// Collect all response headers
+									responseHeaders = make(map[string]string)
+									for hk, hvs := range resp.Header {
+										responseHeaders[hk] = strings.Join(hvs, ", ")
+									}
+									// Collect request headers that were sent
+									requestHeaders = safeRequestHeaders(req.Header)
+									requestBody = string(reqBody)
+								}
 							}
-							// Collect request headers that were sent
-							requestHeaders = make(map[string]string)
-							for hk, hvs := range req.Header {
-								requestHeaders[hk] = strings.Join(hvs, ", ")
-							}
-							requestBody = string(reqBody)
 						}
 					}
 				}
@@ -411,6 +465,7 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 		}
 
 		stepRuns = append(stepRuns, stepRun)
+		stepRuns = append(stepRuns, subRequestStepRuns(runID, step, scriptSubRequests)...)
 
 		if status != domain.StatusSuccess && !step.ContinueOnFailure {
 			break
@@ -446,6 +501,624 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 		}
 	}
 	return run
+}
+
+func subRequestStepRuns(runID string, parent domain.MonitorStep, traces []scripting.SubRequestTrace) []domain.StepRun {
+	if len(traces) == 0 {
+		return nil
+	}
+
+	runs := make([]domain.StepRun, 0, len(traces))
+	for index, trace := range traces {
+		name := fmt.Sprintf("%s sendRequest %d", parent.Name, index+1)
+		if trace.Method != "" && trace.URL != "" {
+			name = fmt.Sprintf("%s %s", trace.Method, trace.URL)
+		}
+		runs = append(runs, domain.StepRun{
+			ID:              fmt.Sprintf("%s-%s-send-request-%d", runID, parent.ID, index+1),
+			StepName:        name,
+			Type:            "http",
+			Status:          trace.Status,
+			LatencyMS:       trace.LatencyMS,
+			Timing:          trace.Timing,
+			RequestSummary:  trace.RequestSummary,
+			RequestBody:     trace.RequestBody,
+			RequestHeaders:  trace.RequestHeaders,
+			ResponseSummary: trace.ResponseSummary,
+			StatusCode:      trace.StatusCode,
+			ResponseBody:    trace.ResponseBody,
+			ResponseHeaders: trace.ResponseHeaders,
+			Assertions:      []domain.Assertion{},
+			Extractors:      []domain.Extractor{},
+			ErrorMessage:    trace.ErrorMessage,
+		})
+	}
+
+	return runs
+}
+
+func applyAuthConfig(req *http.Request, config map[string]any, resolver variables.Resolver) error {
+	if config == nil {
+		return nil
+	}
+	authMap, ok := config["auth"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	authType := strings.TrimSpace(stringFromAny(authMap["type"]))
+	if authType == "" || authType == "noAuth" {
+		return nil
+	}
+
+	switch authType {
+	case "apiKey":
+		key, err := resolveConfigString(authMap["key"], resolver)
+		if err != nil {
+			return err
+		}
+		value, err := resolveConfigString(authMap["value"], resolver)
+		if err != nil {
+			return err
+		}
+		if key == "" {
+			return fmt.Errorf("api key name is required")
+		}
+		if authMap["addTo"] == "query" {
+			query := req.URL.Query()
+			query.Set(key, value)
+			req.URL.RawQuery = query.Encode()
+		} else {
+			req.Header.Set(key, value)
+		}
+	case "bearer":
+		token, err := resolveConfigString(authMap["token"], resolver)
+		if err != nil {
+			return err
+		}
+		if token == "" {
+			return fmt.Errorf("bearer token is required")
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	case "basic":
+		username, err := resolveConfigString(authMap["username"], resolver)
+		if err != nil {
+			return err
+		}
+		password, err := resolveConfigString(authMap["password"], resolver)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
+	case "jwtBearer":
+		token, err := jwtBearerToken(authMap, resolver)
+		if err != nil {
+			return err
+		}
+		addTo := stringFromAny(authMap["addTo"])
+		prefix := stringFromAny(authMap["headerPrefix"])
+		if prefix == "" {
+			prefix = "Bearer"
+		}
+		if addTo == "query" {
+			key := stringFromAny(authMap["queryKey"])
+			if key == "" {
+				key = "jwt"
+			}
+			query := req.URL.Query()
+			query.Set(key, token)
+			req.URL.RawQuery = query.Encode()
+		} else {
+			headerName := stringFromAny(authMap["headerName"])
+			if headerName == "" {
+				headerName = "Authorization"
+			}
+			if prefix != "" {
+				token = prefix + " " + token
+			}
+			req.Header.Set(headerName, token)
+		}
+	default:
+		return fmt.Errorf("unsupported auth type %q", authType)
+	}
+
+	return nil
+}
+
+func applyCookieConfig(req *http.Request, config map[string]any, resolver variables.Resolver) error {
+	cookieMap := configMap(config, "cookies")
+	if cookieMap == nil || !cookieConfigEnabled(cookieMap) {
+		return nil
+	}
+	manual, ok := cookieMap["manual"].([]any)
+	if !ok {
+		return nil
+	}
+
+	for _, item := range manual {
+		row, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, err := resolveConfigString(row["name"], resolver)
+		if err != nil {
+			return err
+		}
+		value, err := resolveConfigString(row["value"], resolver)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		cookie := &http.Cookie{Name: strings.TrimSpace(name), Value: value}
+		if path, err := resolveConfigString(row["path"], resolver); err != nil {
+			return err
+		} else if strings.TrimSpace(path) != "" {
+			cookie.Path = strings.TrimSpace(path)
+		}
+		if domain, err := resolveConfigString(row["domain"], resolver); err != nil {
+			return err
+		} else if strings.TrimSpace(domain) != "" {
+			cookie.Domain = strings.TrimSpace(domain)
+		}
+		req.AddCookie(cookie)
+	}
+
+	return nil
+}
+
+func jarForStep(config map[string]any, jar http.CookieJar) http.CookieJar {
+	cookieMap := configMap(config, "cookies")
+	if cookieMap == nil {
+		return jar
+	}
+	if !cookieConfigEnabled(cookieMap) {
+		return nil
+	}
+	return jar
+}
+
+func cookieConfigEnabled(cookieMap map[string]any) bool {
+	if value, ok := cookieMap["enabled"]; ok {
+		return boolFromAny(value)
+	}
+	return true
+}
+
+type rawSecretLookup func(alias string) (string, bool)
+
+func transportForStep(config map[string]any, resolver variables.Resolver, secrets map[string]string, requestURL *url.URL, profiles []domain.CertificateProfile, lookup rawSecretLookup) (*http.Transport, error) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	tlsConfig, err := tlsConfigForStep(config, resolver, secrets, requestURL, profiles, lookup)
+	if err != nil {
+		return nil, err
+	}
+	if tlsConfig != nil {
+		transport.TLSClientConfig = tlsConfig
+	}
+	proxy, err := proxyForStep(config, resolver)
+	if err != nil {
+		return nil, err
+	}
+	if proxy != nil {
+		transport.Proxy = http.ProxyURL(proxy)
+	}
+	return transport, nil
+}
+
+func tlsConfigForStep(config map[string]any, resolver variables.Resolver, secrets map[string]string, requestURL *url.URL, profiles []domain.CertificateProfile, lookup rawSecretLookup) (*tls.Config, error) {
+	mtlsMap := configMap(config, "mtls")
+	mode := "global"
+	if mtlsMap != nil {
+		if configuredMode := strings.TrimSpace(stringFromAny(mtlsMap["mode"])); configuredMode != "" {
+			mode = configuredMode
+		} else if boolFromAny(mtlsMap["enabled"]) {
+			mode = "custom"
+		}
+	}
+	if mode == "none" {
+		return nil, nil
+	}
+	if mode == "profile" {
+		profileID, err := resolveConfigString(mtlsMap["profileId"], resolver)
+		if err != nil {
+			return nil, err
+		}
+		profile, ok := certificateProfileByID(profiles, profileID)
+		if !ok || !profile.IsActive {
+			return nil, fmt.Errorf("certificate profile %q was not found or is inactive", profileID)
+		}
+		return tlsConfigFromCertificateProfile(profile, lookup)
+	}
+	if mode == "global" {
+		profile, ok := matchingCertificateProfile(profiles, requestURL)
+		if !ok {
+			return nil, nil
+		}
+		return tlsConfigFromCertificateProfile(profile, lookup)
+	}
+	if mtlsMap == nil {
+		return nil, nil
+	}
+
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: boolFromAny(mtlsMap["insecureSkipVerify"]), //nolint:gosec // Explicit user-controlled monitor setting, default false.
+	}
+
+	certAlias, err := resolveConfigString(mtlsMap["certSecretAlias"], resolver)
+	if err != nil {
+		return nil, err
+	}
+	keyAlias, err := resolveConfigString(mtlsMap["keySecretAlias"], resolver)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(certAlias) != "" || strings.TrimSpace(keyAlias) != "" {
+		if strings.TrimSpace(certAlias) == "" || strings.TrimSpace(keyAlias) == "" {
+			return nil, fmt.Errorf("both certificate and key secret aliases are required for mTLS")
+		}
+		certPEM, ok := secrets[strings.TrimSpace(certAlias)]
+		if !ok || certPEM == "" {
+			return nil, fmt.Errorf("certificate secret alias %q was not found", strings.TrimSpace(certAlias))
+		}
+		keyPEM, ok := secrets[strings.TrimSpace(keyAlias)]
+		if !ok || keyPEM == "" {
+			return nil, fmt.Errorf("private key secret alias %q was not found", strings.TrimSpace(keyAlias))
+		}
+		certificate, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+		if err != nil {
+			return nil, fmt.Errorf("load client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{certificate}
+	}
+
+	caAlias, err := resolveConfigString(mtlsMap["caCertSecretAlias"], resolver)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(caAlias) != "" {
+		caPEM, ok := secrets[strings.TrimSpace(caAlias)]
+		if !ok || caPEM == "" {
+			return nil, fmt.Errorf("CA certificate secret alias %q was not found", strings.TrimSpace(caAlias))
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(caPEM)) {
+			return nil, fmt.Errorf("CA certificate secret alias %q did not contain valid PEM certificates", strings.TrimSpace(caAlias))
+		}
+		tlsConfig.RootCAs = pool
+	}
+
+	return tlsConfig, nil
+}
+
+func tlsConfigFromCertificateProfile(profile domain.CertificateProfile, lookup rawSecretLookup) (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: profile.InsecureSkipVerify, //nolint:gosec // Explicit user-controlled monitor setting, default false.
+	}
+	passphrase := ""
+	if profile.PassphraseSecretAlias != "" {
+		passphrase, _ = lookup(profile.PassphraseSecretAlias)
+	}
+	switch profile.CertType {
+	case "pfx":
+		pfxValue, ok := lookup(profile.PFXSecretAlias)
+		if !ok || strings.TrimSpace(pfxValue) == "" {
+			return nil, fmt.Errorf("PFX/P12 secret alias %q was not found", profile.PFXSecretAlias)
+		}
+		pfxBytes, err := decodeBase64FileValue(pfxValue)
+		if err != nil {
+			return nil, err
+		}
+		privateKey, certificate, caCerts, err := pkcs12.DecodeChain(pfxBytes, passphrase)
+		if err != nil {
+			return nil, fmt.Errorf("parse PFX/P12 bundle: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{{
+			Certificate: [][]byte{certificate.Raw},
+			PrivateKey:  privateKey,
+			Leaf:        certificate,
+		}}
+		if len(caCerts) > 0 {
+			pool := x509.NewCertPool()
+			for _, cert := range caCerts {
+				pool.AddCert(cert)
+			}
+			tlsConfig.RootCAs = pool
+		}
+	default:
+		certPEM, ok := lookup(profile.CertSecretAlias)
+		if !ok || strings.TrimSpace(certPEM) == "" {
+			return nil, fmt.Errorf("certificate secret alias %q was not found", profile.CertSecretAlias)
+		}
+		keyPEM, ok := lookup(profile.KeySecretAlias)
+		if !ok || strings.TrimSpace(keyPEM) == "" {
+			return nil, fmt.Errorf("private key secret alias %q was not found", profile.KeySecretAlias)
+		}
+		certificate, err := keyPairFromPEM([]byte(certPEM), []byte(keyPEM), passphrase)
+		if err != nil {
+			return nil, err
+		}
+		tlsConfig.Certificates = []tls.Certificate{certificate}
+	}
+	if profile.CACertSecretAlias != "" {
+		caPEM, ok := lookup(profile.CACertSecretAlias)
+		if !ok || strings.TrimSpace(caPEM) == "" {
+			return nil, fmt.Errorf("CA certificate secret alias %q was not found", profile.CACertSecretAlias)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(caPEM)) {
+			return nil, fmt.Errorf("CA certificate secret alias %q did not contain valid PEM certificates", profile.CACertSecretAlias)
+		}
+		tlsConfig.RootCAs = pool
+	}
+	return tlsConfig, nil
+}
+
+func certificateProfileByID(profiles []domain.CertificateProfile, id string) (domain.CertificateProfile, bool) {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return domain.CertificateProfile{}, false
+}
+
+func matchingCertificateProfile(profiles []domain.CertificateProfile, requestURL *url.URL) (domain.CertificateProfile, bool) {
+	if requestURL == nil {
+		return domain.CertificateProfile{}, false
+	}
+	host := strings.ToLower(requestURL.Hostname())
+	port := requestURL.Port()
+	if port == "" {
+		if requestURL.Scheme == "http" {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	}
+	for _, profile := range profiles {
+		if !profile.IsActive {
+			continue
+		}
+		if strings.EqualFold(profile.Host, host) && strconv.Itoa(profile.Port) == port {
+			return profile, true
+		}
+	}
+	return domain.CertificateProfile{}, false
+}
+
+func keyPairFromPEM(certPEM []byte, keyPEM []byte, passphrase string) (tls.Certificate, error) {
+	if passphrase == "" {
+		certificate, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			return tls.Certificate{}, fmt.Errorf("load CRT/KEY files: %w", err)
+		}
+		return certificate, nil
+	}
+	block, rest := pem.Decode(keyPEM)
+	if block == nil {
+		return tls.Certificate{}, fmt.Errorf("KEY file did not contain a PEM block")
+	}
+	if !x509.IsEncryptedPEMBlock(block) {
+		certificate, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			return tls.Certificate{}, fmt.Errorf("load CRT/KEY files: %w", err)
+		}
+		return certificate, nil
+	}
+	decrypted, err := x509.DecryptPEMBlock(block, []byte(passphrase))
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("decrypt KEY file: %w", err)
+	}
+	decryptedPEM := pem.EncodeToMemory(&pem.Block{Type: block.Type, Bytes: decrypted})
+	decryptedPEM = append(decryptedPEM, rest...)
+	certificate, err := tls.X509KeyPair(certPEM, decryptedPEM)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("load decrypted CRT/KEY files: %w", err)
+	}
+	return certificate, nil
+}
+
+func decodeBase64FileValue(value string) ([]byte, error) {
+	trimmed := strings.TrimSpace(value)
+	if comma := strings.Index(trimmed, ","); strings.HasPrefix(trimmed, "data:") && comma >= 0 {
+		trimmed = trimmed[comma+1:]
+	}
+	decoded, err := base64.StdEncoding.DecodeString(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("decode PFX/P12 Base64 content: %w", err)
+	}
+	return decoded, nil
+}
+
+func proxyForStep(config map[string]any, resolver variables.Resolver) (*url.URL, error) {
+	proxyMap := configMap(config, "proxy")
+	if proxyMap == nil || !boolFromAny(proxyMap["enabled"]) {
+		return nil, nil
+	}
+	rawProxyURL, err := resolveConfigString(proxyMap["url"], resolver)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(rawProxyURL) == "" {
+		return nil, fmt.Errorf("proxy URL is required")
+	}
+	proxyURL, err := url.Parse(strings.TrimSpace(rawProxyURL))
+	if err != nil {
+		return nil, fmt.Errorf("parse proxy URL: %w", err)
+	}
+	if proxyURL.Scheme == "" || proxyURL.Host == "" {
+		return nil, fmt.Errorf("proxy URL must include scheme and host")
+	}
+
+	username, err := resolveConfigString(proxyMap["username"], resolver)
+	if err != nil {
+		return nil, err
+	}
+	password, err := resolveConfigString(proxyMap["password"], resolver)
+	if err != nil {
+		return nil, err
+	}
+	if username != "" || password != "" {
+		if password != "" {
+			proxyURL.User = url.UserPassword(username, password)
+		} else {
+			proxyURL.User = url.User(username)
+		}
+	}
+
+	return proxyURL, nil
+}
+
+func safeRequestHeaders(headers http.Header) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	safe := make(map[string]string, len(headers))
+	for key, values := range headers {
+		if isSensitiveHeader(key) {
+			safe[key] = masking.Mask
+			continue
+		}
+		safe[key] = strings.Join(values, ", ")
+	}
+	return safe
+}
+
+func isSensitiveHeader(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	return normalized == "authorization" || normalized == "proxy-authorization" || normalized == "cookie" || normalized == "set-cookie"
+}
+
+func configMap(config map[string]any, key string) map[string]any {
+	if config == nil {
+		return nil
+	}
+	switch typed := config[key].(type) {
+	case map[string]any:
+		return typed
+	case map[string]string:
+		out := make(map[string]any, len(typed))
+		for k, v := range typed {
+			out[k] = v
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func jwtBearerToken(authMap map[string]any, resolver variables.Resolver) (string, error) {
+	algorithm := strings.ToUpper(stringFromAny(authMap["algorithm"]))
+	if algorithm == "" {
+		algorithm = "HS256"
+	}
+	if algorithm != "HS256" && algorithm != "HS384" && algorithm != "HS512" {
+		return "", fmt.Errorf("JWT bearer currently supports HS256, HS384, and HS512")
+	}
+
+	payloadRaw, err := resolveConfigString(authMap["payload"], resolver)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(payloadRaw) == "" {
+		payloadRaw = "{}"
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil {
+		return "", fmt.Errorf("invalid JWT payload JSON: %w", err)
+	}
+	now := time.Now().Unix()
+	if _, ok := payload["iat"]; !ok {
+		payload["iat"] = now
+	}
+	if _, ok := payload["exp"]; !ok {
+		payload["exp"] = now + 300
+	}
+
+	headers := map[string]any{"typ": "JWT", "alg": algorithm}
+	if headersRaw, err := resolveConfigString(authMap["headers"], resolver); err != nil {
+		return "", err
+	} else if strings.TrimSpace(headersRaw) != "" {
+		var custom map[string]any
+		if err := json.Unmarshal([]byte(headersRaw), &custom); err != nil {
+			return "", fmt.Errorf("invalid JWT headers JSON: %w", err)
+		}
+		for key, value := range custom {
+			headers[key] = value
+		}
+		headers["alg"] = algorithm
+	}
+
+	secret, err := resolveConfigString(authMap["secret"], resolver)
+	if err != nil {
+		return "", err
+	}
+	if secret == "" {
+		return "", fmt.Errorf("JWT secret is required")
+	}
+	secretBytes := []byte(secret)
+	if boolFromAny(authMap["secretBase64Encoded"]) {
+		decoded, err := base64.StdEncoding.DecodeString(secret)
+		if err != nil {
+			return "", fmt.Errorf("decode base64 JWT secret: %w", err)
+		}
+		secretBytes = decoded
+	}
+
+	headerBytes, _ := json.Marshal(headers)
+	payloadBytes, _ := json.Marshal(payload)
+	signingInput := base64.RawURLEncoding.EncodeToString(headerBytes) + "." + base64.RawURLEncoding.EncodeToString(payloadBytes)
+
+	var signature []byte
+	switch algorithm {
+	case "HS384":
+		mac := hmac.New(sha512.New384, secretBytes)
+		_, _ = mac.Write([]byte(signingInput))
+		signature = mac.Sum(nil)
+	case "HS512":
+		mac := hmac.New(sha512.New, secretBytes)
+		_, _ = mac.Write([]byte(signingInput))
+		signature = mac.Sum(nil)
+	default:
+		mac := hmac.New(sha256.New, secretBytes)
+		_, _ = mac.Write([]byte(signingInput))
+		signature = mac.Sum(nil)
+	}
+
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
+}
+
+func resolveConfigString(value any, resolver variables.Resolver) (string, error) {
+	resolved, err := resolver.Resolve(stringFromAny(value))
+	if err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
+func stringFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case fmt.Stringer:
+		return typed.String()
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func boolFromAny(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return typed == "true"
+	default:
+		return false
+	}
 }
 
 func executePreRequestAction(actionType string, configPreview string, resolver variables.Resolver) string {

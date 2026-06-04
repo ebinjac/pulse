@@ -41,6 +41,10 @@ type Store interface {
 	GetRetentionSettings() domain.RetentionSettings
 	UpdateRetentionSettings(settings domain.RetentionSettings) domain.RetentionSettings
 	PurgeExpiredRuns(retentionDays int) (int, error)
+	ListCertificateProfiles() []domain.CertificateProfile
+	GetCertificateProfile(id string) (domain.CertificateProfile, bool)
+	UpsertCertificateProfile(profile domain.CertificateProfile) (domain.CertificateProfile, error)
+	DeleteCertificateProfile(id string) bool
 	ListSecrets() []domain.SecretReference
 	GetSecret(id string) (domain.SecretReference, bool)
 	UpsertSecret(secret domain.SecretReference) (domain.SecretReference, error)

@@ -1,8 +1,17 @@
 package httpapi
 
 import (
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +19,7 @@ import (
 	"github.com/ensemble-pulse/pulse/apps/api/internal/executor"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/jobqueue"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/store"
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
 type Server struct {
@@ -53,6 +63,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/settings/retention", s.getRetentionSettings)
 	mux.HandleFunc("PUT /api/settings/retention", s.updateRetentionSettings)
 	mux.HandleFunc("POST /api/settings/retention/purge", s.purgeRetention)
+	mux.HandleFunc("GET /api/settings/certificates", s.listCertificateProfiles)
+	mux.HandleFunc("POST /api/settings/certificates", s.createCertificateProfile)
+	mux.HandleFunc("/api/settings/certificates/", s.certificateProfileRoutes)
 	mux.HandleFunc("GET /api/metrics/slo", s.getSLOSummary)
 
 	return withJSON(mux)
@@ -440,6 +453,333 @@ func (s *Server) secretRoutes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listAlerts(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"alerts": s.store.ListAlerts()})
+}
+
+type certificateProfilePayload struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Host               string `json:"host"`
+	Port               int    `json:"port"`
+	CertType           string `json:"certType"`
+	CertFile           string `json:"certFile"`
+	KeyFile            string `json:"keyFile"`
+	PFXFile            string `json:"pfxFile"`
+	CACertFile         string `json:"caCertFile"`
+	Passphrase         string `json:"passphrase"`
+	InsecureSkipVerify bool   `json:"insecureSkipVerify"`
+	IsActive           *bool  `json:"isActive"`
+}
+
+func (s *Server) listCertificateProfiles(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"profiles": s.store.ListCertificateProfiles()})
+}
+
+func (s *Server) createCertificateProfile(w http.ResponseWriter, r *http.Request) {
+	profile, ok := s.decodeCertificateProfilePayload(w, r, "")
+	if !ok {
+		return
+	}
+	saved, err := s.store.UpsertCertificateProfile(profile)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"profile": saved})
+}
+
+func (s *Server) certificateProfileRoutes(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/settings/certificates/")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		writeError(w, http.StatusNotFound, "certificate profile not found")
+		return
+	}
+	id := parts[0]
+
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			profile, ok := s.store.GetCertificateProfile(id)
+			if !ok {
+				writeError(w, http.StatusNotFound, "certificate profile not found")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"profile": profile})
+		case http.MethodPut:
+			profile, ok := s.decodeCertificateProfilePayload(w, r, id)
+			if !ok {
+				return
+			}
+			saved, err := s.store.UpsertCertificateProfile(profile)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"profile": saved})
+		case http.MethodDelete:
+			if !s.store.DeleteCertificateProfile(id) {
+				writeError(w, http.StatusNotFound, "certificate profile not found")
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "test" && r.Method == http.MethodPost {
+		profile, ok := s.store.GetCertificateProfile(id)
+		if !ok {
+			writeError(w, http.StatusNotFound, "certificate profile not found")
+			return
+		}
+		err := s.validateCertificateProfileSecrets(profile)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		now := time.Now().UTC()
+		profile.LastTestedAt = &now
+		saved, _ := s.store.UpsertCertificateProfile(profile)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": saved})
+		return
+	}
+
+	writeError(w, http.StatusNotFound, "route not found")
+}
+
+func (s *Server) decodeCertificateProfilePayload(w http.ResponseWriter, r *http.Request, id string) (domain.CertificateProfile, bool) {
+	var payload certificateProfilePayload
+	if !decodeJSON(w, r, &payload) {
+		return domain.CertificateProfile{}, false
+	}
+	if id != "" {
+		payload.ID = id
+	}
+	if payload.ID == "" {
+		payload.ID = "cert-" + apiRandomID()
+	}
+	payload.Host = normalizeCertificateHost(payload.Host)
+	if payload.Host == "" {
+		writeError(w, http.StatusBadRequest, "host is required")
+		return domain.CertificateProfile{}, false
+	}
+	if payload.Port <= 0 {
+		payload.Port = 443
+	}
+	payload.CertType = strings.ToLower(strings.TrimSpace(payload.CertType))
+	if payload.CertType == "" {
+		payload.CertType = "pem"
+	}
+	if payload.CertType != "pem" && payload.CertType != "pfx" {
+		writeError(w, http.StatusBadRequest, "certType must be pem or pfx")
+		return domain.CertificateProfile{}, false
+	}
+	isActive := true
+	if payload.IsActive != nil {
+		isActive = *payload.IsActive
+	}
+	name := strings.TrimSpace(payload.Name)
+	if name == "" {
+		name = payload.Host + ":" + strconv.Itoa(payload.Port)
+	}
+
+	existing, _ := s.store.GetCertificateProfile(payload.ID)
+	profile := domain.CertificateProfile{
+		ID:                    payload.ID,
+		Name:                  name,
+		Host:                  payload.Host,
+		Port:                  payload.Port,
+		CertType:              payload.CertType,
+		CertSecretAlias:       existing.CertSecretAlias,
+		KeySecretAlias:        existing.KeySecretAlias,
+		PFXSecretAlias:        existing.PFXSecretAlias,
+		CACertSecretAlias:     existing.CACertSecretAlias,
+		PassphraseSecretAlias: existing.PassphraseSecretAlias,
+		InsecureSkipVerify:    payload.InsecureSkipVerify,
+		IsActive:              isActive,
+		LastTestedAt:          existing.LastTestedAt,
+		CreatedAt:             existing.CreatedAt,
+	}
+
+	if payload.CertFile != "" {
+		profile.CertSecretAlias = certificateSecretAlias(profile.ID, "cert")
+		if err := s.upsertCertificateSecret(profile.ID, profile.CertSecretAlias, "Client certificate PEM", payload.CertFile); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return domain.CertificateProfile{}, false
+		}
+	}
+	if payload.KeyFile != "" {
+		profile.KeySecretAlias = certificateSecretAlias(profile.ID, "key")
+		if err := s.upsertCertificateSecret(profile.ID, profile.KeySecretAlias, "Client key PEM", payload.KeyFile); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return domain.CertificateProfile{}, false
+		}
+	}
+	if payload.PFXFile != "" {
+		profile.PFXSecretAlias = certificateSecretAlias(profile.ID, "pfx")
+		if err := s.upsertCertificateSecret(profile.ID, profile.PFXSecretAlias, "Client PFX/P12 bundle", payload.PFXFile); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return domain.CertificateProfile{}, false
+		}
+	}
+	if payload.CACertFile != "" {
+		profile.CACertSecretAlias = certificateSecretAlias(profile.ID, "ca")
+		if err := s.upsertCertificateSecret(profile.ID, profile.CACertSecretAlias, "Custom CA certificate PEM", payload.CACertFile); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return domain.CertificateProfile{}, false
+		}
+	}
+	if payload.Passphrase != "" {
+		profile.PassphraseSecretAlias = certificateSecretAlias(profile.ID, "passphrase")
+		if err := s.upsertCertificateSecret(profile.ID, profile.PassphraseSecretAlias, "Certificate passphrase", payload.Passphrase); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return domain.CertificateProfile{}, false
+		}
+	}
+
+	if profile.CertType == "pem" && (profile.CertSecretAlias == "" || profile.KeySecretAlias == "") {
+		writeError(w, http.StatusBadRequest, "CRT and KEY files are required for PEM certificate profiles")
+		return domain.CertificateProfile{}, false
+	}
+	if profile.CertType == "pfx" && profile.PFXSecretAlias == "" {
+		writeError(w, http.StatusBadRequest, "PFX/P12 file is required for PFX certificate profiles")
+		return domain.CertificateProfile{}, false
+	}
+
+	return profile, true
+}
+
+func (s *Server) upsertCertificateSecret(profileID string, alias string, name string, value string) error {
+	_, err := s.store.UpsertSecret(domain.SecretReference{
+		ID:          "sec-" + profileID + "-" + strings.TrimPrefix(alias, "certprofile."+profileID+"."),
+		Name:        name,
+		Alias:       alias,
+		Description: "Certificate profile material managed from Pulse settings.",
+		Provider:    "encrypted-db",
+		MaskedValue: "********",
+		IsActive:    true,
+		RawValue:    value,
+	})
+	return err
+}
+
+func (s *Server) validateCertificateProfileSecrets(profile domain.CertificateProfile) error {
+	switch profile.CertType {
+	case "pfx":
+		pfxValue, ok := s.store.GetRawSecretValue(profile.PFXSecretAlias)
+		if !ok || strings.TrimSpace(pfxValue) == "" {
+			return fmt.Errorf("PFX/P12 secret is not configured")
+		}
+		passphrase := ""
+		if profile.PassphraseSecretAlias != "" {
+			passphrase, _ = s.store.GetRawSecretValue(profile.PassphraseSecretAlias)
+		}
+		pfxBytes, err := decodeBase64FileValue(pfxValue)
+		if err != nil {
+			return err
+		}
+		if _, _, _, err := pkcs12.DecodeChain(pfxBytes, passphrase); err != nil {
+			return fmt.Errorf("parse PFX/P12 bundle: %w", err)
+		}
+	default:
+		certPEM, ok := s.store.GetRawSecretValue(profile.CertSecretAlias)
+		if !ok || strings.TrimSpace(certPEM) == "" {
+			return fmt.Errorf("CRT file secret is not configured")
+		}
+		keyPEM, ok := s.store.GetRawSecretValue(profile.KeySecretAlias)
+		if !ok || strings.TrimSpace(keyPEM) == "" {
+			return fmt.Errorf("KEY file secret is not configured")
+		}
+		passphrase := ""
+		if profile.PassphraseSecretAlias != "" {
+			passphrase, _ = s.store.GetRawSecretValue(profile.PassphraseSecretAlias)
+		}
+		if _, err := keyPairFromPEM([]byte(certPEM), []byte(keyPEM), passphrase); err != nil {
+			return err
+		}
+	}
+	if profile.CACertSecretAlias != "" {
+		caPEM, ok := s.store.GetRawSecretValue(profile.CACertSecretAlias)
+		if !ok || strings.TrimSpace(caPEM) == "" {
+			return fmt.Errorf("CA certificate secret is not configured")
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(caPEM)) {
+			return fmt.Errorf("CA certificate file did not contain valid PEM certificates")
+		}
+	}
+	return nil
+}
+
+func keyPairFromPEM(certPEM []byte, keyPEM []byte, passphrase string) (tls.Certificate, error) {
+	if passphrase == "" {
+		certificate, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			return tls.Certificate{}, fmt.Errorf("load CRT/KEY files: %w", err)
+		}
+		return certificate, nil
+	}
+	block, rest := pem.Decode(keyPEM)
+	if block == nil {
+		return tls.Certificate{}, fmt.Errorf("KEY file did not contain a PEM block")
+	}
+	if !x509.IsEncryptedPEMBlock(block) {
+		certificate, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			return tls.Certificate{}, fmt.Errorf("load CRT/KEY files: %w", err)
+		}
+		return certificate, nil
+	}
+	decrypted, err := x509.DecryptPEMBlock(block, []byte(passphrase))
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("decrypt KEY file: %w", err)
+	}
+	decryptedPEM := pem.EncodeToMemory(&pem.Block{Type: block.Type, Bytes: decrypted})
+	decryptedPEM = append(decryptedPEM, rest...)
+	certificate, err := tls.X509KeyPair(certPEM, decryptedPEM)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("load decrypted CRT/KEY files: %w", err)
+	}
+	return certificate, nil
+}
+
+func decodeBase64FileValue(value string) ([]byte, error) {
+	trimmed := strings.TrimSpace(value)
+	if comma := strings.Index(trimmed, ","); strings.HasPrefix(trimmed, "data:") && comma >= 0 {
+		trimmed = trimmed[comma+1:]
+	}
+	decoded, err := base64.StdEncoding.DecodeString(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("decode PFX/P12 Base64 content: %w", err)
+	}
+	return decoded, nil
+}
+
+func normalizeCertificateHost(value string) string {
+	trimmed := strings.TrimSpace(value)
+	trimmed = strings.TrimPrefix(trimmed, "https://")
+	trimmed = strings.TrimPrefix(trimmed, "http://")
+	if parsed, err := url.Parse("https://" + trimmed); err == nil && parsed.Hostname() != "" {
+		return strings.ToLower(parsed.Hostname())
+	}
+	if host, _, ok := strings.Cut(trimmed, ":"); ok {
+		return strings.ToLower(strings.TrimSpace(host))
+	}
+	return strings.ToLower(trimmed)
+}
+
+func certificateSecretAlias(profileID string, part string) string {
+	return "certprofile." + profileID + "." + part
+}
+
+func apiRandomID() string {
+	bytes := make([]byte, 8)
+	if _, err := rand.Read(bytes); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(bytes)
 }
 
 type notificationSettingsPayload struct {

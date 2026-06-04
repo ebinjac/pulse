@@ -49,12 +49,12 @@ func NormalizeMonitorStatus(status string) MonitorStatus {
 type FailureCategory string
 
 const (
-	FailureAssertion   FailureCategory = "ASSERTION_FAILURE"
-	FailureDNS         FailureCategory = "DNS_FAILURE"
-	FailureConnection  FailureCategory = "CONNECTION_FAILURE"
-	FailureTLS         FailureCategory = "TLS_FAILURE"
-	FailureTimeout     FailureCategory = "TIMEOUT"
-	FailureUnknown     FailureCategory = "UNKNOWN_ERROR"
+	FailureAssertion  FailureCategory = "ASSERTION_FAILURE"
+	FailureDNS        FailureCategory = "DNS_FAILURE"
+	FailureConnection FailureCategory = "CONNECTION_FAILURE"
+	FailureTLS        FailureCategory = "TLS_FAILURE"
+	FailureTimeout    FailureCategory = "TIMEOUT"
+	FailureUnknown    FailureCategory = "UNKNOWN_ERROR"
 )
 
 type Monitor struct {
@@ -136,31 +136,31 @@ type ApplicationRunSummary struct {
 }
 
 type AlertRouting struct {
-	Enabled              bool     `json:"enabled"`
-	Severity             string   `json:"severity,omitempty"`
-	Threshold            int      `json:"threshold,omitempty"`
-	ResponseTimeMS       int      `json:"responseTimeMs,omitempty"`
-	CooldownMinutes      int      `json:"cooldownMinutes,omitempty"`
-	Email                bool     `json:"email"`
-	SlackWebhook         bool     `json:"slackWebhook"`
-	EmailTo              []string `json:"emailTo,omitempty"`
-	OnCallTargets        []string `json:"onCallTargets,omitempty"`
-	SlackWebhookSecret   string   `json:"slackWebhookSecret,omitempty"`
-	InheritFromApplication bool   `json:"inheritFromApplication,omitempty"`
+	Enabled                bool     `json:"enabled"`
+	Severity               string   `json:"severity,omitempty"`
+	Threshold              int      `json:"threshold,omitempty"`
+	ResponseTimeMS         int      `json:"responseTimeMs,omitempty"`
+	CooldownMinutes        int      `json:"cooldownMinutes,omitempty"`
+	Email                  bool     `json:"email"`
+	SlackWebhook           bool     `json:"slackWebhook"`
+	EmailTo                []string `json:"emailTo,omitempty"`
+	OnCallTargets          []string `json:"onCallTargets,omitempty"`
+	SlackWebhookSecret     string   `json:"slackWebhookSecret,omitempty"`
+	InheritFromApplication bool     `json:"inheritFromApplication,omitempty"`
 }
 
 type AlertPolicy struct {
-	Enabled         bool `json:"enabled"`
-	Threshold       int  `json:"threshold"`
-	ResponseTimeMS  int  `json:"responseTimeMs"`
-	Email           bool `json:"email"`
-	SlackWebhook    bool `json:"slackWebhook"`
-	CooldownMinutes int  `json:"cooldownMinutes"`
-	Severity             string   `json:"severity,omitempty"`
-	EmailTo              []string `json:"emailTo,omitempty"`
-	OnCallTargets        []string `json:"onCallTargets,omitempty"`
-	SlackWebhookSecret   string   `json:"slackWebhookSecret,omitempty"`
-	InheritFromApplication bool   `json:"inheritFromApplication,omitempty"`
+	Enabled                bool     `json:"enabled"`
+	Threshold              int      `json:"threshold"`
+	ResponseTimeMS         int      `json:"responseTimeMs"`
+	Email                  bool     `json:"email"`
+	SlackWebhook           bool     `json:"slackWebhook"`
+	CooldownMinutes        int      `json:"cooldownMinutes"`
+	Severity               string   `json:"severity,omitempty"`
+	EmailTo                []string `json:"emailTo,omitempty"`
+	OnCallTargets          []string `json:"onCallTargets,omitempty"`
+	SlackWebhookSecret     string   `json:"slackWebhookSecret,omitempty"`
+	InheritFromApplication bool     `json:"inheritFromApplication,omitempty"`
 }
 
 type MonitorStep struct {
@@ -265,6 +265,24 @@ type AlertEvent struct {
 type RetentionSettings struct {
 	RunsRetentionDays int  `json:"runsRetentionDays"`
 	Enabled           bool `json:"enabled"`
+}
+
+type CertificateProfile struct {
+	ID                    string     `json:"id"`
+	Name                  string     `json:"name"`
+	Host                  string     `json:"host"`
+	Port                  int        `json:"port"`
+	CertType              string     `json:"certType"`
+	CertSecretAlias       string     `json:"certSecretAlias,omitempty"`
+	KeySecretAlias        string     `json:"keySecretAlias,omitempty"`
+	PFXSecretAlias        string     `json:"pfxSecretAlias,omitempty"`
+	CACertSecretAlias     string     `json:"caCertSecretAlias,omitempty"`
+	PassphraseSecretAlias string     `json:"passphraseSecretAlias,omitempty"`
+	InsecureSkipVerify    bool       `json:"insecureSkipVerify"`
+	IsActive              bool       `json:"isActive"`
+	LastTestedAt          *time.Time `json:"lastTestedAt,omitempty"`
+	CreatedAt             time.Time  `json:"createdAt"`
+	UpdatedAt             time.Time  `json:"updatedAt"`
 }
 
 type NotificationTestOverrides struct {
