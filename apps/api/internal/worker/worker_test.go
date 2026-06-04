@@ -35,6 +35,12 @@ func (m *mockExecutor) RunScheduled(monitor domain.Monitor) domain.MonitorRun {
 	return run
 }
 
+func (m *mockExecutor) RunDraft(monitor domain.Monitor) domain.MonitorRun {
+	run := m.Run(monitor)
+	run.TriggeredBy = "draft"
+	return run
+}
+
 func (m *mockExecutor) Test(monitor domain.Monitor) domain.MonitorRun {
 	return domain.MonitorRun{}
 }
