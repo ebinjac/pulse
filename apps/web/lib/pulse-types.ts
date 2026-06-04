@@ -1,6 +1,6 @@
 export type MonitorStatus = "success" | "failed" | "timeout" | "error" | "skipped"
 
-export type StepType = "http" | "preRequest" | "delay"
+export type StepType = "http" | "preRequest" | "delay" | "dns" | "tcp" | "tls"
 
 export type TriggeredBy = "manual" | "schedule" | "draft" | "test"
 
@@ -23,6 +23,8 @@ export type AssertionType =
   | "header"
   | "bodyContains"
   | "regex"
+  | "certExpiryDays"
+  | "dnsRecords"
 
 export type ExtractorType =
   | "jsonPath"
@@ -325,4 +327,69 @@ export interface NotificationSettingsInput {
   smtpUser: string
   smtpPassword: string
   slackWebhookUrl: string
+}
+
+export interface NotificationTestResult {
+  ok: boolean
+  deliveries: AlertDelivery[]
+}
+
+export interface RetentionSettings {
+  runsRetentionDays: number
+  enabled: boolean
+}
+
+export interface RetentionPurgeResult {
+  deleted: number
+  runsRetentionDays?: number
+  enabled?: boolean
+  message?: string
+}
+
+export interface UptimeWindow {
+  uptimePct: number
+  totalRuns: number
+  successfulRuns: number
+}
+
+export interface LatencyPercentiles {
+  p50Ms: number
+  p95Ms: number
+  p99Ms: number
+  avgMs: number
+}
+
+export interface MonitorSLO {
+  monitorId: string
+  uptime7d: UptimeWindow
+  uptime30d: UptimeWindow
+  runLatency7d: LatencyPercentiles
+  runLatency30d: LatencyPercentiles
+  stepLatency7d: LatencyPercentiles
+  stepLatency30d: LatencyPercentiles
+}
+
+export interface ApplicationSLO {
+  applicationId: string
+  uptime7d: UptimeWindow
+  uptime30d: UptimeWindow
+  runLatency7d: LatencyPercentiles
+  runLatency30d: LatencyPercentiles
+}
+
+export interface ErrorBudgetSummary {
+  targetUptimePct: number
+  actualUptime30dPct: number
+  errorBudgetRemainingPct: number
+  allowedDowntimeMinutes30d: number
+  consumedDowntimeMinutes30d: number
+}
+
+export interface SLOSummary {
+  targetUptimePct: number
+  global: UptimeWindow
+  globalLatency30d: LatencyPercentiles
+  errorBudget: ErrorBudgetSummary
+  monitors: MonitorSLO[]
+  applications: ApplicationSLO[]
 }

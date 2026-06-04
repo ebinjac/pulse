@@ -80,6 +80,9 @@ func (s *PostgresStore) GetMonitorDraft(id string) (domain.Monitor, bool) {
 
 	row, err := s.queries.GetMonitorDraft(context.Background(), id)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return published, true
+		}
 		return domain.Monitor{}, false
 	}
 

@@ -49,6 +49,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/maintenance-windows/", s.maintenanceWindowRoutes)
 	mux.HandleFunc("GET /api/settings/notifications", s.getNotificationSettings)
 	mux.HandleFunc("PUT /api/settings/notifications", s.updateNotificationSettings)
+	mux.HandleFunc("POST /api/settings/notifications/test", s.testNotificationSettings)
+	mux.HandleFunc("GET /api/settings/retention", s.getRetentionSettings)
+	mux.HandleFunc("PUT /api/settings/retention", s.updateRetentionSettings)
+	mux.HandleFunc("POST /api/settings/retention/purge", s.purgeRetention)
+	mux.HandleFunc("GET /api/metrics/slo", s.getSLOSummary)
 
 	return withJSON(mux)
 }

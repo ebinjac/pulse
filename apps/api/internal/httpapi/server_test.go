@@ -18,6 +18,20 @@ func testServer() http.Handler {
 	return NewServer(store, executor.NewMockExecutor(store)).Routes()
 }
 
+func TestRunMonitorDraftEndpoint(t *testing.T) {
+	handler := testServer()
+	body := bytes.NewBufferString(`{"name":"Synthetic monitor","steps":[]}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/monitors/mon-protected-api/run/draft", body)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+}
+
 func TestListMonitorVersionsEndpoint(t *testing.T) {
 	handler := testServer()
 	request := httptest.NewRequest(http.MethodGet, "/api/monitors/mon-protected-api/versions", nil)

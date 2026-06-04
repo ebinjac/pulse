@@ -21,6 +21,8 @@ Use golang-migrate naming:
 000005_monitor_versions.down.sql
 000006_alert_routing_ops.up.sql
 000006_alert_routing_ops.down.sql
+000007_system_settings.up.sql
+000007_system_settings.down.sql
 ```
 
 Each schema change must add a new numbered pair:

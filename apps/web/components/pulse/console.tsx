@@ -53,8 +53,14 @@ import type {
   MonitorRun,
   NotificationSettings,
   NotificationSettingsInput,
+  NotificationTestResult,
+  RetentionPurgeResult,
+  RetentionSettings,
   SecretReference,
+  SLOSummary,
 } from "@/lib/pulse-types"
+import { applicationSLOMap, formatUptimePct, monitorSLOMap } from "@/lib/pulse-slo"
+import { ErrorBudgetWidget } from "@/components/pulse/slo-widgets"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import {
@@ -126,23 +132,27 @@ interface PulseConsoleProps {
   alertId?: string
 }
 
-function applicationHealth(monitors: Monitor[]) {
+function applicationHealth(monitors: Monitor[], appSlo?: { uptime7d: { uptimePct: number }; uptime30d: { uptimePct: number } }) {
   const total = monitors.length
   const failing = monitors.filter((monitor) => isFailedStatus(monitor.status)).length
   const active = monitors.filter((monitor) => monitor.isActive).length
-  const successRate = total > 0
-    ? Math.round(monitors.reduce((sum, monitor) => sum + (monitor.successRate24h || 0), 0) / total)
-    : 100
+  const successRate = appSlo
+    ? Math.round(appSlo.uptime30d.uptimePct)
+    : total > 0
+      ? Math.round(monitors.reduce((sum, monitor) => sum + (monitor.successRate24h || 0), 0) / total)
+      : 100
+  const uptime7d = appSlo ? Math.round(appSlo.uptime7d.uptimePct) : successRate
   const avgLatency = total > 0
     ? Math.round(monitors.reduce((sum, monitor) => sum + (monitor.lastDurationMs || 0), 0) / total)
     : 0
 
-  return { total, failing, active, successRate, avgLatency }
+  return { total, failing, active, successRate, uptime7d, avgLatency }
 }
 
 function ApplicationsView({
   applications,
   monitors,
+  applicationSloMap: appSloLookup,
   onSaveApplication,
   onRunApplication,
   runningAppId,
@@ -150,6 +160,7 @@ function ApplicationsView({
 }: {
   applications: Application[]
   monitors: Monitor[]
+  applicationSloMap?: Map<string, import("@/lib/pulse-types").ApplicationSLO>
   onSaveApplication: (input: Application) => Promise<void>
   onRunApplication: (applicationId: string) => Promise<void>
   runningAppId?: string
@@ -261,15 +272,16 @@ function ApplicationsView({
               <TableHead className="w-[12%] text-xs">Environment</TableHead>
               <TableHead className="w-[14%] text-xs">Owner Team</TableHead>
               <TableHead className="w-[10%] text-xs text-center">Monitors</TableHead>
-              <TableHead className="w-[10%] text-xs text-center">Success Rate</TableHead>
-              <TableHead className="w-[10%] text-xs text-center">Avg Latency</TableHead>
+              <TableHead className="w-[8%] text-xs text-center">Uptime 7d</TableHead>
+              <TableHead className="w-[8%] text-xs text-center">Uptime 30d</TableHead>
+              <TableHead className="w-[8%] text-xs text-center">Avg Latency</TableHead>
               <TableHead className="w-[18%] text-right pr-6 text-xs">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {sortedApplications.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="h-48 text-center align-middle">
+                <TableCell colSpan={9} className="h-48 text-center align-middle">
                   <Empty className="border-0 bg-transparent py-6">
                     <EmptyHeader>
                       <EmptyMedia variant="icon">
@@ -286,7 +298,8 @@ function ApplicationsView({
             ) : (
               sortedApplications.map((application) => {
                 const appMonitors = monitors.filter((monitor) => monitor.applicationId === application.id)
-                const health = applicationHealth(appMonitors)
+                const appSlo = appSloLookup?.get(application.id)
+                const health = applicationHealth(appMonitors, appSlo)
                 const isRunning = runningAppId === application.id
 
                 return (
@@ -374,21 +387,11 @@ function ApplicationsView({
                       </div>
                     </TableCell>
 
-                    {/* Success Rate */}
-                    <TableCell className="align-middle text-center">
-                      <div className={cn(
-                        "text-xs font-bold",
-                        health.successRate === 100
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : health.successRate >= 90
-                            ? "text-amber-500 dark:text-amber-400"
-                            : "text-rose-500 dark:text-rose-400"
-                      )}>
-                        {health.successRate}%
-                      </div>
-                      <div className="text-[9px] text-muted-foreground font-medium">
-                        24h avg
-                      </div>
+                    <TableCell className="align-middle text-center text-xs font-bold">
+                      {formatUptimePct(health.uptime7d)}
+                    </TableCell>
+                    <TableCell className="align-middle text-center text-xs font-bold">
+                      {formatUptimePct(health.successRate)}
                     </TableCell>
 
                     {/* Latency */}
@@ -567,6 +570,7 @@ function ApplicationsView({
 function ApplicationDetailView({
   application,
   monitors,
+  applicationSlo,
   onRunApplication,
   onRunNow,
   onToggleActive,
@@ -576,6 +580,7 @@ function ApplicationDetailView({
 }: {
   application: Application
   monitors: Monitor[]
+  applicationSlo?: import("@/lib/pulse-types").ApplicationSLO
   onRunApplication: (applicationId: string) => Promise<void>
   onRunNow: (monitorId: string) => Promise<any> | any
   onToggleActive: (monitorId: string, currentActive: boolean) => void
@@ -586,7 +591,7 @@ function ApplicationDetailView({
   const [running, setRunning] = useState(false)
   const [routing, setRouting] = useState(application.alertRouting || {})
   const [savingRouting, setSavingRouting] = useState(false)
-  const health = applicationHealth(monitors)
+  const health = applicationHealth(monitors, applicationSlo)
 
   async function run() {
     if (running) return
@@ -644,11 +649,12 @@ function ApplicationDetailView({
           )}
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <Metric label="Total monitors" value={String(health.total)} icon={Workflow} detail={`${health.active} active`} />
           <Metric label="Failing" value={String(health.failing)} icon={AlertTriangle} detail="Current status" />
-          <Metric label="Success rate" value={`${health.successRate}%`} icon={CheckCircle2} detail="24h average" />
-          <Metric label="Avg latency" value={`${health.avgLatency}ms`} icon={Server} detail={application.environment || "environment"} />
+          <Metric label="Uptime 7d" value={formatUptimePct(health.uptime7d)} icon={CheckCircle2} detail="Rolling production runs" />
+          <Metric label="Uptime 30d" value={formatUptimePct(health.successRate)} icon={CheckCircle2} detail="Rolling production runs" />
+          <Metric label="p95 latency (30d)" value={`${applicationSlo?.runLatency30d.p95Ms ?? health.avgLatency}ms`} icon={Server} detail={application.environment || "environment"} />
         </div>
 
         <Card>
@@ -732,12 +738,13 @@ function ApplicationDetailView({
 
 interface MonitorTableProps {
   monitors: Monitor[]
+  monitorSloMap?: Map<string, import("@/lib/pulse-types").MonitorSLO>
   onRunNow: (monitorId: string) => Promise<any> | any
   onToggleActive: (monitorId: string, currentActive: boolean) => void
   onDeleteMonitor?: (monitorId: string) => void
 }
 
-function MonitorTable({ monitors, onRunNow, onToggleActive, onDeleteMonitor }: MonitorTableProps) {
+function MonitorTable({ monitors, monitorSloMap, onRunNow, onToggleActive, onDeleteMonitor }: MonitorTableProps) {
   const [runningIds, setRunningIds] = useState<string[]>([])
 
   const handleRunClick = async (monitorId: string) => {
@@ -760,15 +767,17 @@ function MonitorTable({ monitors, onRunNow, onToggleActive, onDeleteMonitor }: M
             <TableHead className="w-[30%] text-xs ">Monitor</TableHead>
             <TableHead className="w-[12%] text-xs ">Status</TableHead>
             <TableHead className="w-[15%] text-xs ">Schedule</TableHead>
-            <TableHead className="w-[18%] text-xs ">Last execution</TableHead>
-            <TableHead className="w-[10%] text-xs ">State</TableHead>
-            <TableHead className="text-right w-[15%] pr-6 text-xs ">Actions</TableHead>
+            <TableHead className="w-[12%] text-xs ">Last execution</TableHead>
+            <TableHead className="w-[8%] text-xs text-center">7d</TableHead>
+            <TableHead className="w-[8%] text-xs text-center">30d</TableHead>
+            <TableHead className="w-[8%] text-xs ">State</TableHead>
+            <TableHead className="text-right w-[12%] pr-6 text-xs ">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {monitors.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="h-48 text-center align-middle">
+              <TableCell colSpan={8} className="h-48 text-center align-middle">
                 <Empty className="border-0 bg-transparent py-6">
                   <EmptyHeader>
                     <EmptyMedia variant="icon">
@@ -805,6 +814,12 @@ function MonitorTable({ monitors, onRunNow, onToggleActive, onDeleteMonitor }: M
                   </TableCell>
                   <TableCell className="align-middle text-muted-foreground text-xs font-medium">
                     {monitor.lastRunAt ? formatDate(monitor.lastRunAt) : "Never"}
+                  </TableCell>
+                  <TableCell className="align-middle text-center text-xs font-semibold">
+                    {formatUptimePct(monitorSloMap?.get(monitor.id)?.uptime7d.uptimePct)}
+                  </TableCell>
+                  <TableCell className="align-middle text-center text-xs font-semibold">
+                    {formatUptimePct(monitorSloMap?.get(monitor.id)?.uptime30d.uptimePct)}
                   </TableCell>
                   <TableCell className="align-middle">
                     <span className={cn(
@@ -934,15 +949,6 @@ function SchedulerStatusCard({ monitors }: { monitors: Monitor[] }) {
   )
 }
 
-interface DashboardProps {
-  monitors: Monitor[]
-  runs: MonitorRun[]
-  alerts: AlertEvent[]
-  onRunNow: (monitorId: string) => void
-  onToggleActive: (monitorId: string, currentActive: boolean) => void
-  onDeleteMonitor?: (monitorId: string) => void
-}
-
 function AlertFeed({ alerts }: { alerts: AlertEvent[] }) {
   const latestAlerts = alerts.slice(0, 5)
 
@@ -1019,6 +1025,7 @@ interface DashboardProps {
   monitors: Monitor[]
   runs: MonitorRun[]
   alerts: AlertEvent[]
+  sloSummary: SLOSummary | null
   onRunNow: (monitorId: string) => void
   onToggleActive: (monitorId: string, currentActive: boolean) => void
   onDeleteMonitor?: (monitorId: string) => void
@@ -1033,6 +1040,7 @@ function Dashboard({
   monitors,
   runs,
   alerts,
+  sloSummary,
   onRunNow,
   onToggleActive,
   onDeleteMonitor,
@@ -1041,6 +1049,8 @@ function Dashboard({
   runningAppId,
   onImportExport,
 }: DashboardProps) {
+  const monitorSloLookup = useMemo(() => monitorSLOMap(sloSummary), [sloSummary])
+  const applicationSloLookup = useMemo(() => applicationSLOMap(sloSummary), [sloSummary])
   const [activeTab, setActiveTab] = useState("overview")
   const [monitorSearch, setMonitorSearch] = useState("")
   const [monitorStatusFilter, setMonitorStatusFilter] = useState<"all" | "active" | "inactive" | "failed" | "healthy">("all")
@@ -1223,6 +1233,8 @@ function Dashboard({
             />
           </div>
 
+          <ErrorBudgetWidget summary={sloSummary} />
+
           {/* Response Time Trend Chart */}
           <div className="w-full">
             <LatencyChart runs={runs} />
@@ -1328,6 +1340,7 @@ function Dashboard({
           <ApplicationsView
             applications={applications}
             monitors={monitors}
+            applicationSloMap={applicationSloLookup}
             onSaveApplication={onSaveApplication}
             onRunApplication={onRunApplication}
             runningAppId={runningAppId}
@@ -1380,7 +1393,8 @@ function Dashboard({
           </div>
 
           <MonitorTable 
-            monitors={filteredMonitors} 
+            monitors={filteredMonitors}
+            monitorSloMap={monitorSloLookup}
             onRunNow={onRunNow} 
             onToggleActive={onToggleActive} 
             onDeleteMonitor={onDeleteMonitor}
@@ -2292,6 +2306,8 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
   const [secrets, setSecrets] = useState<SecretReference[]>([])
   const [alerts, setAlerts] = useState<AlertEvent[]>([])
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null)
+  const [retentionSettings, setRetentionSettings] = useState<RetentionSettings | null>(null)
+  const [sloSummary, setSloSummary] = useState<SLOSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [isImportExportOpen, setIsImportExportOpen] = useState(false)
 
@@ -2420,6 +2436,30 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
     }
   }
 
+  const fetchRetentionSettings = async () => {
+    try {
+      const res = await fetch("/api/settings/retention")
+      if (res.ok) {
+        const data = await res.json()
+        setRetentionSettings(data.settings || null)
+      }
+    } catch (err) {
+      console.error("Failed to fetch retention settings:", err)
+    }
+  }
+
+  const fetchSLOSummary = async () => {
+    try {
+      const res = await fetch("/api/metrics/slo")
+      if (res.ok) {
+        const data = await res.json()
+        setSloSummary(data.summary || null)
+      }
+    } catch (err) {
+      console.error("Failed to fetch SLO summary:", err)
+    }
+  }
+
   const fetchSingleMonitor = async (id: string) => {
     try {
       const res = await fetch(`/api/monitors/${id}`)
@@ -2446,7 +2486,16 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
 
   useEffect(() => {
     setLoading(true)
-    const promises = [fetchApplications(), fetchMonitors(), fetchSecrets(), fetchAlerts(), fetchRuns(), fetchNotificationSettings()]
+    const promises = [
+      fetchApplications(),
+      fetchMonitors(),
+      fetchSecrets(),
+      fetchAlerts(),
+      fetchRuns(),
+      fetchNotificationSettings(),
+      fetchRetentionSettings(),
+      fetchSLOSummary(),
+    ]
     if (monitorId) {
       promises.push(fetchSingleMonitor(monitorId))
     }
@@ -2462,7 +2511,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
     try {
       const res = await fetch(`/api/monitors/${monitorIdVal}/run`, { method: "POST" })
       if (res.ok) {
-        await Promise.all([fetchMonitors(), fetchRuns(), fetchAlerts()])
+        await Promise.all([fetchMonitors(), fetchRuns(), fetchAlerts(), fetchSLOSummary()])
       }
     } catch (err) {
       console.error("Failed to trigger monitor run:", err)
@@ -2587,7 +2636,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
         method: "DELETE",
       })
       if (res.ok) {
-        await Promise.all([fetchMonitors(), fetchRuns(), fetchAlerts()])
+        await Promise.all([fetchMonitors(), fetchRuns(), fetchAlerts(), fetchSLOSummary()])
       }
     } catch (err) {
       console.error("Failed to delete monitor:", err)
@@ -2681,6 +2730,44 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
     await fetchSecrets()
   }
 
+  const handleTestNotificationSettings = async (input: NotificationSettingsInput): Promise<NotificationTestResult> => {
+    const res = await fetch("/api/settings/notifications/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to send test alert.")
+    }
+    return data as NotificationTestResult
+  }
+
+  const handleSaveRetentionSettings = async (settings: RetentionSettings): Promise<RetentionSettings> => {
+    const res = await fetch("/api/settings/retention", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to save retention settings.")
+    }
+    const updated = (data.settings || settings) as RetentionSettings
+    setRetentionSettings(updated)
+    return updated
+  }
+
+  const handlePurgeRetention = async (): Promise<RetentionPurgeResult> => {
+    const res = await fetch("/api/settings/retention/purge", { method: "POST" })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to purge expired runs.")
+    }
+    await fetchRuns()
+    return data as RetentionPurgeResult
+  }
+
   if (loading && ((applicationId && !activeApplication) || (monitorId && !activeMonitor) || (runId && !activeRun) || (alertId && alerts.length === 0) || (!applicationId && !monitorId && !runId && !alertId))) {
     return (
       <div className="flex min-h-svh items-center justify-center bg-background text-foreground">
@@ -2718,6 +2805,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
         <ApplicationDetailView
           application={activeApplication}
           monitors={monitors.filter((monitor) => monitor.applicationId === activeApplication.id)}
+          applicationSlo={applicationSLOMap(sloSummary).get(activeApplication.id)}
           onRunApplication={handleRunApplication}
           onRunNow={handleRunNow}
           onToggleActive={handleToggleActive}
@@ -2903,6 +2991,10 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
       <SettingsView
         notificationSettings={notificationSettings}
         onSaveNotifications={handleSaveNotificationSettings}
+        onTestNotifications={handleTestNotificationSettings}
+        retentionSettings={retentionSettings}
+        onSaveRetention={handleSaveRetentionSettings}
+        onPurgeRetention={handlePurgeRetention}
         applications={applications}
         monitors={monitors}
       />
@@ -2914,6 +3006,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
         monitors={monitors}
         runs={runs}
         alerts={alerts}
+        sloSummary={sloSummary}
         onRunNow={handleRunNow}
         onToggleActive={handleToggleActive}
         onDeleteMonitor={handleDeleteMonitor}

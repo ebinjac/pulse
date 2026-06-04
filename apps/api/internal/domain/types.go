@@ -49,8 +49,12 @@ func NormalizeMonitorStatus(status string) MonitorStatus {
 type FailureCategory string
 
 const (
-	FailureAssertion FailureCategory = "ASSERTION_FAILURE"
-	FailureUnknown   FailureCategory = "UNKNOWN_ERROR"
+	FailureAssertion   FailureCategory = "ASSERTION_FAILURE"
+	FailureDNS         FailureCategory = "DNS_FAILURE"
+	FailureConnection  FailureCategory = "CONNECTION_FAILURE"
+	FailureTLS         FailureCategory = "TLS_FAILURE"
+	FailureTimeout     FailureCategory = "TIMEOUT"
+	FailureUnknown     FailureCategory = "UNKNOWN_ERROR"
 )
 
 type Monitor struct {
@@ -256,6 +260,22 @@ type AlertEvent struct {
 	SuppressionReason string          `json:"suppressionReason,omitempty"`
 	CreatedAt         time.Time       `json:"createdAt"`
 	UpdatedAt         time.Time       `json:"updatedAt"`
+}
+
+type RetentionSettings struct {
+	RunsRetentionDays int  `json:"runsRetentionDays"`
+	Enabled           bool `json:"enabled"`
+}
+
+type NotificationTestOverrides struct {
+	SMTPHost        string   `json:"smtpHost,omitempty"`
+	SMTPPort        string   `json:"smtpPort,omitempty"`
+	SMTPFrom        string   `json:"smtpFrom,omitempty"`
+	SMTPTo          string   `json:"smtpTo,omitempty"`
+	SMTPUser        string   `json:"smtpUser,omitempty"`
+	SMTPPassword    string   `json:"smtpPassword,omitempty"`
+	SlackWebhookURL string   `json:"slackWebhookUrl,omitempty"`
+	Channels        []string `json:"channels,omitempty"`
 }
 
 type MaintenanceWindow struct {

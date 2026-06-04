@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countRunsOlderThan = `-- name: CountRunsOlderThan :one
+SELECT COUNT(*)::bigint AS count
+FROM monitor_runs
+WHERE started_at < $1
+`
+
+func (q *Queries) CountRunsOlderThan(ctx context.Context, startedAt pgtype.Timestamp) (int64, error) {
+	row := q.db.QueryRow(ctx, countRunsOlderThan, startedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteRunsOlderThan = `-- name: DeleteRunsOlderThan :execrows
+DELETE FROM monitor_runs
+WHERE started_at < $1
+`
+
+func (q *Queries) DeleteRunsOlderThan(ctx context.Context, startedAt pgtype.Timestamp) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRunsOlderThan, startedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getRun = `-- name: GetRun :one
 SELECT
   r.id,

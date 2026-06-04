@@ -24,6 +24,7 @@ type MemoryStore struct {
 	secrets      map[string]domain.SecretReference
 	alerts       map[string]domain.AlertEvent
 	maintenance  map[string]domain.MaintenanceWindow
+	retention    domain.RetentionSettings
 }
 
 func NewMemoryStore() *MemoryStore {

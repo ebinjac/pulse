@@ -59,6 +59,15 @@ UPDATE monitors
 SET status = $2, last_run_at = $3, last_duration_ms = $4, updated_at = NOW()
 WHERE id = $1;
 
+-- name: DeleteRunsOlderThan :execrows
+DELETE FROM monitor_runs
+WHERE started_at < $1;
+
+-- name: CountRunsOlderThan :one
+SELECT COUNT(*)::bigint AS count
+FROM monitor_runs
+WHERE started_at < $1;
+
 -- name: ListRuns :many
 SELECT
   r.id,

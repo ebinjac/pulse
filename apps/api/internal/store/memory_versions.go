@@ -69,14 +69,16 @@ func (s *MemoryStore) GetMonitorDraft(id string) (domain.Monitor, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	record, ok := s.drafts[id]
+	published, ok := s.monitors[id]
 	if !ok {
 		return domain.Monitor{}, false
 	}
 
-	published, ok := s.monitors[id]
+	record, ok := s.drafts[id]
 	if !ok {
-		return domain.Monitor{}, false
+		draft := cloneMonitorConfig(published)
+		draft.ID = id
+		return draft, true
 	}
 
 	draft := cloneMonitorConfig(record.config)

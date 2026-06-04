@@ -25,6 +25,9 @@ func main() {
 	defer cancel()
 
 	activeStore := newStore(ctx)
+	if envBool("PULSE_RETENTION_PURGE_ENABLED", true) {
+		store.StartRetentionPurger(ctx, activeStore, time.Hour)
+	}
 	alertService := alerting.NewService(activeStore)
 	executor := executor.NewRealExecutor(activeStore, alertService)
 	runQueue := newRunQueue(ctx)

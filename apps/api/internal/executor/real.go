@@ -84,6 +84,7 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 
 	stepRuns := make([]domain.StepRun, 0, len(monitor.Steps))
 	var failedStep *domain.StepRun
+	var failedStepCategory domain.FailureCategory
 	totalDuration := 0
 
 	for _, step := range monitor.Steps {
@@ -114,6 +115,8 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 		assertions := make([]domain.Assertion, len(step.Assertions))
 		copy(assertions, step.Assertions)
 
+		var stepFailureCategory domain.FailureCategory
+
 		if step.Type == "preRequest" {
 			for _, action := range step.Actions {
 				resolvedPreview, _ := resolver.Resolve(action.ConfigPreview)
@@ -127,6 +130,53 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 			for _, action := range step.Actions {
 				if val, ok := variablesPool[action.Output]; ok {
 					extractedVars[action.Output] = val
+				}
+			}
+		} else if step.Type == "delay" {
+			result := executeDelayStep(step)
+			status = result.status
+			errorMessage = result.errorMessage
+			latency = result.latencyMS
+			requestSummary = result.requestSummary
+			responseSummary = result.responseSummary
+			stepFailureCategory = result.failureCategory
+		} else if step.Type == "dns" {
+			result := executeDNSStep(step)
+			status = result.status
+			errorMessage = result.errorMessage
+			latency = result.latencyMS
+			requestSummary = result.requestSummary
+			responseSummary = result.responseSummary
+			stepFailureCategory = result.failureCategory
+			if failed, reason := evaluateSyntheticAssertions(assertions, result.actuals, latency); failed {
+				status = domain.StatusFailed
+				errorMessage = reason
+			}
+		} else if step.Type == "tcp" {
+			result := executeTCPStep(step)
+			status = result.status
+			errorMessage = result.errorMessage
+			latency = result.latencyMS
+			requestSummary = result.requestSummary
+			responseSummary = result.responseSummary
+			stepFailureCategory = result.failureCategory
+			if failed, reason := evaluateSyntheticAssertions(assertions, result.actuals, latency); failed {
+				status = domain.StatusFailed
+				errorMessage = reason
+			}
+		} else if step.Type == "tls" {
+			result := executeTLSStep(step)
+			status = result.status
+			errorMessage = result.errorMessage
+			latency = result.latencyMS
+			requestSummary = result.requestSummary
+			responseSummary = result.responseSummary
+			stepFailureCategory = result.failureCategory
+			if failed, reason := evaluateSyntheticAssertions(assertions, result.actuals, latency); failed {
+				status = domain.StatusFailed
+				errorMessage = reason
+				if stepFailureCategory == "" {
+					stepFailureCategory = domain.FailureAssertion
 				}
 			}
 		} else if step.Type == "http" {
@@ -357,6 +407,7 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 		if status != domain.StatusSuccess && failedStep == nil {
 			copyStep := stepRun
 			failedStep = &copyStep
+			failedStepCategory = stepFailureCategory
 		}
 
 		stepRuns = append(stepRuns, stepRun)
@@ -381,8 +432,11 @@ func (e *RealExecutor) run(monitor domain.Monitor, saveToStore bool, triggeredBy
 
 	if failedStep != nil {
 		run.Status = failedStep.Status
-		run.FailureCategory = domain.FailureAssertion
 		run.FailureReason = failedStep.ErrorMessage
+		run.FailureCategory = domain.FailureAssertion
+		if failedStepCategory != "" {
+			run.FailureCategory = failedStepCategory
+		}
 	}
 
 	if saveToStore {

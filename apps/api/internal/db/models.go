@@ -173,3 +173,9 @@ type SecretReference struct {
 	CreatedAt      pgtype.Timestamp `json:"created_at"`
 	UpdatedAt      pgtype.Timestamp `json:"updated_at"`
 }
+
+type SystemSetting struct {
+	Key       string           `json:"key"`
+	ValueJson []byte           `json:"value_json"`
+	UpdatedAt pgtype.Timestamp `json:"updated_at"`
+}

@@ -36,6 +36,7 @@ import {
 import { MonitorImportExportDialog } from "./monitor-import-export-dialog"
 import { MonitorVersionsPanel } from "./monitor-versions-panel"
 import { ScriptEditor } from "./script-editor"
+import { SyntheticStepEditor } from "./synthetic-step-editor"
 import Editor from "@monaco-editor/react"
 import { useTheme } from "next-themes"
 import type { Application, Monitor, MonitorRun, MonitorStatus, MonitorStep, PulseAssertion, PulseExtractor, PreRequestAction } from "@/lib/pulse-types"
@@ -131,6 +132,10 @@ function validateMonitor(draft: Monitor) {
   draft.steps.forEach((step, index) => {
     if (!step.name.trim()) errors.push(`Step ${index + 1} needs a name.`)
     if (step.type === "http" && !step.url?.trim()) errors.push(`Step ${index + 1} needs a URL.`)
+    if (["dns", "tcp", "tls"].includes(step.type)) {
+      const host = String(step.config?.host || step.url || "").trim()
+      if (!host) errors.push(`Step ${index + 1} needs a host.`)
+    }
   })
 
   return errors
@@ -582,7 +587,19 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
           <span className="font-mono text-xs font-semibold text-primary">{step.name}</span>
         </div>
         <span className="text-[10px] font-mono font-semibold uppercase px-2 py-0.5 rounded bg-muted text-muted-foreground border border-border/30">
-          {step.type === "http" ? "HTTP Request" : "Pre-request Action"}
+          {step.type === "http"
+            ? "HTTP Request"
+            : step.type === "preRequest"
+              ? "Pre-request Action"
+              : step.type === "dns"
+                ? "DNS resolve"
+                : step.type === "tcp"
+                  ? "TCP connect"
+                  : step.type === "tls"
+                    ? "TLS certificate"
+                    : step.type === "delay"
+                      ? "Delay"
+                      : step.type}
         </span>
       </div>
 
@@ -911,6 +928,8 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
                           <SelectItem value="header">Header</SelectItem>
                           <SelectItem value="bodyContains">Body Contains</SelectItem>
                           <SelectItem value="regex">Regex Match</SelectItem>
+                          <SelectItem value="certExpiryDays">TLS cert expiry (days)</SelectItem>
+                          <SelectItem value="dnsRecords">DNS records</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1144,6 +1163,20 @@ function StepCard({ step, index, totalSteps, mockRun, onUpdate, onDelete, onMove
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {["dns", "tcp", "tls", "delay"].includes(step.type) && (
+        <div className="space-y-4">
+          <SyntheticStepEditor step={step} onUpdate={onUpdate} />
+          {step.type !== "delay" ? (
+            <div className="rounded-lg border border-border/50 bg-background/50 p-4 space-y-3">
+              <div className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Assertions</div>
+              <p className="text-xs text-muted-foreground">
+                Use the Tests tab on HTTP steps for full assertion tooling, or add assertions in the JSON editor for synthetic steps.
+              </p>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -1418,6 +1451,85 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
       ...draft,
       steps: [...draft.steps, newStep],
     })
+    setSelectedStepId(newId)
+  }
+
+  function addDnsStep() {
+    const newId = `step-${crypto.randomUUID()}`
+    const newStep: MonitorStep = {
+      id: newId,
+      order: draft.steps.length + 1,
+      name: `Step ${draft.steps.length + 1}: DNS resolve`,
+      type: "dns",
+      timeoutMs: 5000,
+      retryCount: 0,
+      continueOnFailure: false,
+      assertions: [],
+      extractors: [],
+      config: { host: "example.com", recordType: "A", expected: "" },
+    }
+    updateDraft({ ...draft, steps: [...draft.steps, newStep] })
+    setSelectedStepId(newId)
+  }
+
+  function addTcpStep() {
+    const newId = `step-${crypto.randomUUID()}`
+    const newStep: MonitorStep = {
+      id: newId,
+      order: draft.steps.length + 1,
+      name: `Step ${draft.steps.length + 1}: TCP connect`,
+      type: "tcp",
+      timeoutMs: 5000,
+      retryCount: 0,
+      continueOnFailure: false,
+      assertions: [],
+      extractors: [],
+      config: { host: "example.com", port: "443" },
+    }
+    updateDraft({ ...draft, steps: [...draft.steps, newStep] })
+    setSelectedStepId(newId)
+  }
+
+  function addTlsStep() {
+    const newId = `step-${crypto.randomUUID()}`
+    const newStep: MonitorStep = {
+      id: newId,
+      order: draft.steps.length + 1,
+      name: `Step ${draft.steps.length + 1}: TLS certificate`,
+      type: "tls",
+      timeoutMs: 8000,
+      retryCount: 0,
+      continueOnFailure: false,
+      assertions: [{
+        id: `assert-${crypto.randomUUID()}`,
+        type: "certExpiryDays",
+        label: "Certificate expires in more than 30 days",
+        target: "certExpiryDays",
+        operator: "greaterThan",
+        expected: "30",
+      }],
+      extractors: [],
+      config: { host: "example.com", port: "443" },
+    }
+    updateDraft({ ...draft, steps: [...draft.steps, newStep] })
+    setSelectedStepId(newId)
+  }
+
+  function addDelayStep() {
+    const newId = `step-${crypto.randomUUID()}`
+    const newStep: MonitorStep = {
+      id: newId,
+      order: draft.steps.length + 1,
+      name: `Step ${draft.steps.length + 1}: Delay`,
+      type: "delay",
+      timeoutMs: 1000,
+      retryCount: 0,
+      continueOnFailure: false,
+      assertions: [],
+      extractors: [],
+      config: { delayMs: "1000" },
+    }
+    updateDraft({ ...draft, steps: [...draft.steps, newStep] })
     setSelectedStepId(newId)
   }
 
@@ -1955,6 +2067,18 @@ export function BuilderWorkbench({ monitor, applications = [] }: BuilderWorkbenc
                       className="w-full text-[10px] h-7 justify-start gap-1 font-semibold"
                     >
                       <Plus className="size-3" /> Add Pre-Request Script
+                    </Button>
+                    <Button type="button" variant="outline" size="xs" onClick={addDnsStep} className="w-full text-[10px] h-7 justify-start gap-1 font-semibold">
+                      <Plus className="size-3" /> Add DNS check
+                    </Button>
+                    <Button type="button" variant="outline" size="xs" onClick={addTcpStep} className="w-full text-[10px] h-7 justify-start gap-1 font-semibold">
+                      <Plus className="size-3" /> Add TCP check
+                    </Button>
+                    <Button type="button" variant="outline" size="xs" onClick={addTlsStep} className="w-full text-[10px] h-7 justify-start gap-1 font-semibold">
+                      <Plus className="size-3" /> Add TLS cert check
+                    </Button>
+                    <Button type="button" variant="outline" size="xs" onClick={addDelayStep} className="w-full text-[10px] h-7 justify-start gap-1 font-semibold">
+                      <Plus className="size-3" /> Add delay
                     </Button>
                     <Button
                       type="button"

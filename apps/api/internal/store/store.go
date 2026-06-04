@@ -38,9 +38,13 @@ type Store interface {
 	CreateMaintenanceWindow(window domain.MaintenanceWindow) domain.MaintenanceWindow
 	DeleteMaintenanceWindow(id string) bool
 	IsUnderMaintenance(monitorID, applicationID string, at time.Time) (reason string, active bool)
+	GetRetentionSettings() domain.RetentionSettings
+	UpdateRetentionSettings(settings domain.RetentionSettings) domain.RetentionSettings
+	PurgeExpiredRuns(retentionDays int) (int, error)
 	ListSecrets() []domain.SecretReference
 	GetSecret(id string) (domain.SecretReference, bool)
 	UpsertSecret(secret domain.SecretReference) (domain.SecretReference, error)
 	GetRawSecretValue(alias string) (string, bool)
 	DeleteSecret(id string) bool
+	GetSLOSummary() domain.SLOSummary
 }

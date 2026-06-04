@@ -8,6 +8,7 @@ sql:
       - "migrations/000004_step_timing.up.sql"
       - "migrations/000005_monitor_versions.up.sql"
       - "migrations/000006_alert_routing_ops.up.sql"
+      - "migrations/000007_system_settings.up.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -186,19 +187,24 @@ func (s *Server) publishMonitor(w http.ResponseWriter, r *http.Request, monitorI
 }
 
 func (s *Server) runMonitorDraft(w http.ResponseWriter, r *http.Request, monitorID string) {
-	draft, ok := s.store.GetMonitorDraft(monitorID)
+	published, ok := s.store.GetMonitor(monitorID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "monitor not found")
 		return
 	}
 
-	if r.ContentLength > 0 {
-		var override domain.Monitor
-		if !decodeJSON(w, r, &override) {
-			return
-		}
+	draft := published
+	if stored, ok := s.store.GetMonitorDraft(monitorID); ok {
+		draft = stored
+	}
+
+	var override domain.Monitor
+	if err := json.NewDecoder(r.Body).Decode(&override); err == nil {
 		override.ID = monitorID
 		draft = mergeMonitorDraft(draft, override)
+	} else if err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{"run": s.executor.RunDraft(draft)})

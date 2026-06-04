@@ -429,8 +429,12 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
     const other = Math.max(total - success - failed, 0)
     const durations = runs.map((run) => run.durationMs).filter((duration) => Number.isFinite(duration)).sort((a, b) => a - b)
     const avg = durations.length ? Math.round(durations.reduce((sum, duration) => sum + duration, 0) / durations.length) : 0
+    const p50Index = durations.length ? Math.ceil(durations.length * 0.50) - 1 : 0
     const p95Index = durations.length ? Math.ceil(durations.length * 0.95) - 1 : 0
+    const p99Index = durations.length ? Math.ceil(durations.length * 0.99) - 1 : 0
+    const p50 = durations.length ? durations[Math.max(0, Math.min(p50Index, durations.length - 1))] : 0
     const p95 = durations.length ? durations[Math.max(0, Math.min(p95Index, durations.length - 1))] : 0
+    const p99 = durations.length ? durations[Math.max(0, Math.min(p99Index, durations.length - 1))] : 0
     const peak = durations.length ? durations[durations.length - 1] : 0
     const successRate = total ? Math.round((success / total) * 100) : 100
     const latest = [...runs].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0]
@@ -443,7 +447,7 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
     const manual = runs.filter((run) => run.triggeredBy === "manual").length
     const scheduled = Math.max(total - manual, 0)
 
-    return { total, success, failed, other, avg, p95, peak, successRate, latest, consecutiveFailures, manual, scheduled }
+    return { total, success, failed, other, avg, p50, p95, p99, peak, successRate, latest, consecutiveFailures, manual, scheduled }
   }, [runs])
 
   const outcomeData = useMemo(() => {
@@ -568,13 +572,24 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
             </div>
           </CardContent>
         </Card>
-        <Card className="py-4">
-          <CardContent className="space-y-1 px-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">P95 latency</p>
-            <div className="flex items-end justify-between gap-3">
-              <span className="font-heading text-2xl font-bold">{metrics.p95}ms</span>
-              <span className="text-xs font-semibold text-muted-foreground">avg {metrics.avg}ms</span>
+        <Card className="py-4 md:col-span-2">
+          <CardContent className="space-y-2 px-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Latency percentiles</p>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-[10px] text-muted-foreground">p50</p>
+                <p className="font-heading text-xl font-bold">{metrics.p50}ms</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground">p95</p>
+                <p className="font-heading text-xl font-bold">{metrics.p95}ms</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground">p99</p>
+                <p className="font-heading text-xl font-bold">{metrics.p99}ms</p>
+              </div>
             </div>
+            <p className="text-[11px] text-muted-foreground text-center">avg {metrics.avg}ms · peak {metrics.peak}ms</p>
           </CardContent>
         </Card>
         <Card className="py-4">
