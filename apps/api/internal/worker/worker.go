@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/ensemble-pulse/pulse/apps/api/internal/domain"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/executor"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/jobqueue"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/store"
@@ -92,7 +93,36 @@ func (w *Worker) process(ctx context.Context, job jobqueue.MonitorRunJob) {
 	if job.Trigger == "manual" {
 		run = w.executor.Run(monitor)
 	}
+	if job.ValidationID != "" && job.ValidationPhase != "" {
+		phase := domain.DeploymentValidationPhase(job.ValidationPhase)
+		w.store.LinkDeploymentValidationRun(job.ValidationID, phase, monitor.ID, run.ID)
+		w.refreshValidationReport(job.ValidationID, phase)
+	}
 	log.Printf("[Worker] Finished queued check for %s. Duration: %dms, Status: %s", monitor.Name, run.DurationMS, run.Status)
+}
+
+func (w *Worker) refreshValidationReport(validationID string, phase domain.DeploymentValidationPhase) {
+	validation, ok := w.store.GetDeploymentValidation(validationID)
+	if !ok {
+		return
+	}
+	preRuns := w.store.ListDeploymentValidationRuns(validationID, domain.DeploymentValidationPhasePre)
+	postRuns := w.store.ListDeploymentValidationRuns(validationID, domain.DeploymentValidationPhasePost)
+	now := time.Now().UTC()
+	expectedRuns := len(validation.MonitorIDs) * validation.SampleCount
+	if expectedRuns <= 0 {
+		expectedRuns = len(validation.MonitorIDs)
+	}
+	if phase == domain.DeploymentValidationPhasePre && len(preRuns) >= expectedRuns {
+		validation.Status = domain.DeploymentValidationPreComplete
+		validation.PreCompletedAt = &now
+	}
+	if phase == domain.DeploymentValidationPhasePost && len(postRuns) >= expectedRuns {
+		validation.Status = domain.DeploymentValidationReportReady
+		validation.PostCompletedAt = &now
+		validation.Report = store.BuildDeploymentValidationReport(validation, preRuns, postRuns)
+	}
+	w.store.UpdateDeploymentValidation(validation)
 }
 
 func (w *Worker) lockTTLForMonitor(timeoutMS int) time.Duration {

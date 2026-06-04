@@ -11,6 +11,12 @@ type Store interface {
 	GetApplication(id string) (domain.Application, bool)
 	UpsertApplication(application domain.Application) domain.Application
 	DeleteApplication(id string) bool
+	ListDeploymentValidations(applicationID string) []domain.DeploymentValidation
+	GetDeploymentValidation(id string) (domain.DeploymentValidation, bool)
+	CreateDeploymentValidation(validation domain.DeploymentValidation) domain.DeploymentValidation
+	UpdateDeploymentValidation(validation domain.DeploymentValidation) domain.DeploymentValidation
+	LinkDeploymentValidationRun(validationID string, phase domain.DeploymentValidationPhase, monitorID string, runID string)
+	ListDeploymentValidationRuns(validationID string, phase domain.DeploymentValidationPhase) []domain.MonitorRun
 	ListMonitors() []domain.Monitor
 	ListMonitorsByApplication(applicationID string) []domain.Monitor
 	GetMonitor(id string) (domain.Monitor, bool)

@@ -73,6 +73,40 @@ type CertificateProfile struct {
 	UpdatedAt             pgtype.Timestamp `json:"updated_at"`
 }
 
+type DeploymentValidation struct {
+	ID                  string           `json:"id"`
+	ApplicationID       pgtype.Text      `json:"application_id"`
+	ApplicationName     string           `json:"application_name"`
+	CarID               string           `json:"car_id"`
+	Name                string           `json:"name"`
+	Version             pgtype.Text      `json:"version"`
+	BuildID             pgtype.Text      `json:"build_id"`
+	Environment         pgtype.Text      `json:"environment"`
+	Status              string           `json:"status"`
+	MonitorIdsJson      []byte           `json:"monitor_ids_json"`
+	ReportJson          []byte           `json:"report_json"`
+	PreStartedAt        pgtype.Timestamp `json:"pre_started_at"`
+	PreCompletedAt      pgtype.Timestamp `json:"pre_completed_at"`
+	PostStartedAt       pgtype.Timestamp `json:"post_started_at"`
+	PostCompletedAt     pgtype.Timestamp `json:"post_completed_at"`
+	CreatedAt           pgtype.Timestamp `json:"created_at"`
+	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
+	SampleCount         int32            `json:"sample_count"`
+	IntervalSeconds     int32            `json:"interval_seconds"`
+	AiReportJson        []byte           `json:"ai_report_json"`
+	DeploymentStartedAt pgtype.Timestamp `json:"deployment_started_at"`
+	BaselineWindowHours int32            `json:"baseline_window_hours"`
+	BaselineRunCount    int32            `json:"baseline_run_count"`
+}
+
+type DeploymentValidationRun struct {
+	ValidationID string           `json:"validation_id"`
+	Phase        string           `json:"phase"`
+	MonitorID    string           `json:"monitor_id"`
+	RunID        string           `json:"run_id"`
+	CreatedAt    pgtype.Timestamp `json:"created_at"`
+}
+
 type Monitor struct {
 	ID                  string           `json:"id"`
 	ApplicationID       pgtype.Text      `json:"application_id"`

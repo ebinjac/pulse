@@ -135,6 +135,107 @@ type ApplicationRunSummary struct {
 	MonitorIDs    []string `json:"monitorIds"`
 }
 
+type DeploymentValidationStatus string
+
+const (
+	DeploymentValidationDraft       DeploymentValidationStatus = "draft"
+	DeploymentValidationPreRunning  DeploymentValidationStatus = "pre_running"
+	DeploymentValidationPreComplete DeploymentValidationStatus = "pre_complete"
+	DeploymentValidationPostRunning DeploymentValidationStatus = "post_running"
+	DeploymentValidationReportReady DeploymentValidationStatus = "report_ready"
+	DeploymentValidationIncomplete  DeploymentValidationStatus = "incomplete"
+)
+
+type DeploymentValidationPhase string
+
+const (
+	DeploymentValidationPhasePre  DeploymentValidationPhase = "pre_deploy"
+	DeploymentValidationPhasePost DeploymentValidationPhase = "post_deploy"
+)
+
+type DeploymentValidation struct {
+	ID                  string                       `json:"id"`
+	ApplicationID       string                       `json:"applicationId"`
+	ApplicationName     string                       `json:"applicationName"`
+	CarID               string                       `json:"carId"`
+	Name                string                       `json:"name"`
+	Version             string                       `json:"version,omitempty"`
+	BuildID             string                       `json:"buildId,omitempty"`
+	Environment         string                       `json:"environment,omitempty"`
+	Status              DeploymentValidationStatus   `json:"status"`
+	MonitorIDs          []string                     `json:"monitorIds"`
+	Report              DeploymentValidationReport   `json:"report,omitempty"`
+	AIReport            DeploymentValidationAIReport `json:"aiReport,omitempty"`
+	SampleCount         int                          `json:"sampleCount"`
+	IntervalSeconds     int                          `json:"intervalSeconds"`
+	DeploymentStartedAt *time.Time                   `json:"deploymentStartedAt,omitempty"`
+	BaselineWindowHours int                          `json:"baselineWindowHours"`
+	BaselineRunCount    int                          `json:"baselineRunCount"`
+	CreatedAt           time.Time                    `json:"createdAt"`
+	UpdatedAt           time.Time                    `json:"updatedAt"`
+	PreStartedAt        *time.Time                   `json:"preStartedAt,omitempty"`
+	PreCompletedAt      *time.Time                   `json:"preCompletedAt,omitempty"`
+	PostStartedAt       *time.Time                   `json:"postStartedAt,omitempty"`
+	PostCompletedAt     *time.Time                   `json:"postCompletedAt,omitempty"`
+}
+
+type DeploymentValidationRunLink struct {
+	ValidationID string                    `json:"validationId"`
+	Phase        DeploymentValidationPhase `json:"phase"`
+	MonitorID    string                    `json:"monitorId"`
+	RunID        string                    `json:"runId"`
+	CreatedAt    time.Time                 `json:"createdAt"`
+}
+
+type DeploymentValidationReport struct {
+	Status             string                        `json:"status"`
+	Summary            DeploymentValidationSummary   `json:"summary"`
+	Regressions        []string                      `json:"regressions"`
+	MonitorComparisons []MonitorValidationComparison `json:"monitorComparisons"`
+	GeneratedAt        time.Time                     `json:"generatedAt,omitempty"`
+	IncompleteReason   string                        `json:"incompleteReason,omitempty"`
+}
+
+type DeploymentValidationAIReport struct {
+	GeneratedAt      time.Time `json:"generatedAt,omitempty"`
+	ExecutiveSummary string    `json:"executiveSummary,omitempty"`
+	Recommendation   string    `json:"recommendation,omitempty"`
+	RiskLevel        string    `json:"riskLevel,omitempty"`
+	KeyFindings      []string  `json:"keyFindings,omitempty"`
+	NextActions      []string  `json:"nextActions,omitempty"`
+}
+
+type DeploymentValidationSummary struct {
+	TotalMonitors      int     `json:"totalMonitors"`
+	ComparedMonitors   int     `json:"comparedMonitors"`
+	PreSuccessRate     float64 `json:"preSuccessRate"`
+	PostSuccessRate    float64 `json:"postSuccessRate"`
+	SuccessRateDelta   float64 `json:"successRateDelta"`
+	PreP95LatencyMS    int     `json:"preP95LatencyMs"`
+	PostP95LatencyMS   int     `json:"postP95LatencyMs"`
+	P95LatencyDeltaMS  int     `json:"p95LatencyDeltaMs"`
+	P95LatencyDeltaPct float64 `json:"p95LatencyDeltaPct"`
+	NewFailures        int     `json:"newFailures"`
+	ResolvedFailures   int     `json:"resolvedFailures"`
+}
+
+type MonitorValidationComparison struct {
+	MonitorID            string        `json:"monitorId"`
+	MonitorName          string        `json:"monitorName"`
+	PreRunID             string        `json:"preRunId,omitempty"`
+	PostRunID            string        `json:"postRunId,omitempty"`
+	PreStatus            MonitorStatus `json:"preStatus,omitempty"`
+	PostStatus           MonitorStatus `json:"postStatus,omitempty"`
+	PreDurationMS        int           `json:"preDurationMs"`
+	PostDurationMS       int           `json:"postDurationMs"`
+	DurationDeltaMS      int           `json:"durationDeltaMs"`
+	DurationDeltaPct     float64       `json:"durationDeltaPct"`
+	Result               string        `json:"result"`
+	Reason               string        `json:"reason,omitempty"`
+	SlowestTimingPhase   string        `json:"slowestTimingPhase,omitempty"`
+	SlowestTimingDeltaMS int           `json:"slowestTimingDeltaMs,omitempty"`
+}
+
 type AlertRouting struct {
 	Enabled                bool     `json:"enabled"`
 	Severity               string   `json:"severity,omitempty"`

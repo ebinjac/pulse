@@ -10,6 +10,9 @@ sql:
       - "migrations/000006_alert_routing_ops.up.sql"
       - "migrations/000007_system_settings.up.sql"
       - "migrations/000008_certificate_profiles.up.sql"
+      - "migrations/000009_deployment_validations.up.sql"
+      - "migrations/000010_deployment_validation_sampling.up.sql"
+      - "migrations/000011_deployment_validation_baseline.up.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -7,6 +7,7 @@ import { useTheme } from "next-themes"
 import {
   Activity,
   Boxes,
+  Rocket,
   Workflow,
   Bell,
   KeyRound,
@@ -32,6 +33,7 @@ import {
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: Activity },
   { href: "/applications", label: "Applications", icon: Boxes },
+  { href: "/deployments", label: "Deployments", icon: Rocket },
   { href: "/monitors", label: "Monitors", icon: Workflow },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/secrets", label: "Secrets", icon: KeyRound },

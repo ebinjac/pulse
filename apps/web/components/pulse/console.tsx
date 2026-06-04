@@ -51,6 +51,7 @@ import type {
   AlertEvent,
   CertificateProfile,
   CertificateProfileInput,
+  DeploymentValidation,
   Monitor,
   MonitorRun,
   NotificationSettings,
@@ -132,6 +133,31 @@ interface PulseConsoleProps {
   monitorId?: string
   runId?: string
   alertId?: string
+  validationId?: string
+}
+
+type DeploymentValidationCreateInput = {
+  applicationId: string
+  name: string
+  version: string
+  buildId: string
+  environment: string
+  monitorIds: string[]
+  sampleCount: number
+  intervalSeconds: number
+  deploymentStartedAt: string
+  baselineWindowHours: number
+  baselineRunCount: number
+}
+
+function toDateTimeLocalInput(date = new Date()) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 16)
+}
+
+function dateTimeLocalToISOString(value: string) {
+  if (!value) return new Date().toISOString()
+  return new Date(value).toISOString()
 }
 
 function applicationHealth(monitors: Monitor[], appSlo?: { uptime7d: { uptimePct: number }; uptime30d: { uptimePct: number } }) {
@@ -149,6 +175,470 @@ function applicationHealth(monitors: Monitor[], appSlo?: { uptime7d: { uptimePct
     : 0
 
   return { total, failing, active, successRate, uptime7d, avgLatency }
+}
+
+function validationStatusLabel(status: string) {
+  return status.replaceAll("_", " ")
+}
+
+function ValidationResultPill({ status }: { status: string }) {
+  const normalized = (status || "incomplete").toLowerCase()
+  return (
+    <span className={cn(
+      "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-bold capitalize",
+      normalized === "pass"
+        ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-300"
+        : normalized === "fail"
+          ? "border-rose-500/25 bg-rose-500/5 text-rose-600 dark:text-rose-300"
+          : normalized === "warning"
+            ? "border-amber-500/25 bg-amber-500/5 text-amber-700 dark:text-amber-300"
+            : "border-border bg-muted/40 text-muted-foreground"
+    )}>
+      {normalized === "pass" ? <CheckCircle2 className="size-3" /> : normalized === "fail" ? <AlertTriangle className="size-3" /> : <Timer className="size-3" />}
+      {normalized}
+    </span>
+  )
+}
+
+function DeploymentValidationPanel({
+  application,
+  monitors,
+  validations,
+  onCreateValidation,
+}: {
+  application: Application
+  monitors: Monitor[]
+  validations: DeploymentValidation[]
+  onCreateValidation: (input: DeploymentValidationCreateInput) => Promise<DeploymentValidation | null>
+}) {
+  const activeMonitors = monitors.filter((monitor) => monitor.isActive)
+  const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [selectedMonitorIds, setSelectedMonitorIds] = useState<string[]>(activeMonitors.map((monitor) => monitor.id))
+  const [draft, setDraft] = useState({
+    name: "",
+    version: "",
+    buildId: "",
+    environment: application.environment || "production",
+    deploymentStartedAt: toDateTimeLocalInput(),
+    baselineWindowHours: 24,
+    baselineRunCount: 30,
+    sampleCount: 30,
+    intervalSeconds: 30,
+  })
+
+  useEffect(() => {
+    if (open) {
+      setSelectedMonitorIds(activeMonitors.map((monitor) => monitor.id))
+      setDraft((current) => ({ ...current, deploymentStartedAt: toDateTimeLocalInput() }))
+    }
+  }, [open, activeMonitors.length])
+
+  async function createValidation() {
+    if (saving || selectedMonitorIds.length === 0) return
+    setSaving(true)
+    try {
+      const created = await onCreateValidation({
+        applicationId: application.id,
+        name: draft.name || `${application.name} deployment validation`,
+        version: draft.version,
+        buildId: draft.buildId,
+        environment: draft.environment,
+        monitorIds: selectedMonitorIds,
+        sampleCount: draft.sampleCount,
+        intervalSeconds: draft.intervalSeconds,
+        deploymentStartedAt: dateTimeLocalToISOString(draft.deploymentStartedAt),
+        baselineWindowHours: draft.baselineWindowHours,
+        baselineRunCount: draft.baselineRunCount,
+      })
+      if (created) {
+        setOpen(false)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="border-b pb-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle className="text-sm font-semibold">Deployment validations</CardTitle>
+            <CardDescription>Compare historical baseline metrics against sampled post-deploy checks.</CardDescription>
+          </div>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger render={
+              <Button size="sm" className="h-8 gap-2">
+                <Plus className="size-3.5" />
+                New validation
+              </Button>
+            } />
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Create deployment validation</DialogTitle>
+                <DialogDescription>
+                  Pick the deployment time, baseline history, and post-deploy sampling plan for CAR {application.carId}.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="text-xs font-semibold">
+                  Name
+                  <Input className="mt-1 h-9 text-xs" value={draft.name} placeholder={`${application.name} deployment validation`} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+                </label>
+                <label className="text-xs font-semibold">
+                  Environment
+                  <Input className="mt-1 h-9 text-xs" value={draft.environment} onChange={(e) => setDraft({ ...draft, environment: e.target.value })} />
+                </label>
+                <label className="text-xs font-semibold">
+                  Version
+                  <Input className="mt-1 h-9 text-xs" value={draft.version} placeholder="v1.8.0" onChange={(e) => setDraft({ ...draft, version: e.target.value })} />
+                </label>
+                <label className="text-xs font-semibold">
+                  Build ID
+                  <Input className="mt-1 h-9 text-xs" value={draft.buildId} placeholder="release-2026.06.04" onChange={(e) => setDraft({ ...draft, buildId: e.target.value })} />
+                </label>
+                <label className="text-xs font-semibold">
+                  Deployment time
+                  <Input className="mt-1 h-9 text-xs" type="datetime-local" value={draft.deploymentStartedAt} onChange={(e) => setDraft({ ...draft, deploymentStartedAt: e.target.value })} />
+                </label>
+                <label className="text-xs font-semibold">
+                  Baseline window hours
+                  <Input className="mt-1 h-9 text-xs" type="number" min={1} max={720} value={draft.baselineWindowHours} onChange={(e) => setDraft({ ...draft, baselineWindowHours: Number(e.target.value) })} />
+                </label>
+                <label className="text-xs font-semibold">
+                  Baseline runs per monitor
+                  <Input className="mt-1 h-9 text-xs" type="number" min={1} max={500} value={draft.baselineRunCount} onChange={(e) => setDraft({ ...draft, baselineRunCount: Number(e.target.value) })} />
+                </label>
+                <label className="text-xs font-semibold">
+                  Post samples per monitor
+                  <Input className="mt-1 h-9 text-xs" type="number" min={1} max={100} value={draft.sampleCount} onChange={(e) => setDraft({ ...draft, sampleCount: Number(e.target.value) })} />
+                </label>
+                <label className="text-xs font-semibold">
+                  Post sample interval seconds
+                  <Input className="mt-1 h-9 text-xs" type="number" min={0} max={3600} value={draft.intervalSeconds} onChange={(e) => setDraft({ ...draft, intervalSeconds: Number(e.target.value) })} />
+                </label>
+              </div>
+              <div className="space-y-2">
+                <div className="text-xs font-semibold">Monitors</div>
+                <div className="max-h-64 overflow-auto rounded-md border">
+                  {activeMonitors.length === 0 ? (
+                    <div className="p-4 text-xs text-muted-foreground">No active monitors are assigned to this application.</div>
+                  ) : (
+                    activeMonitors.map((monitor) => (
+                      <label key={monitor.id} className="flex items-start gap-3 border-b px-3 py-2 text-xs last:border-b-0">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={selectedMonitorIds.includes(monitor.id)}
+                          onChange={(event) => {
+                            setSelectedMonitorIds((current) =>
+                              event.target.checked ? [...current, monitor.id] : current.filter((id) => id !== monitor.id)
+                            )
+                          }}
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-semibold text-foreground">{monitor.name}</span>
+                          <span className="block truncate text-muted-foreground">{monitor.description || monitor.scheduleLabel || "Synthetic monitor"}</span>
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+                <Button onClick={createValidation} disabled={saving || selectedMonitorIds.length === 0}>
+                  {saving ? <RotateCw className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                  Create validation
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-4">
+        {validations.length === 0 ? (
+          <div className="rounded-md border border-dashed bg-muted/20 p-4 text-xs text-muted-foreground">
+            No deployment validations yet. Create one before your next release to compare baseline and post-deploy behavior.
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Validation</TableHead>
+                  <TableHead className="text-xs">Status</TableHead>
+                  <TableHead className="text-xs">Report</TableHead>
+                  <TableHead className="text-xs">Created</TableHead>
+                  <TableHead className="text-right text-xs">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {validations.slice(0, 5).map((validation) => (
+                  <TableRow key={validation.id}>
+                    <TableCell>
+                      <div className="text-sm font-semibold">{validation.name}</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {[validation.environment, validation.version, validation.buildId].filter(Boolean).join(" · ") || `CAR ${validation.carId}`}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-xs font-semibold capitalize">{validationStatusLabel(validation.status)}</TableCell>
+                    <TableCell><ValidationResultPill status={validation.report?.status || "incomplete"} /></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{formatDate(validation.createdAt)}</TableCell>
+                    <TableCell className="text-right">
+                      <Link href={`/deployments/${validation.id}`}>
+                        <Button variant="outline" size="sm" className="h-8 gap-1 text-xs">
+                          <Eye className="size-3" />
+                          Open
+                        </Button>
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function DeploymentsView({
+  applications,
+  monitors,
+  validations,
+  onCreateValidation,
+}: {
+  applications: Application[]
+  monitors: Monitor[]
+  validations: DeploymentValidation[]
+  onCreateValidation: (input: DeploymentValidationCreateInput) => Promise<DeploymentValidation | null>
+}) {
+  const defaultApplication = applications[0]
+  const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [applicationId, setApplicationId] = useState(defaultApplication?.id || "")
+  const selectedApplication = applications.find((app) => app.id === applicationId) || defaultApplication
+  const activeMonitors = monitors.filter((monitor) => monitor.applicationId === selectedApplication?.id && monitor.isActive)
+  const [selectedMonitorIds, setSelectedMonitorIds] = useState<string[]>([])
+  const [draft, setDraft] = useState({
+    name: "",
+    version: "",
+    buildId: "",
+    environment: defaultApplication?.environment || "production",
+    deploymentStartedAt: toDateTimeLocalInput(),
+    baselineWindowHours: 24,
+    baselineRunCount: 30,
+    sampleCount: 30,
+    intervalSeconds: 30,
+  })
+
+  useEffect(() => {
+    if (!applicationId && defaultApplication?.id) {
+      setApplicationId(defaultApplication.id)
+    }
+  }, [applicationId, defaultApplication?.id])
+
+  useEffect(() => {
+    if (open) {
+      setSelectedMonitorIds(activeMonitors.map((monitor) => monitor.id))
+      setDraft((current) => ({
+        ...current,
+        deploymentStartedAt: toDateTimeLocalInput(),
+        environment: selectedApplication?.environment || current.environment || "production",
+      }))
+    }
+  }, [open, selectedApplication?.id, activeMonitors.length])
+
+  async function createValidation() {
+    if (!selectedApplication || saving || selectedMonitorIds.length === 0) return
+    setSaving(true)
+    try {
+      await onCreateValidation({
+        applicationId: selectedApplication.id,
+        name: draft.name || `${selectedApplication.name} deployment validation`,
+        version: draft.version,
+        buildId: draft.buildId,
+        environment: draft.environment,
+        monitorIds: selectedMonitorIds,
+        sampleCount: draft.sampleCount,
+        intervalSeconds: draft.intervalSeconds,
+        deploymentStartedAt: dateTimeLocalToISOString(draft.deploymentStartedAt),
+        baselineWindowHours: draft.baselineWindowHours,
+        baselineRunCount: draft.baselineRunCount,
+      })
+      setOpen(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <PageShell
+      eyebrow="Release checks"
+      title="Deployments"
+      description="Compare historical baseline behavior against sampled post-deployment checks."
+      action={
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger render={
+            <Button className="h-9 gap-2">
+              <Plus className="size-4" />
+              New deployment check
+            </Button>
+          } />
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>New deployment check</DialogTitle>
+              <DialogDescription>Select an application, choose the deployment time, and configure baseline plus post-deploy sampling.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="text-xs font-semibold">
+                Application
+                <NativeSelect size="sm" className="mt-1 w-full" value={applicationId} onChange={(e) => setApplicationId(e.target.value)}>
+                  {applications.map((application) => (
+                    <NativeSelectOption key={application.id} value={application.id}>
+                      {application.name} · CAR {application.carId}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </label>
+              <label className="text-xs font-semibold">
+                Environment
+                <Input className="mt-1 h-9 text-xs" value={draft.environment} onChange={(e) => setDraft({ ...draft, environment: e.target.value })} />
+              </label>
+              <label className="text-xs font-semibold">
+                Name
+                <Input className="mt-1 h-9 text-xs" value={draft.name} placeholder={selectedApplication ? `${selectedApplication.name} deployment validation` : "Deployment validation"} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+              </label>
+              <label className="text-xs font-semibold">
+                Version
+                <Input className="mt-1 h-9 text-xs" value={draft.version} placeholder="v1.8.0" onChange={(e) => setDraft({ ...draft, version: e.target.value })} />
+              </label>
+              <label className="text-xs font-semibold">
+                Build ID
+                <Input className="mt-1 h-9 text-xs" value={draft.buildId} placeholder="release-2026.06.05" onChange={(e) => setDraft({ ...draft, buildId: e.target.value })} />
+              </label>
+              <label className="text-xs font-semibold">
+                Deployment time
+                <Input className="mt-1 h-9 text-xs" type="datetime-local" value={draft.deploymentStartedAt} onChange={(e) => setDraft({ ...draft, deploymentStartedAt: e.target.value })} />
+              </label>
+              <label className="text-xs font-semibold">
+                Baseline window hours
+                <Input className="mt-1 h-9 text-xs" type="number" min={1} max={720} value={draft.baselineWindowHours} onChange={(e) => setDraft({ ...draft, baselineWindowHours: Number(e.target.value) })} />
+              </label>
+              <label className="text-xs font-semibold">
+                Baseline runs per monitor
+                <Input className="mt-1 h-9 text-xs" type="number" min={1} max={500} value={draft.baselineRunCount} onChange={(e) => setDraft({ ...draft, baselineRunCount: Number(e.target.value) })} />
+              </label>
+              <label className="text-xs font-semibold">
+                Post samples per monitor
+                <Input className="mt-1 h-9 text-xs" type="number" min={1} max={100} value={draft.sampleCount} onChange={(e) => setDraft({ ...draft, sampleCount: Number(e.target.value) })} />
+              </label>
+              <label className="text-xs font-semibold">
+                Post sample interval seconds
+                <Input className="mt-1 h-9 text-xs" type="number" min={0} max={3600} value={draft.intervalSeconds} onChange={(e) => setDraft({ ...draft, intervalSeconds: Number(e.target.value) })} />
+              </label>
+            </div>
+            <div className="space-y-2">
+              <div className="text-xs font-semibold">Active monitors</div>
+              <div className="max-h-64 overflow-auto rounded-md border">
+                {activeMonitors.length === 0 ? (
+                  <div className="p-4 text-xs text-muted-foreground">No active monitors are assigned to this application.</div>
+                ) : (
+                  activeMonitors.map((monitor) => (
+                    <label key={monitor.id} className="flex items-start gap-3 border-b px-3 py-2 text-xs last:border-b-0">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={selectedMonitorIds.includes(monitor.id)}
+                        onChange={(event) => {
+                          setSelectedMonitorIds((current) =>
+                            event.target.checked ? [...current, monitor.id] : current.filter((id) => id !== monitor.id)
+                          )
+                        }}
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-semibold text-foreground">{monitor.name}</span>
+                        <span className="block truncate text-muted-foreground">{monitor.description || monitor.scheduleLabel || "Synthetic monitor"}</span>
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button onClick={createValidation} disabled={saving || !selectedApplication || selectedMonitorIds.length === 0}>
+                {saving ? <RotateCw className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                Create check
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Metric label="Deployment checks" value={String(validations.length)} icon={Workflow} detail="All applications" />
+          <Metric label="Ready reports" value={String(validations.filter((validation) => validation.status === "report_ready").length)} icon={CheckCircle2} detail="Completed comparisons" />
+          <Metric label="Failing reports" value={String(validations.filter((validation) => validation.report?.status === "fail").length)} icon={AlertTriangle} detail="Needs investigation" />
+          <Metric label="Applications" value={String(applications.length)} icon={Boxes} detail="CAR groups" />
+        </div>
+        <Card>
+          <CardHeader className="border-b pb-3">
+            <CardTitle className="text-sm font-semibold">Deployment history</CardTitle>
+            <CardDescription>Baseline versus post-deploy validation reports across application groups.</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-4">
+            {validations.length === 0 ? (
+              <div className="rounded-md border border-dashed bg-muted/20 p-5 text-sm text-muted-foreground">
+                No deployment checks yet. Create one to compare historical baseline metrics with post-deploy samples.
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Deployment</TableHead>
+                      <TableHead className="text-xs">Application</TableHead>
+                      <TableHead className="text-xs">Samples</TableHead>
+                      <TableHead className="text-xs">Status</TableHead>
+                      <TableHead className="text-xs">Report</TableHead>
+                      <TableHead className="text-right text-xs">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {validations.map((validation) => (
+                      <TableRow key={validation.id}>
+                        <TableCell>
+                          <div className="text-sm font-semibold">{validation.name}</div>
+                          <div className="text-[11px] text-muted-foreground">{[validation.environment, validation.version, validation.buildId].filter(Boolean).join(" · ") || formatDate(validation.createdAt)}</div>
+                        </TableCell>
+                        <TableCell className="text-xs font-semibold">{validation.applicationName}<div className="text-[11px] font-normal text-muted-foreground">CAR {validation.carId}</div></TableCell>
+                        <TableCell className="text-xs">
+                          {validation.baselineRunCount || 30} baseline + {validation.sampleCount || 30} post
+                          <div className="text-[11px] text-muted-foreground">{validation.intervalSeconds || 0}s post interval</div>
+                        </TableCell>
+                        <TableCell className="text-xs font-semibold capitalize">{validationStatusLabel(validation.status)}</TableCell>
+                        <TableCell><ValidationResultPill status={validation.report?.status || "incomplete"} /></TableCell>
+                        <TableCell className="text-right">
+                          <Link href={`/deployments/${validation.id}`}>
+                            <Button variant="outline" size="sm" className="h-8 text-xs">Open</Button>
+                          </Link>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </PageShell>
+  )
 }
 
 function ApplicationsView({
@@ -572,8 +1062,10 @@ function ApplicationsView({
 function ApplicationDetailView({
   application,
   monitors,
+  validations,
   applicationSlo,
   onRunApplication,
+  onCreateValidation,
   onRunNow,
   onToggleActive,
   onDeleteMonitor,
@@ -582,8 +1074,10 @@ function ApplicationDetailView({
 }: {
   application: Application
   monitors: Monitor[]
+  validations: DeploymentValidation[]
   applicationSlo?: import("@/lib/pulse-types").ApplicationSLO
   onRunApplication: (applicationId: string) => Promise<void>
+  onCreateValidation: (input: DeploymentValidationCreateInput) => Promise<DeploymentValidation | null>
   onRunNow: (monitorId: string) => Promise<any> | any
   onToggleActive: (monitorId: string, currentActive: boolean) => void
   onDeleteMonitor?: (monitorId: string) => void
@@ -658,6 +1152,13 @@ function ApplicationDetailView({
           <Metric label="Uptime 30d" value={formatUptimePct(health.successRate)} icon={CheckCircle2} detail="Rolling production runs" />
           <Metric label="p95 latency (30d)" value={`${applicationSlo?.runLatency30d.p95Ms ?? health.avgLatency}ms`} icon={Server} detail={application.environment || "environment"} />
         </div>
+
+        <DeploymentValidationPanel
+          application={application}
+          monitors={monitors}
+          validations={validations}
+          onCreateValidation={onCreateValidation}
+        />
 
         <Card>
           <CardHeader className="border-b pb-3">
@@ -922,6 +1423,239 @@ function MonitorTable({ monitors, monitorSloMap, onRunNow, onToggleActive, onDel
         </TableBody>
       </Table>
     </Card>
+  )
+}
+
+function DeploymentValidationDetailView({
+  validation,
+  preRuns,
+  postRuns,
+  onRunPost,
+  onGenerateAIReport,
+  onRefresh,
+}: {
+  validation: DeploymentValidation
+  preRuns: MonitorRun[]
+  postRuns: MonitorRun[]
+  onRunPost: (validationId: string) => Promise<void>
+  onGenerateAIReport: (validation: DeploymentValidation, preRuns: MonitorRun[], postRuns: MonitorRun[]) => Promise<DeploymentValidation | null>
+  onRefresh: () => Promise<void>
+}) {
+  const [runningPost, setRunningPost] = useState(false)
+  const [generatingAI, setGeneratingAI] = useState(false)
+  const report = validation.report
+  const summary = report?.summary
+  const hasPre = preRuns.length > 0
+  const hasPost = postRuns.length > 0
+  const expectedPostRuns = Math.max(1, validation.monitorIds.length * (validation.sampleCount || 30))
+  const deploymentTime = validation.deploymentStartedAt || validation.createdAt
+
+  useEffect(() => {
+    if (validation.status !== "post_running") return
+    const timer = window.setInterval(() => {
+      void onRefresh()
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [validation.status, onRefresh])
+
+  async function runPostSamples() {
+    setRunningPost(true)
+    try {
+      await onRunPost(validation.id)
+      await onRefresh()
+    } finally {
+      setRunningPost(false)
+    }
+  }
+
+  async function generateAIReport() {
+    if (!report || report.status === "incomplete" || generatingAI) return
+    setGeneratingAI(true)
+    try {
+      await onGenerateAIReport(validation, preRuns, postRuns)
+      await onRefresh()
+    } finally {
+      setGeneratingAI(false)
+    }
+  }
+
+  return (
+    <PageShell
+      eyebrow={`CAR ${validation.carId}`}
+      title={validation.name}
+      description={[validation.applicationName, validation.environment, validation.version, validation.buildId].filter(Boolean).join(" · ")}
+      action={
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={runPostSamples} disabled={runningPost || !hasPre} className="h-9 gap-2">
+            {runningPost || validation.status === "post_running" ? <RotateCw className="size-4 animate-spin" /> : <Play className="size-4" />}
+            Run post samples
+          </Button>
+          <Button variant="outline" onClick={generateAIReport} disabled={generatingAI || !hasPre || !hasPost || report?.status === "incomplete"} className="h-9 gap-2">
+            {generatingAI ? <RotateCw className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+            AI report
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <Metric label="Report status" value={report?.status || "Incomplete"} icon={CheckCircle2} detail={validationStatusLabel(validation.status)} />
+          <Metric label="Monitors" value={String(summary?.totalMonitors ?? validation.monitorIds.length)} icon={Workflow} detail={`${summary?.comparedMonitors ?? 0} compared`} />
+          <Metric label="Success delta" value={`${summary?.successRateDelta ?? 0}%`} icon={Activity} detail={`${summary?.preSuccessRate ?? 0}% to ${summary?.postSuccessRate ?? 0}%`} />
+          <Metric label="p95 delta" value={`${summary?.p95LatencyDeltaMs ?? 0}ms`} icon={Timer} detail={`${summary?.p95LatencyDeltaPct ?? 0}% change`} />
+          <Metric label="New failures" value={String(summary?.newFailures ?? 0)} icon={AlertTriangle} detail={`${summary?.resolvedFailures ?? 0} resolved`} />
+        </div>
+
+        <Card>
+          <CardHeader className="border-b pb-3">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="text-sm font-semibold">Validation flow</CardTitle>
+                <CardDescription>Historical baseline before deployment compared with controlled post-deploy samples.</CardDescription>
+              </div>
+              <ValidationResultPill status={report?.status || "incomplete"} />
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-3 pt-4 md:grid-cols-3">
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="text-xs font-bold uppercase text-muted-foreground">Historical baseline</div>
+              <div className="mt-2 text-xl font-bold">{preRuns.length}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Last {validation.baselineRunCount || 30}/monitor from {validation.baselineWindowHours || 24}h before deployment
+              </div>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="text-xs font-bold uppercase text-muted-foreground">Deployment time</div>
+              <div className="mt-2 text-base font-bold">{formatDate(deploymentTime)}</div>
+              <div className="mt-1 text-xs text-muted-foreground">Baseline runs must start before this timestamp.</div>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="text-xs font-bold uppercase text-muted-foreground">Post-deploy samples</div>
+              <div className="mt-2 text-xl font-bold">{postRuns.length}/{expectedPostRuns}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {validation.postCompletedAt ? `Completed ${formatDate(validation.postCompletedAt)}` : postRuns.length > 0 ? `${validation.intervalSeconds || 0}s interval in progress` : "Ready to start after deployment"}
+              </div>
+            </div>
+            <div className="rounded-md border bg-muted/20 p-3 md:col-span-3">
+              <div className="text-xs font-bold uppercase text-muted-foreground">Report</div>
+              <div className="mt-2"><ValidationResultPill status={report?.status || "incomplete"} /></div>
+              <div className="mt-2 text-xs text-muted-foreground">{report?.incompleteReason || "Generated from historical baseline and post-deploy samples."}</div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {report?.regressions && report.regressions.length > 0 && (
+          <Card>
+            <CardHeader className="border-b pb-3">
+              <CardTitle className="text-sm font-semibold">Regressions</CardTitle>
+              <CardDescription>Issues detected after deployment.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 pt-4">
+              {report.regressions.map((regression, index) => (
+                <div key={`${regression}-${index}`} className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 p-3 text-xs font-medium text-amber-800 dark:text-amber-200">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                  {regression}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {validation.aiReport?.executiveSummary && (
+          <Card>
+            <CardHeader className="border-b pb-3">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="text-sm font-semibold">AI deployment report</CardTitle>
+                  <CardDescription>Generated from deterministic Pulse metrics and linked monitor runs.</CardDescription>
+                </div>
+                <Badge variant="outline" className="w-fit capitalize">{validation.aiReport.riskLevel || "risk"} risk</Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-4">
+              <div className="rounded-md border bg-muted/20 p-4">
+                <div className="text-xs font-bold uppercase text-muted-foreground">Recommendation</div>
+                <div className="mt-1 text-lg font-bold">{validation.aiReport.recommendation || "Review"}</div>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{validation.aiReport.executiveSummary}</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="text-xs font-bold uppercase text-muted-foreground">Key findings</div>
+                  {(validation.aiReport.keyFindings || []).map((finding, index) => (
+                    <div key={`${finding}-${index}`} className="rounded-md border bg-background p-3 text-xs font-medium">{finding}</div>
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs font-bold uppercase text-muted-foreground">Next actions</div>
+                  {(validation.aiReport.nextActions || []).map((action, index) => (
+                    <div key={`${action}-${index}`} className="rounded-md border bg-background p-3 text-xs font-medium">{action}</div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card>
+          <CardHeader className="border-b pb-3">
+            <CardTitle className="text-sm font-semibold">Monitor comparison</CardTitle>
+            <CardDescription>Pre and post deployment run status, latency delta, and diagnostic links.</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-4">
+            {!report?.monitorComparisons?.length ? (
+              <div className="rounded-md border border-dashed bg-muted/20 p-4 text-xs text-muted-foreground">
+                Run both phases to generate monitor comparisons.
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Monitor</TableHead>
+                      <TableHead className="text-xs">Pre</TableHead>
+                      <TableHead className="text-xs">Post</TableHead>
+                      <TableHead className="text-xs">Latency delta</TableHead>
+                      <TableHead className="text-xs">Result</TableHead>
+                      <TableHead className="text-right text-xs">Runs</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.monitorComparisons.map((comparison) => (
+                      <TableRow key={comparison.monitorId}>
+                        <TableCell>
+                          <div className="text-sm font-semibold">{comparison.monitorName || comparison.monitorId}</div>
+                          <div className="text-[11px] text-muted-foreground">{comparison.reason || "No regression detected"}</div>
+                        </TableCell>
+                        <TableCell>{comparison.preStatus ? <StatusPill status={comparison.preStatus} /> : <span className="text-xs text-muted-foreground">Missing</span>}</TableCell>
+                        <TableCell>{comparison.postStatus ? <StatusPill status={comparison.postStatus} /> : <span className="text-xs text-muted-foreground">Missing</span>}</TableCell>
+                        <TableCell className={cn("text-xs font-bold", comparison.durationDeltaMs > 0 ? "text-amber-700 dark:text-amber-300" : "text-emerald-600 dark:text-emerald-300")}>
+                          {comparison.durationDeltaMs > 0 ? "+" : ""}{comparison.durationDeltaMs}ms · {comparison.durationDeltaPct > 0 ? "+" : ""}{comparison.durationDeltaPct}%
+                        </TableCell>
+                        <TableCell><ValidationResultPill status={comparison.result} /></TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            {comparison.preRunId && (
+                              <Link href={`/runs/${comparison.preRunId}`}>
+                                <Button variant="outline" size="sm" className="h-8 text-xs">Pre</Button>
+                              </Link>
+                            )}
+                            {comparison.postRunId && (
+                              <Link href={`/runs/${comparison.postRunId}`}>
+                                <Button variant="outline" size="sm" className="h-8 text-xs">Post</Button>
+                              </Link>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </PageShell>
   )
 }
 
@@ -1231,11 +1965,9 @@ function Dashboard({
               label="Average response" 
               value={`${averageResponse}ms`} 
               detail="Based on latest samples" 
-              icon={Timer} 
+              icon={Timer}
             />
           </div>
-
-          <ErrorBudgetWidget summary={sloSummary} />
 
           {/* Response Time Trend Chart */}
           <div className="w-full">
@@ -1334,6 +2066,8 @@ function Dashboard({
               </CardContent>
             </Card>
           </div>
+
+          <ErrorBudgetWidget summary={sloSummary} />
 
           <AlertFeed alerts={alerts} />
         </TabsContent>
@@ -2301,10 +3035,11 @@ function Runs({ monitor, runs, onRefresh, onRunNow }: RunsProps) {
 
 
 
-export function PulseConsole({ view = "dashboard", applicationId, monitorId, runId, alertId }: PulseConsoleProps) {
+export function PulseConsole({ view = "dashboard", applicationId, monitorId, runId, alertId, validationId }: PulseConsoleProps) {
   const [applications, setApplications] = useState<Application[]>([])
   const [monitors, setMonitors] = useState<Monitor[]>([])
   const [runs, setRuns] = useState<MonitorRun[]>([])
+  const [deploymentValidations, setDeploymentValidations] = useState<DeploymentValidation[]>([])
   const [secrets, setSecrets] = useState<SecretReference[]>([])
   const [certificateProfiles, setCertificateProfiles] = useState<CertificateProfile[]>([])
   const [alerts, setAlerts] = useState<AlertEvent[]>([])
@@ -2316,6 +3051,8 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
 
   const [activeMonitor, setActiveMonitor] = useState<Monitor | null>(null)
   const [activeRun, setActiveRun] = useState<MonitorRun | null>(null)
+  const [activeValidation, setActiveValidation] = useState<DeploymentValidation | null>(null)
+  const [activeValidationRuns, setActiveValidationRuns] = useState<{ preRuns: MonitorRun[]; postRuns: MonitorRun[] }>({ preRuns: [], postRuns: [] })
   const activeApplication = useMemo(() => {
     return applications.find((application) => application.id === applicationId) || null
   }, [applications, applicationId])
@@ -2388,6 +3125,19 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
       }
     } catch (err) {
       console.error("Failed to fetch applications:", err)
+    }
+  }
+
+  const fetchDeploymentValidations = async (applicationIdVal?: string) => {
+    try {
+      const query = applicationIdVal ? `?applicationId=${encodeURIComponent(applicationIdVal)}` : ""
+      const res = await fetch(`/api/deployment-validations${query}`)
+      if (res.ok) {
+        const data = await res.json()
+        setDeploymentValidations(data.validations || [])
+      }
+    } catch (err) {
+      console.error("Failed to fetch deployment validations:", err)
     }
   }
 
@@ -2499,6 +3249,19 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
     }
   }
 
+  const fetchSingleDeploymentValidation = async (id: string) => {
+    try {
+      const res = await fetch(`/api/deployment-validations/${id}`)
+      if (res.ok) {
+        const data = await res.json()
+        setActiveValidation(data.validation || null)
+        setActiveValidationRuns({ preRuns: data.preRuns || [], postRuns: data.postRuns || [] })
+      }
+    } catch (err) {
+      console.error(`Failed to fetch deployment validation ${id}:`, err)
+    }
+  }
+
   useEffect(() => {
     setLoading(true)
     const promises = [
@@ -2511,6 +3274,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
       fetchNotificationSettings(),
       fetchRetentionSettings(),
       fetchSLOSummary(),
+      fetchDeploymentValidations(applicationId),
     ]
     if (monitorId) {
       promises.push(fetchSingleMonitor(monitorId))
@@ -2518,10 +3282,13 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
     if (runId) {
       promises.push(fetchSingleRun(runId))
     }
+    if (validationId) {
+      promises.push(fetchSingleDeploymentValidation(validationId))
+    }
     Promise.all(promises).finally(() => {
       setLoading(false)
     })
-  }, [applicationId, monitorId, runId, alertId])
+  }, [applicationId, monitorId, runId, alertId, validationId])
 
   const handleRunNow = async (monitorIdVal: string) => {
     try {
@@ -2627,6 +3394,60 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
       throw new Error(data.error || "Failed to save application.")
     }
     await fetchApplications()
+  }
+
+  const handleCreateDeploymentValidation = async (input: DeploymentValidationCreateInput) => {
+    const res = await fetch("/api/deployment-validations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to create deployment validation.")
+    }
+    await fetchDeploymentValidations(input.applicationId)
+    const validation = (data.validation || null) as DeploymentValidation | null
+    if (validation) {
+      window.location.href = `/deployments/${validation.id}`
+    }
+    return validation
+  }
+
+  const handleRunDeploymentValidationPost = async (id: string) => {
+    const res = await fetch(`/api/deployment-validations/${id}/run-post`, { method: "POST" })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to run post-deploy checks.")
+    }
+  }
+
+  const handleGenerateDeploymentAIReport = async (validation: DeploymentValidation, preRuns: MonitorRun[], postRuns: MonitorRun[]) => {
+    const copilotRes = await fetch("/api/copilot/deployment-report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ validation, preRuns, postRuns }),
+    })
+    const copilotData = await copilotRes.json().catch(() => ({}))
+    if (!copilotRes.ok) {
+      throw new Error(copilotData.error || "Failed to generate AI deployment report.")
+    }
+
+    const saveRes = await fetch(`/api/deployment-validations/${validation.id}/ai-report`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(copilotData.result || {}),
+    })
+    const saveData = await saveRes.json().catch(() => ({}))
+    if (!saveRes.ok) {
+      throw new Error(saveData.error || "Failed to save AI deployment report.")
+    }
+    const updated = (saveData.validation || null) as DeploymentValidation | null
+    if (updated) {
+      setActiveValidation(updated)
+      await fetchDeploymentValidations(updated.applicationId)
+    }
+    return updated
   }
 
   const executeToggleActive = async (monitorIdVal: string, currentActive: boolean) => {
@@ -2820,7 +3641,7 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
     await fetchCertificateProfiles()
   }
 
-  if (loading && ((applicationId && !activeApplication) || (monitorId && !activeMonitor) || (runId && !activeRun) || (alertId && alerts.length === 0) || (!applicationId && !monitorId && !runId && !alertId))) {
+  if (loading && ((applicationId && !activeApplication) || (monitorId && !activeMonitor) || (runId && !activeRun) || (validationId && !activeValidation) || (alertId && alerts.length === 0) || (!applicationId && !monitorId && !runId && !validationId && !alertId))) {
     return (
       <div className="flex min-h-svh items-center justify-center bg-background text-foreground">
         <div className="flex flex-col items-center gap-3">
@@ -2843,6 +3664,15 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
         runningAppId={runningApp?.id}
       />
     )
+  } else if (view === "deployments") {
+    viewContent = (
+      <DeploymentsView
+        applications={applications}
+        monitors={monitors}
+        validations={deploymentValidations}
+        onCreateValidation={handleCreateDeploymentValidation}
+      />
+    )
   } else if (view === "application-detail") {
     if (!activeApplication) {
       viewContent = (
@@ -2857,13 +3687,36 @@ export function PulseConsole({ view = "dashboard", applicationId, monitorId, run
         <ApplicationDetailView
           application={activeApplication}
           monitors={monitors.filter((monitor) => monitor.applicationId === activeApplication.id)}
+          validations={deploymentValidations.filter((validation) => validation.applicationId === activeApplication.id)}
           applicationSlo={applicationSLOMap(sloSummary).get(activeApplication.id)}
           onRunApplication={handleRunApplication}
+          onCreateValidation={handleCreateDeploymentValidation}
           onRunNow={handleRunNow}
           onToggleActive={handleToggleActive}
           onDeleteMonitor={handleDeleteMonitor}
           onSaveApplication={handleSaveApplication}
           runningAppId={runningApp?.id}
+        />
+      )
+    }
+  } else if (view === "deployment-validation") {
+    if (!activeValidation) {
+      viewContent = (
+        <PageShell eyebrow="Deployment" title="Validation not found">
+          <div className="rounded-md border bg-card p-6 text-sm text-muted-foreground">
+            This deployment validation was not found.
+          </div>
+        </PageShell>
+      )
+    } else {
+      viewContent = (
+        <DeploymentValidationDetailView
+          validation={activeValidation}
+          preRuns={activeValidationRuns.preRuns}
+          postRuns={activeValidationRuns.postRuns}
+          onRunPost={handleRunDeploymentValidationPost}
+          onGenerateAIReport={handleGenerateDeploymentAIReport}
+          onRefresh={() => fetchSingleDeploymentValidation(activeValidation.id)}
         />
       )
     }

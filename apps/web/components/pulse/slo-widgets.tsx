@@ -37,8 +37,8 @@ export function ErrorBudgetWidget({ summary }: { summary: SLOSummary | null }) {
           Target {budget.targetUptimePct}% uptime vs {formatUptimePct(budget.actualUptime30dPct)} actual across production runs.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-4 pt-5 md:grid-cols-[180px_1fr]">
-        <ChartContainer config={budgetChartConfig} className="mx-auto aspect-square h-[180px]">
+      <CardContent className="grid gap-4 pt-5 md:grid-cols-[180px_1fr] items-center">
+        <ChartContainer config={budgetChartConfig} className="mx-auto aspect-square h-[180px] w-[180px]" initialDimension={{ width: 180, height: 180 }}>
           <PieChart>
             <ChartTooltip content={<ChartTooltipContent hideLabel />} />
             <Pie

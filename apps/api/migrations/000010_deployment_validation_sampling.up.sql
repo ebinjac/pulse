@@ -1,0 +1,4 @@
+ALTER TABLE deployment_validations
+    ADD COLUMN IF NOT EXISTS sample_count INTEGER NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS interval_seconds INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ai_report_json JSONB DEFAULT '{}'::jsonb;

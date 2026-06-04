@@ -50,7 +50,7 @@ func (q *RedisQueue) EnqueueMonitorRun(ctx context.Context, job MonitorRunJob) (
 		job.Trigger = "schedule"
 	}
 
-	key := q.enqueueDedupKey(job.MonitorID)
+	key := q.enqueueDedupKey(enqueueDedupKey(job))
 	acquired, err := q.client.SetNX(ctx, key, job.EnqueuedAt.Format(time.RFC3339Nano), q.enqueueDedupTTL).Result()
 	if err != nil {
 		return false, err
@@ -114,8 +114,8 @@ func (q *RedisQueue) Close() error {
 	return q.client.Close()
 }
 
-func (q *RedisQueue) enqueueDedupKey(monitorID string) string {
-	return fmt.Sprintf("%s:enqueue-lock:%s", q.keyspace, monitorID)
+func (q *RedisQueue) enqueueDedupKey(dedupKey string) string {
+	return fmt.Sprintf("%s:enqueue-lock:%s", q.keyspace, dedupKey)
 }
 
 func (q *RedisQueue) runLockKey(monitorID string) string {

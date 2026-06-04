@@ -29,11 +29,12 @@ func NewMemoryQueue(size int) *MemoryQueue {
 func (q *MemoryQueue) EnqueueMonitorRun(ctx context.Context, job MonitorRunJob) (bool, error) {
 	q.mu.Lock()
 	now := time.Now().UTC()
-	if heldUntil, ok := q.enqueueHeld[job.MonitorID]; ok && heldUntil.After(now) {
+	dedupKey := enqueueDedupKey(job)
+	if heldUntil, ok := q.enqueueHeld[dedupKey]; ok && heldUntil.After(now) {
 		q.mu.Unlock()
 		return false, nil
 	}
-	q.enqueueHeld[job.MonitorID] = now.Add(55 * time.Second)
+	q.enqueueHeld[dedupKey] = now.Add(55 * time.Second)
 	q.mu.Unlock()
 
 	select {

@@ -15,17 +15,19 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type MemoryStore struct {
-	mu           sync.RWMutex
-	applications map[string]domain.Application
-	monitors     map[string]domain.Monitor
-	drafts       map[string]memoryDraftRecord
-	versions     map[string][]memoryVersionRecord
-	runs         map[string]domain.MonitorRun
-	secrets      map[string]domain.SecretReference
-	certificates map[string]domain.CertificateProfile
-	alerts       map[string]domain.AlertEvent
-	maintenance  map[string]domain.MaintenanceWindow
-	retention    domain.RetentionSettings
+	mu              sync.RWMutex
+	applications    map[string]domain.Application
+	validations     map[string]domain.DeploymentValidation
+	validationLinks []domain.DeploymentValidationRunLink
+	monitors        map[string]domain.Monitor
+	drafts          map[string]memoryDraftRecord
+	versions        map[string][]memoryVersionRecord
+	runs            map[string]domain.MonitorRun
+	secrets         map[string]domain.SecretReference
+	certificates    map[string]domain.CertificateProfile
+	alerts          map[string]domain.AlertEvent
+	maintenance     map[string]domain.MaintenanceWindow
+	retention       domain.RetentionSettings
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -137,8 +139,10 @@ func NewMemoryStore() *MemoryStore {
 	seedDraft := cloneMonitorConfig(monitor)
 
 	return &MemoryStore{
-		applications: map[string]domain.Application{application.ID: application},
-		monitors:     map[string]domain.Monitor{monitor.ID: monitor},
+		applications:    map[string]domain.Application{application.ID: application},
+		validations:     map[string]domain.DeploymentValidation{},
+		validationLinks: []domain.DeploymentValidationRunLink{},
+		monitors:        map[string]domain.Monitor{monitor.ID: monitor},
 		drafts: map[string]memoryDraftRecord{
 			monitor.ID: {config: seedDraft, updatedAt: now},
 		},
@@ -236,6 +240,137 @@ func (s *MemoryStore) DeleteApplication(id string) bool {
 		}
 	}
 	return true
+}
+
+func (s *MemoryStore) ListDeploymentValidations(applicationID string) []domain.DeploymentValidation {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	validations := make([]domain.DeploymentValidation, 0, len(s.validations))
+	for _, validation := range s.validations {
+		if applicationID == "" || validation.ApplicationID == applicationID {
+			validations = append(validations, validation)
+		}
+	}
+	sort.Slice(validations, func(i, j int) bool {
+		return validations[i].CreatedAt.After(validations[j].CreatedAt)
+	})
+	return validations
+}
+
+func (s *MemoryStore) GetDeploymentValidation(id string) (domain.DeploymentValidation, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	validation, ok := s.validations[id]
+	return validation, ok
+}
+
+func (s *MemoryStore) CreateDeploymentValidation(validation domain.DeploymentValidation) domain.DeploymentValidation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	if validation.ID == "" {
+		validation.ID = "depval-" + randomID()
+	}
+	if validation.Status == "" {
+		validation.Status = domain.DeploymentValidationDraft
+	}
+	if validation.SampleCount <= 0 {
+		validation.SampleCount = 30
+	}
+	if validation.IntervalSeconds < 0 {
+		validation.IntervalSeconds = 0
+	}
+	if validation.DeploymentStartedAt == nil {
+		deploymentStartedAt := now
+		validation.DeploymentStartedAt = &deploymentStartedAt
+	}
+	if validation.BaselineWindowHours <= 0 {
+		validation.BaselineWindowHours = 24
+	}
+	if validation.BaselineRunCount <= 0 {
+		validation.BaselineRunCount = 30
+	}
+	if validation.CreatedAt.IsZero() {
+		validation.CreatedAt = now
+	}
+	validation.UpdatedAt = now
+	if validation.MonitorIDs == nil {
+		validation.MonitorIDs = []string{}
+	}
+	s.validations[validation.ID] = validation
+	return validation
+}
+
+func (s *MemoryStore) UpdateDeploymentValidation(validation domain.DeploymentValidation) domain.DeploymentValidation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing, ok := s.validations[validation.ID]
+	if ok && validation.CreatedAt.IsZero() {
+		validation.CreatedAt = existing.CreatedAt
+	}
+	if validation.CreatedAt.IsZero() {
+		validation.CreatedAt = time.Now().UTC()
+	}
+	validation.UpdatedAt = time.Now().UTC()
+	if validation.MonitorIDs == nil {
+		validation.MonitorIDs = []string{}
+	}
+	if validation.DeploymentStartedAt == nil {
+		deploymentStartedAt := validation.CreatedAt
+		if deploymentStartedAt.IsZero() {
+			deploymentStartedAt = time.Now().UTC()
+		}
+		validation.DeploymentStartedAt = &deploymentStartedAt
+	}
+	if validation.BaselineWindowHours <= 0 {
+		validation.BaselineWindowHours = 24
+	}
+	if validation.BaselineRunCount <= 0 {
+		validation.BaselineRunCount = 30
+	}
+	s.validations[validation.ID] = validation
+	return validation
+}
+
+func (s *MemoryStore) LinkDeploymentValidationRun(validationID string, phase domain.DeploymentValidationPhase, monitorID string, runID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, link := range s.validationLinks {
+		if link.ValidationID == validationID && link.Phase == phase && link.MonitorID == monitorID && link.RunID == runID {
+			return
+		}
+	}
+	s.validationLinks = append(s.validationLinks, domain.DeploymentValidationRunLink{
+		ValidationID: validationID,
+		Phase:        phase,
+		MonitorID:    monitorID,
+		RunID:        runID,
+		CreatedAt:    time.Now().UTC(),
+	})
+}
+
+func (s *MemoryStore) ListDeploymentValidationRuns(validationID string, phase domain.DeploymentValidationPhase) []domain.MonitorRun {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	runs := make([]domain.MonitorRun, 0)
+	for _, link := range s.validationLinks {
+		if link.ValidationID != validationID || link.Phase != phase {
+			continue
+		}
+		if run, ok := s.runs[link.RunID]; ok {
+			runs = append(runs, run)
+		}
+	}
+	sort.Slice(runs, func(i, j int) bool {
+		return runs[i].StartedAt.After(runs[j].StartedAt)
+	})
+	return runs
 }
 
 func (s *MemoryStore) ListMonitors() []domain.Monitor {

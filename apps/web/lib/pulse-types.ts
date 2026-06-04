@@ -308,6 +308,91 @@ export interface ApplicationRunSummary {
   monitorIds: string[]
 }
 
+export type DeploymentValidationStatus =
+  | "draft"
+  | "pre_running"
+  | "pre_complete"
+  | "post_running"
+  | "report_ready"
+  | "incomplete"
+
+export type DeploymentValidationPhase = "pre_deploy" | "post_deploy"
+
+export interface DeploymentValidationSummary {
+  totalMonitors: number
+  comparedMonitors: number
+  preSuccessRate: number
+  postSuccessRate: number
+  successRateDelta: number
+  preP95LatencyMs: number
+  postP95LatencyMs: number
+  p95LatencyDeltaMs: number
+  p95LatencyDeltaPct: number
+  newFailures: number
+  resolvedFailures: number
+}
+
+export interface MonitorValidationComparison {
+  monitorId: string
+  monitorName: string
+  preRunId?: string
+  postRunId?: string
+  preStatus?: MonitorStatus
+  postStatus?: MonitorStatus
+  preDurationMs: number
+  postDurationMs: number
+  durationDeltaMs: number
+  durationDeltaPct: number
+  result: "pass" | "warning" | "fail" | "incomplete" | string
+  reason?: string
+  slowestTimingPhase?: string
+  slowestTimingDeltaMs?: number
+}
+
+export interface DeploymentValidationReport {
+  status: "pass" | "warning" | "fail" | "incomplete" | string
+  summary: DeploymentValidationSummary
+  regressions: string[]
+  monitorComparisons: MonitorValidationComparison[]
+  generatedAt?: string
+  incompleteReason?: string
+}
+
+export interface DeploymentValidationAIReport {
+  generatedAt?: string
+  executiveSummary?: string
+  recommendation?: string
+  riskLevel?: string
+  keyFindings?: string[]
+  nextActions?: string[]
+}
+
+export interface DeploymentValidation {
+  id: string
+  applicationId: string
+  applicationName: string
+  carId: string
+  name: string
+  version?: string
+  buildId?: string
+  environment?: string
+  status: DeploymentValidationStatus
+  monitorIds: string[]
+  report?: DeploymentValidationReport
+  aiReport?: DeploymentValidationAIReport
+  sampleCount: number
+  intervalSeconds: number
+  deploymentStartedAt?: string
+  baselineWindowHours: number
+  baselineRunCount: number
+  createdAt: string
+  updatedAt: string
+  preStartedAt?: string
+  preCompletedAt?: string
+  postStartedAt?: string
+  postCompletedAt?: string
+}
+
 export interface StepRun {
   id: string
   stepId: string
