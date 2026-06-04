@@ -71,7 +71,7 @@ Docker example:
 ```bash
 docker run --rm \
   -e DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require' \
-  -e PULSE_MIGRATIONS_PATH='file://migrations' \
+  -e PULSE_MIGRATIONS_PATH='file:///app/migrations' \
   ensemble-pulse-api \
   /app/pulse-migrate up
 ```
@@ -188,6 +188,29 @@ Start infrastructure and API:
 ```bash
 docker compose up -d postgres redis migrate api worker
 ```
+
+If this is a fresh machine or after pulling new migration files, rebuild the API image used by the migration service:
+
+```bash
+docker compose up -d --build postgres redis migrate api worker
+```
+
+If `migrate` logs `migrate up: no change` but the API says tables are missing, check whether only the migration bookkeeping table exists:
+
+```bash
+docker compose exec postgres psql -U pulse -d pulse -c '\dt'
+docker compose exec postgres psql -U pulse -d pulse -c 'select * from schema_migrations;'
+docker compose run --rm migrate /app/pulse-migrate version
+```
+
+For a local development database with no data you need to keep, reset the PostgreSQL volume and rerun migrations:
+
+```bash
+docker compose down -v
+docker compose up -d --build postgres redis migrate api worker
+```
+
+Do not use `docker compose down -v` against a database that contains data you need. It deletes the local PostgreSQL volume.
 
 Start the web service separately:
 

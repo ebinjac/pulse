@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -22,6 +24,7 @@ func main() {
 	}
 
 	migrationsPath := env("PULSE_MIGRATIONS_PATH", "file://migrations")
+	validateMigrationSource(migrationsPath)
 	command := "up"
 	if len(os.Args) > 1 {
 		command = os.Args[1]
@@ -85,6 +88,25 @@ func main() {
 		log.Printf("forced migration version to %d", version)
 	default:
 		log.Fatalf("unknown command %q; use up, down, steps, version, or force", command)
+	}
+}
+
+func validateMigrationSource(migrationsPath string) {
+	if !strings.HasPrefix(migrationsPath, "file://") {
+		return
+	}
+
+	path := strings.TrimPrefix(migrationsPath, "file://")
+	if path == "" {
+		log.Fatal("PULSE_MIGRATIONS_PATH points to an empty file path")
+	}
+
+	matches, err := filepath.Glob(filepath.Join(path, "*.up.sql"))
+	if err != nil {
+		log.Fatalf("validate migration path %q: %v", migrationsPath, err)
+	}
+	if len(matches) == 0 {
+		log.Fatalf("no .up.sql migrations found at %q; check PULSE_MIGRATIONS_PATH and rebuild the API image", path)
 	}
 }
 

@@ -32,7 +32,7 @@ services:
     command: ["/app/pulse-migrate", "up"]
     environment:
       DATABASE_URL: postgres://pulse:pulse@postgres:5432/pulse?sslmode=disable
-      PULSE_MIGRATIONS_PATH: file://migrations
+      PULSE_MIGRATIONS_PATH: file:///app/migrations
     depends_on:
       postgres:
         condition: service_healthy

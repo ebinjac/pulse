@@ -107,7 +107,7 @@ Example migration job using the API image:
 ```bash
 docker run --rm \
   -e DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require' \
-  -e PULSE_MIGRATIONS_PATH='file://migrations' \
+  -e PULSE_MIGRATIONS_PATH='file:///app/migrations' \
   ensemble-pulse-api \
   /app/pulse-migrate up
 ```
@@ -117,10 +117,37 @@ Version check:
 ```bash
 docker run --rm \
   -e DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require' \
-  -e PULSE_MIGRATIONS_PATH='file://migrations' \
+  -e PULSE_MIGRATIONS_PATH='file:///app/migrations' \
   ensemble-pulse-api \
   /app/pulse-migrate version
 ```
+
+## Troubleshooting Empty Databases
+
+If `pulse-migrate up` prints `migrate up: no change` but the API fails with missing PostgreSQL tables, the migration metadata and actual schema are out of sync, or the migration image/path is stale.
+
+First confirm the image can see migrations:
+
+```bash
+docker compose run --rm migrate sh -lc 'ls -1 /app/migrations/*.up.sql'
+```
+
+Then check the database state:
+
+```bash
+docker compose exec postgres psql -U pulse -d pulse -c '\dt'
+docker compose exec postgres psql -U pulse -d pulse -c 'select * from schema_migrations;'
+docker compose run --rm migrate /app/pulse-migrate version
+```
+
+If this is only a local development database and there is no data to preserve, reset the local volume and rebuild the image:
+
+```bash
+docker compose down -v
+docker compose up -d --build postgres redis migrate api worker
+```
+
+If there is data to preserve, do not delete the volume. Inspect `schema_migrations`, restore the missing schema from backup, or repair the schema manually before using `pulse-migrate force`.
 
 ## Dirty Migrations
 
