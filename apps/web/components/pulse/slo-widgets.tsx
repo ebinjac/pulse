@@ -3,13 +3,12 @@
 import { Cell, Pie, PieChart } from "recharts"
 import type { SLOSummary } from "@/lib/pulse-types"
 import { formatUptimePct } from "@/lib/pulse-slo"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@workspace/ui/components/card"
+import { Card as HeroCard, Chip, Description } from "@heroui/react"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@workspace/ui/components/chart"
-import { cn } from "@workspace/ui/lib/utils"
 
 const budgetChartConfig = {
-  remaining: { label: "Remaining", color: "var(--chart-2)" },
-  consumed: { label: "Consumed", color: "var(--destructive)" },
+  remaining: { label: "Remaining", color: "oklch(0.7329 0.1935 150.81)" },
+  consumed: { label: "Consumed", color: "oklch(0.6532 0.2328 25.74)" },
 } satisfies ChartConfig
 
 export function ErrorBudgetWidget({ summary }: { summary: SLOSummary | null }) {
@@ -30,25 +29,26 @@ export function ErrorBudgetWidget({ summary }: { summary: SLOSummary | null }) {
   const onTarget = budget.actualUptime30dPct >= budget.targetUptimePct
 
   return (
-    <Card>
-      <CardHeader className="border-b pb-4">
-        <CardTitle className="text-base font-semibold">SLO error budget (30d)</CardTitle>
-        <CardDescription>
+    <HeroCard>
+      <HeroCard.Header >
+        <HeroCard.Title className="text-base font-semibold">SLO error budget (30d)</HeroCard.Title>
+        <Description>
           Target {budget.targetUptimePct}% uptime vs {formatUptimePct(budget.actualUptime30dPct)} actual across production runs.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4 pt-5 md:grid-cols-[180px_1fr] items-center">
-        <ChartContainer config={budgetChartConfig} className="mx-auto aspect-square h-[180px] w-[180px]" initialDimension={{ width: 180, height: 180 }}>
+        </Description>
+      </HeroCard.Header>
+      <HeroCard.Content className="grid items-center gap-4 pt-5 md:grid-cols-[180px_1fr]">
+        <ChartContainer
+          config={budgetChartConfig}
+          className="mx-auto aspect-square h-[180px] w-[180px] [&_svg]:outline-none [&_rect]:outline-none"
+          initialDimension={{ width: 180, height: 180 }}
+        >
           <PieChart>
-            <ChartTooltip content={<ChartTooltipContent hideLabel />} />
-            <Pie
-              data={chartData}
-              dataKey="value"
-              nameKey="name"
-              innerRadius={52}
-              outerRadius={72}
-              strokeWidth={2}
-            />
+            <ChartTooltip content={<ChartTooltipContent hideLabel indicator="line" />} />
+            <Pie data={chartData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={72} strokeWidth={2}>
+              {chartData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.fill} />
+              ))}
+            </Pie>
             <text x="50%" y="48%" textAnchor="middle" className="fill-foreground text-lg font-bold">
               {remaining.toFixed(0)}%
             </text>
@@ -58,14 +58,13 @@ export function ErrorBudgetWidget({ summary }: { summary: SLOSummary | null }) {
           </PieChart>
         </ChartContainer>
         <div className="space-y-3 text-sm">
-          <div className={cn(
-            "rounded-md border px-3 py-2 text-xs font-semibold",
-            onTarget
-              ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
-              : "border-rose-500/20 bg-rose-500/5 text-rose-700 dark:text-rose-300"
-          )}>
-            {onTarget ? "Within SLO target" : "Error budget burning"}
-          </div>
+          <Chip
+            color={onTarget ? "success" : "danger"}
+            variant="primary"
+            className="text-xs font-semibold"
+          >
+            <Chip.Label>{onTarget ? "Within SLO target" : "Error budget burning"}</Chip.Label>
+          </Chip>
           <dl className="grid gap-2 text-xs">
             <div className="flex justify-between gap-4">
               <dt className="text-muted-foreground">Allowed downtime (30d)</dt>
@@ -85,8 +84,8 @@ export function ErrorBudgetWidget({ summary }: { summary: SLOSummary | null }) {
             </div>
           </dl>
         </div>
-      </CardContent>
-    </Card>
+      </HeroCard.Content>
+    </HeroCard>
   )
 }
 

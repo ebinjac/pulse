@@ -1,11 +1,9 @@
 "use client"
 
 import type { MonitorStep } from "@/lib/pulse-types"
-import { Input } from "@workspace/ui/components/input"
-import { NativeSelect, NativeSelectOption } from "@workspace/ui/components/native-select"
+import { Input, ListBox, Select } from "@heroui/react"
 
 const labelClass = "text-xs font-semibold uppercase text-muted-foreground"
-const inputClass = "flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-xs"
 
 function configString(step: MonitorStep, key: string) {
   const value = step.config?.[key]
@@ -35,7 +33,7 @@ export function SyntheticStepEditor({
   if (step.type === "delay") {
     return (
       <div className="space-y-3">
-        <label className="block space-y-1.5">
+        <div className="flex flex-col gap-1.5">
           <span className={labelClass}>Delay (ms)</span>
           <Input
             type="number"
@@ -47,46 +45,56 @@ export function SyntheticStepEditor({
               onUpdate({ timeoutMs: Number(delayMs) || 1000 })
             }}
           />
-        </label>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-3">
-      <label className="block space-y-1.5">
+      <div className="flex flex-col gap-1.5">
         <span className={labelClass}>Host</span>
         <Input
           value={configString(step, "host") || step.url || ""}
           placeholder="api.example.com"
           onChange={(event) => updateConfig(step, onUpdate, "host", event.target.value)}
         />
-      </label>
+      </div>
       {step.type === "dns" ? (
         <>
-          <label className="block space-y-1.5">
+          <div className="flex flex-col gap-1.5">
             <span className={labelClass}>Record type</span>
-            <NativeSelect
-              size="sm"
-              value={configString(step, "recordType") || "A"}
-              onChange={(event) => updateConfig(step, onUpdate, "recordType", event.target.value)}
+            <Select
+              className="w-full"
+              selectedKey={configString(step, "recordType") || "A"}
+              onSelectionChange={(key) => {
+                if (key != null) updateConfig(step, onUpdate, "recordType", String(key))
+              }}
             >
-              <NativeSelectOption value="A">A</NativeSelectOption>
-              <NativeSelectOption value="AAAA">AAAA</NativeSelectOption>
-              <NativeSelectOption value="CNAME">CNAME</NativeSelectOption>
-            </NativeSelect>
-          </label>
-          <label className="block space-y-1.5">
+              <Select.Trigger>
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  <ListBox.Item id="A" textValue="A">A</ListBox.Item>
+                  <ListBox.Item id="AAAA" textValue="AAAA">AAAA</ListBox.Item>
+                  <ListBox.Item id="CNAME" textValue="CNAME">CNAME</ListBox.Item>
+                </ListBox>
+              </Select.Popover>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
             <span className={labelClass}>Expected record (optional)</span>
             <Input
               value={configString(step, "expected")}
               placeholder="1.2.3.4 or cname.target.example"
               onChange={(event) => updateConfig(step, onUpdate, "expected", event.target.value)}
             />
-          </label>
+          </div>
         </>
       ) : (
-        <label className="block space-y-1.5">
+        <div className="flex flex-col gap-1.5">
           <span className={labelClass}>Port</span>
           <Input
             type="number"
@@ -95,7 +103,7 @@ export function SyntheticStepEditor({
             value={configString(step, "port") || "443"}
             onChange={(event) => updateConfig(step, onUpdate, "port", event.target.value)}
           />
-        </label>
+        </div>
       )}
       {step.type === "tls" ? (
         <p className="text-xs text-muted-foreground rounded-md border bg-muted/10 p-3">

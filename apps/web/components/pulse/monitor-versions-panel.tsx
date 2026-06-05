@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { History, Loader2, RotateCcw } from "lucide-react"
 
-import { Button } from "@workspace/ui/components/button"
+import { Button } from "@heroui/react"
 import { diffMonitors, formatDiffValue } from "@/lib/monitor-diff"
 import { pulseMonitorApiPath } from "@/lib/pulse-api-paths"
 import type { Monitor, MonitorConfigChange, MonitorVersionSummary } from "@/lib/pulse-types"
@@ -111,7 +111,7 @@ export function MonitorVersionsPanel({
 
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Version history</h3>
-        <Button type="button" size="sm" variant="outline" onClick={() => void loadVersions()} disabled={loading}>
+        <Button type="button" size="sm" variant="outline" onPress={() => void loadVersions()} isDisabled={loading}>
           {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
           Refresh
         </Button>
@@ -195,8 +195,8 @@ export function MonitorVersionsPanel({
                     type="button"
                     size="sm"
                     variant="outline"
-                    onClick={() => void rollback(selectedVersion)}
-                    disabled={loading}
+                    onPress={() => void rollback(selectedVersion)}
+                    isDisabled={loading}
                   >
                     Rollback to v{selectedVersion}
                   </Button>

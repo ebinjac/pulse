@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@heroui/react": "^3.1.0",
+    "@heroui/styles": "^3.1.0",
     "@monaco-editor/react": "^4.7.0",
     "@workspace/ui": "*",
     "lucide-react": "^1.17.0",

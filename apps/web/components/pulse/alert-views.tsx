@@ -2,19 +2,269 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowLeft, Bell, CheckCircle2, ChevronRight, ExternalLink, Mail, TerminalSquare, XCircle, Sparkles, Loader2, Copy, Check, FileText } from "lucide-react"
-import { Button } from "@workspace/ui/components/button"
+import { AlertTriangle, ArrowLeft, Bell, CheckCircle2, ChevronRight, ExternalLink, Mail, TerminalSquare, XCircle, Sparkles, Loader2, Copy, Check } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { cn } from "@workspace/ui/lib/utils"
 import type { AlertEvent, Monitor, MonitorRun } from "@/lib/pulse-types"
-import { Input } from "@workspace/ui/components/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@workspace/ui/components/card"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@workspace/ui/components/empty"
-import { NativeSelect, NativeSelectOption } from "@workspace/ui/components/native-select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@workspace/ui/components/table"
-import { AlertStatusPill, channelIcon, DeliveryStatusPill, Field, formatDate, Metric, PageShell, Section } from "./console-shared"
+import {
+  Alert,
+  Button,
+  Card,
+  Chip,
+  Description,
+  EmptyState,
+  Input,
+  Label,
+  ListBox,
+  SearchField,
+  Select,
+  TextField,
+} from "@heroui/react"
+import { AlertStatusPill, channelIcon, DeliveryStatusPill, formatDate, PageShell } from "./console-shared"
 import { RunTimeline } from "./run-views"
 
 export type AlertStatusFilter = "all" | "open" | "acknowledged" | "resolved" | "suppressed"
 export type AlertDeliveryFilter = "all" | "sent" | "failed" | "skipped" | "suppressed"
+
+const STATUS_OPTIONS = [
+  { id: "all", label: "All states" },
+  { id: "open", label: "Open" },
+  { id: "acknowledged", label: "Acknowledged" },
+  { id: "resolved", label: "Resolved" },
+  { id: "suppressed", label: "Suppressed" },
+] as const
+
+const CHANNEL_OPTIONS = [
+  { id: "all", label: "All channels" },
+  { id: "email", label: "Email" },
+  { id: "slack", label: "Slack" },
+] as const
+
+const DELIVERY_OPTIONS = [
+  { id: "all", label: "All delivery" },
+  { id: "sent", label: "Sent" },
+  { id: "failed", label: "Failed" },
+  { id: "skipped", label: "Skipped" },
+  { id: "suppressed", label: "Suppressed" },
+] as const
+
+const STAT_ICON_TONE = {
+  default: "bg-default text-default-foreground",
+  warning: "bg-warning/15 text-warning",
+  success: "bg-success/15 text-success",
+  danger: "bg-danger/15 text-danger",
+} as const
+
+function AlertFieldLabel({ children }: { children: React.ReactNode }) {
+  return <p className="text-[10px] font-semibold uppercase tracking-wider text-muted">{children}</p>
+}
+
+function AlertDetailField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-default/40 px-4 py-3.5">
+      <Description className="text-xs leading-4">{label}</Description>
+      <p className="mt-2 break-words text-sm font-medium leading-5 text-foreground">{value}</p>
+    </div>
+  )
+}
+
+function AlertSidebarSection({
+  title,
+  icon: Icon,
+  children,
+}: {
+  title: string
+  icon: typeof Bell
+  children: React.ReactNode
+}) {
+  return (
+    <Card >
+      <Card.Header className="gap-1.5">
+        <Card.Title className="flex items-center gap-2 text-base">
+          <Icon className="size-4 text-accent" aria-hidden />
+          {title}
+        </Card.Title>
+      </Card.Header>
+      <Card.Content className="gap-3">{children}</Card.Content>
+    </Card>
+  )
+}
+
+function AlertStatCard({
+  label,
+  value,
+  detail,
+  icon: Icon,
+  tone = "default",
+}: {
+  label: string
+  value: string
+  detail: string
+  icon: typeof Bell
+  tone?: keyof typeof STAT_ICON_TONE
+}) {
+  return (
+    <Card >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <p className="text-xs font-medium text-muted">{label}</p>
+          <p className="font-heading text-2xl font-bold tracking-tight text-foreground">{value}</p>
+          <Card.Description>{detail}</Card.Description>
+        </div>
+        <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", STAT_ICON_TONE[tone])}>
+          <Icon className="size-4" aria-hidden />
+        </div>
+      </div>
+    </Card>
+  )
+}
+
+function AlertEventCard({
+  alert,
+  monitor,
+  run,
+}: {
+  alert: AlertEvent
+  monitor?: Monitor
+  run?: MonitorRun
+}) {
+  const router = useRouter()
+  const latestDelivery = alert.deliveries?.[0]
+  const failureText = run?.failureReason || alert.description || "Monitor run did not complete successfully."
+
+  return (
+    <Card
+      className="gap-0 overflow-hidden p-0 border border-border/40 hover:border-border/85 transition-all shadow-xs hover:shadow-sm"
+    >
+      <Card.Header className="flex-col gap-3.5 p-4 sm:flex-row sm:items-start sm:justify-between w-full">
+        <div className="min-w-0 flex-1 space-y-2">
+          <Card.Title className="text-sm font-bold text-foreground">
+            <Link href={`/alerts/${alert.id}`} className="hover:text-primary transition-colors">
+              {alert.title}
+            </Link>
+          </Card.Title>
+          <div className="line-clamp-2 text-xs text-muted-foreground leading-relaxed font-mono bg-muted/20 border border-border/20 px-3 py-2 rounded-xl w-fit max-w-full select-all" title={failureText}>
+            {failureText}
+          </div>
+          <div className="flex flex-wrap gap-2 pt-0.5">
+            <span className="font-mono text-[9px] font-bold tracking-wider uppercase bg-primary/10 border border-primary/20 text-primary px-2 py-0.5 rounded-md">
+              {alert.id}
+            </span>
+            {alert.failureCategory ? (
+              <span className="text-[9px] font-bold uppercase tracking-wider bg-warning/10 border border-warning/20 text-warning px-2 py-0.5 rounded-md">
+                {alert.failureCategory}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex flex-col items-start gap-2.5 sm:items-end shrink-0">
+          <AlertStatusPill status={alert.status} />
+          <Description className="text-[11px] text-muted-foreground/80 font-semibold">
+            {alert.resolvedAt ? `Resolved ${formatDate(alert.resolvedAt)}` : `First seen ${formatDate(alert.firstTriggeredAt)}`}
+          </Description>
+        </div>
+      </Card.Header>
+
+      <Card.Content className="grid gap-5 p-4 border-t border-border/10 md:grid-cols-3">
+        <div className="space-y-1">
+          <AlertFieldLabel>Monitor</AlertFieldLabel>
+          <div className="flex flex-col gap-0.5 mt-1">
+            {monitor ? (
+              <Link href={`/monitors/${monitor.id}/runs`} className="text-sm font-bold text-foreground hover:text-primary transition-colors hover:underline">
+                {monitor.name}
+              </Link>
+            ) : (
+              <p className="font-mono text-xs text-muted-foreground">{alert.monitorId}</p>
+            )}
+            <span className="text-[11px] text-muted-foreground font-semibold">
+              {run ? `${run.status} run · ${run.durationMs}ms` : "Run not loaded"}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <AlertFieldLabel>Delivery</AlertFieldLabel>
+          <div className="flex flex-wrap gap-2 mt-1">
+            {(alert.deliveries || []).slice(0, 3).map((delivery, index) => {
+              const Icon = channelIcon(delivery.channel)
+              return (
+                <div
+                  key={`${delivery.channel}-${index}`}
+                  className="flex items-center gap-1.5 rounded-lg border border-border/30 bg-muted/20 px-2.5 py-1"
+                >
+                  <Icon className="size-3 text-muted-foreground" aria-hidden />
+                  <span className="text-[11px] font-bold capitalize text-foreground">{delivery.channel}</span>
+                  <DeliveryStatusPill status={delivery.status} />
+                </div>
+              )
+            })}
+            {!latestDelivery ? <span className="text-[11px] text-muted-foreground font-semibold">No attempts</span> : null}
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <AlertFieldLabel>Last triggered</AlertFieldLabel>
+          <div className="flex flex-col gap-0.5 mt-1">
+            <p className="text-sm font-bold text-foreground">{formatDate(alert.lastTriggeredAt)}</p>
+            <span className="text-[11px] text-muted-foreground font-semibold">
+              Last delivery {alert.lastDeliveredAt ? formatDate(alert.lastDeliveredAt) : "not sent"}
+            </span>
+          </div>
+        </div>
+      </Card.Content>
+
+      <Card.Footer className="justify-end gap-2.5 border-t border-border/10 bg-muted/5 p-3 px-4">
+        {alert.runId ? (
+          <Button variant="secondary" size="sm" className="gap-1 h-8 px-3 rounded-lg text-xs font-semibold" onPress={() => router.push(`/runs/${alert.runId}`)}>
+            Run <ExternalLink className="size-3" />
+          </Button>
+        ) : null}
+        <Button size="sm" className="gap-1 h-8 px-3 rounded-lg text-xs font-semibold" onPress={() => router.push(`/alerts/${alert.id}`)}>
+          Detail <ChevronRight className="size-3" />
+        </Button>
+      </Card.Footer>
+    </Card>
+  )
+}
+
+function AlertFilterSelect<T extends string>({
+  ariaLabel,
+  selectedKey,
+  onSelectionChange,
+  options,
+}: {
+  ariaLabel: string
+  selectedKey: T
+  onSelectionChange: (key: T) => void
+  options: ReadonlyArray<{ id: T; label: string }>
+}) {
+  return (
+    <Select
+      aria-label={ariaLabel}
+      className="w-full min-w-0 [&_[data-slot=trigger]]:h-9"
+      variant="secondary"
+      selectedKey={selectedKey}
+      onSelectionChange={(key) => {
+        if (key != null) onSelectionChange(String(key) as T)
+      }}
+    >
+      <Select.Trigger>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox>
+          {options.map((option) => (
+            <ListBox.Item key={option.id} id={option.id} textValue={option.label}>
+              {option.label}
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  )
+}
 
 export function AlertsHistory({
   alerts,
@@ -63,157 +313,112 @@ export function AlertsHistory({
     })
   }, [alerts, monitorById, runById, searchQuery, statusFilter, channelFilter, deliveryFilter])
 
+  const hasActiveFilters =
+    searchQuery.length > 0 ||
+    statusFilter !== "all" ||
+    channelFilter !== "all" ||
+    deliveryFilter !== "all"
+
   return (
     <PageShell eyebrow="Incident visibility" title="Alert history" description="Persisted monitor failures, delivery status, cooldowns, and recovery state.">
-      <div className="space-y-5">
-        <div className="grid gap-3 md:grid-cols-5">
-          <Metric label="Total alerts" value={stats.total.toString()} icon={Bell} detail="Persisted events" />
-          <Metric label="Open" value={stats.open.toString()} icon={AlertTriangle} detail="Needs review" />
-          <Metric label="Resolved" value={stats.resolved.toString()} icon={CheckCircle2} detail="Recovered monitors" />
-          <Metric label="Delivered" value={stats.delivered.toString()} icon={Mail} detail="Sent notifications" />
-          <Metric label="Delivery failures" value={stats.failedDeliveries.toString()} icon={XCircle} detail="Provider errors" />
+      <div className="space-y-6">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <AlertStatCard label="Total alerts" value={stats.total.toString()} icon={Bell} detail="Persisted events" />
+          <AlertStatCard label="Open" value={stats.open.toString()} icon={AlertTriangle} detail="Needs review" tone="warning" />
+          <AlertStatCard label="Resolved" value={stats.resolved.toString()} icon={CheckCircle2} detail="Recovered monitors" tone="success" />
+          <AlertStatCard label="Delivered" value={stats.delivered.toString()} icon={Mail} detail="Sent notifications" tone="success" />
+          <AlertStatCard
+            label="Delivery failures"
+            value={stats.failedDeliveries.toString()}
+            icon={XCircle}
+            detail="Provider errors"
+            tone="danger"
+          />
         </div>
 
-        <Card>
-          <CardHeader className="border-b pb-4">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-              <div>
-                <CardTitle className="text-base font-semibold">Alert events</CardTitle>
-                <CardDescription>
-                  Filter by state, channel, delivery outcome, monitor name, failure reason, or alert id.
-                </CardDescription>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:w-[760px]">
-                <Input
-                  placeholder="Search alerts..."
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  className="h-9 text-xs sm:col-span-2 lg:col-span-1"
-                />
-                <NativeSelect size="sm" value={statusFilter} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setStatusFilter(event.target.value as AlertStatusFilter)}>
-                  <NativeSelectOption value="all">All states</NativeSelectOption>
-                  <NativeSelectOption value="open">Open</NativeSelectOption>
-                  <NativeSelectOption value="acknowledged">Acknowledged</NativeSelectOption>
-                  <NativeSelectOption value="resolved">Resolved</NativeSelectOption>
-                  <NativeSelectOption value="suppressed">Suppressed</NativeSelectOption>
-                </NativeSelect>
-                <NativeSelect size="sm" value={channelFilter} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setChannelFilter(event.target.value as "all" | "email" | "slack")}>
-                  <NativeSelectOption value="all">All channels</NativeSelectOption>
-                  <NativeSelectOption value="email">Email</NativeSelectOption>
-                  <NativeSelectOption value="slack">Slack</NativeSelectOption>
-                </NativeSelect>
-                <NativeSelect size="sm" value={deliveryFilter} onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setDeliveryFilter(event.target.value as AlertDeliveryFilter)}>
-                  <NativeSelectOption value="all">All delivery</NativeSelectOption>
-                  <NativeSelectOption value="sent">Sent</NativeSelectOption>
-                  <NativeSelectOption value="failed">Failed</NativeSelectOption>
-                  <NativeSelectOption value="skipped">Skipped</NativeSelectOption>
-                  <NativeSelectOption value="suppressed">Suppressed</NativeSelectOption>
-                </NativeSelect>
-              </div>
+        <Card className="gap-0 overflow-hidden p-0">
+          <Card.Header className="flex-col gap-4  p-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="space-y-1">
+              <Card.Title className="text-base">Alert events</Card.Title>
+              <Card.Description>
+                Filter by state, channel, delivery outcome, monitor name, failure reason, or alert id.
+              </Card.Description>
             </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="px-4 font-semibold">Alert</TableHead>
-                  <TableHead className="px-4 font-semibold">State</TableHead>
-                  <TableHead className="px-4 font-semibold">Monitor</TableHead>
-                  <TableHead className="px-4 font-semibold">Delivery</TableHead>
-                  <TableHead className="px-4 font-semibold">Last triggered</TableHead>
-                  <TableHead className="px-4 text-right font-semibold">Links</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredAlerts.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="h-52 text-center align-middle">
-                      <Empty className="border-0 bg-transparent py-6">
-                        <EmptyHeader>
-                          <EmptyMedia variant="icon">
-                            <Bell className="size-5 text-muted-foreground" />
-                          </EmptyMedia>
-                          <EmptyTitle>No alerts match these filters</EmptyTitle>
-                          <EmptyDescription>Alert events appear after monitors cross their configured failure threshold.</EmptyDescription>
-                        </EmptyHeader>
-                      </Empty>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredAlerts.map((alert) => {
-                    const monitor = monitorById.get(alert.monitorId)
-                    const run = alert.runId ? runById.get(alert.runId) : undefined
-                    const latestDelivery = alert.deliveries?.[0]
-                    const failureText = run?.failureReason || alert.description || "Monitor run did not complete successfully."
+            <div className="grid w-full gap-2 sm:grid-cols-2 lg:max-w-2xl lg:grid-cols-4">
+              <SearchField
+                aria-label="Search alerts"
+                className="sm:col-span-2 lg:col-span-4"
+                value={searchQuery}
+                onChange={setSearchQuery}
+                variant="secondary"
+              >
+                <SearchField.Group className="h-9">
+                  <SearchField.SearchIcon />
+                  <SearchField.Input className="text-sm" placeholder="Search alerts by title, id, monitor, or reason..." />
+                  <SearchField.ClearButton />
+                </SearchField.Group>
+              </SearchField>
+              <AlertFilterSelect
+                ariaLabel="Filter by state"
+                selectedKey={statusFilter}
+                onSelectionChange={(key) => setStatusFilter(key as AlertStatusFilter)}
+                options={STATUS_OPTIONS}
+              />
+              <AlertFilterSelect
+                ariaLabel="Filter by channel"
+                selectedKey={channelFilter}
+                onSelectionChange={(key) => setChannelFilter(key as "all" | "email" | "slack")}
+                options={CHANNEL_OPTIONS}
+              />
+              <AlertFilterSelect
+                ariaLabel="Filter by delivery outcome"
+                selectedKey={deliveryFilter}
+                onSelectionChange={(key) => setDeliveryFilter(key as AlertDeliveryFilter)}
+                options={DELIVERY_OPTIONS}
+              />
+            </div>
+          </Card.Header>
 
-                    return (
-                      <TableRow key={alert.id} className="hover:bg-muted/40">
-                        <TableCell className="max-w-[380px] px-4 align-top">
-                          <Link href={`/alerts/${alert.id}`} className="font-semibold text-foreground hover:text-primary hover:underline">
-                            {alert.title}
-                          </Link>
-                          <p className="mt-1 truncate text-xs text-muted-foreground" title={failureText}>{failureText}</p>
-                          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-muted-foreground">
-                            <span className="rounded border bg-muted/30 px-1.5 py-0.5 font-mono">{alert.id}</span>
-                            {alert.failureCategory ? <span className="rounded border bg-muted/30 px-1.5 py-0.5">{alert.failureCategory}</span> : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="px-4 align-top">
-                          <AlertStatusPill status={alert.status} />
-                          <p className="mt-2 text-[10px] font-medium text-muted-foreground">
-                            {alert.resolvedAt ? `Resolved ${formatDate(alert.resolvedAt)}` : `First seen ${formatDate(alert.firstTriggeredAt)}`}
-                          </p>
-                        </TableCell>
-                        <TableCell className="max-w-[240px] px-4 align-top">
-                          {monitor ? (
-                            <Link href={`/monitors/${monitor.id}/runs`} className="font-semibold text-foreground hover:text-primary hover:underline">
-                              {monitor.name}
-                            </Link>
-                          ) : (
-                            <span className="font-mono text-xs text-muted-foreground">{alert.monitorId}</span>
-                          )}
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            {run ? `${run.status} run · ${run.durationMs}ms` : "Run not loaded"}
-                          </p>
-                        </TableCell>
-                        <TableCell className="px-4 align-top">
-                          <div className="flex flex-wrap gap-1.5">
-                            {(alert.deliveries || []).slice(0, 2).map((delivery, index) => {
-                              const Icon = channelIcon(delivery.channel)
-                              return (
-                                <span key={`${delivery.channel}-${index}`} className="inline-flex items-center gap-1 rounded-md border bg-muted/20 px-2 py-1 text-[10px] font-semibold">
-                                  <Icon className="size-3 text-muted-foreground" />
-                                  {delivery.channel}
-                                  <DeliveryStatusPill status={delivery.status} />
-                                </span>
-                              )
-                            })}
-                            {!latestDelivery ? <span className="text-xs text-muted-foreground">No attempts</span> : null}
-                          </div>
-                        </TableCell>
-                        <TableCell className="px-4 align-top text-xs text-muted-foreground">
-                          <span className="font-semibold text-foreground">{formatDate(alert.lastTriggeredAt)}</span>
-                          <p className="mt-1 text-[10px]">Last delivery {alert.lastDeliveredAt ? formatDate(alert.lastDeliveredAt) : "not sent"}</p>
-                        </TableCell>
-                        <TableCell className="px-4 text-right align-top">
-                          <div className="flex justify-end gap-2">
-                            {alert.runId ? (
-                              <Link href={`/runs/${alert.runId}`} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-2.5 text-xs font-semibold hover:bg-muted">
-                                Run <ExternalLink className="size-3" />
-                              </Link>
-                            ) : null}
-                            <Link href={`/alerts/${alert.id}`} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-2.5 text-xs font-semibold hover:bg-muted">
-                              Detail <ChevronRight className="size-3" />
-                            </Link>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
+          <div className="flex items-center justify-between gap-2  bg-default/50 px-5 py-2.5">
+            <Description className="text-xs font-medium">
+              Showing {filteredAlerts.length} of {alerts.length} alert{alerts.length === 1 ? "" : "s"}
+            </Description>
+            {hasActiveFilters ? (
+              <Button
+                size="sm"
+                variant="tertiary"
+                onPress={() => {
+                  setSearchQuery("")
+                  setStatusFilter("all")
+                  setChannelFilter("all")
+                  setDeliveryFilter("all")
+                }}
+              >
+                Clear filters
+              </Button>
+            ) : null}
+          </div>
+
+          <Card.Content className="gap-3 p-4">
+            {filteredAlerts.length === 0 ? (
+              <EmptyState className="flex min-h-52 flex-col items-center justify-center gap-2 py-10 text-center">
+                <Bell className="size-6 text-muted" aria-hidden />
+                <p className="text-sm font-semibold text-foreground">No alerts match these filters</p>
+                <Card.Description className="max-w-sm">
+                  Alert events appear after monitors cross their configured failure threshold.
+                </Card.Description>
+              </EmptyState>
+            ) : (
+              filteredAlerts.map((alert) => (
+                <AlertEventCard
+                  key={alert.id}
+                  alert={alert}
+                  monitor={monitorById.get(alert.monitorId)}
+                  run={alert.runId ? runById.get(alert.runId) : undefined}
+                />
+              ))
+            )}
+          </Card.Content>
         </Card>
       </div>
     </PageShell>
@@ -270,34 +475,58 @@ function AlertOpsBar({
   if (alert.status === "resolved") return null
 
   return (
-    <Card>
-      <CardHeader className="border-b pb-3">
-        <CardTitle className="text-sm font-semibold">On-call actions</CardTitle>
-        <CardDescription>Acknowledge to stop pages, or snooze to mute delivery for a period.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3 pt-4">
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
+    <Card variant="secondary">
+      <Card.Header className="gap-1.5  pb-4">
+        <Card.Title className="text-sm">On-call actions</Card.Title>
+        <Card.Description>Acknowledge to stop pages, or snooze to mute delivery for a period.</Card.Description>
+      </Card.Header>
+      <Card.Content className="gap-4">
+        {error ? (
+          <Alert status="danger">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Description>{error}</Alert.Description>
+            </Alert.Content>
+          </Alert>
+        ) : null}
         {alert.acknowledgedBy ? (
-          <p className="text-xs text-muted-foreground">
+          <Description className="text-xs">
             Acknowledged by <span className="font-semibold text-foreground">{alert.acknowledgedBy}</span>
             {alert.acknowledgedAt ? ` · ${formatDate(alert.acknowledgedAt)}` : ""}
-          </p>
+          </Description>
         ) : null}
         {alert.snoozedUntil ? (
-          <p className="text-xs text-muted-foreground">
+          <Description className="text-xs">
             Snoozed until <span className="font-semibold text-foreground">{formatDate(alert.snoozedUntil)}</span>
             {alert.suppressionReason ? ` · ${alert.suppressionReason}` : ""}
-          </p>
+          </Description>
         ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Input className="h-8 w-36 text-xs" value={ackBy} onChange={(e) => setAckBy(e.target.value)} placeholder="Your name" />
-          <Button size="sm" variant="outline" disabled={busy || alert.status === "acknowledged"} onClick={() => void acknowledge()}>
+        <div className="flex flex-wrap items-end gap-3 pt-1">
+          <TextField className="min-w-[10rem] flex-1 sm:max-w-[12rem]" name="acknowledgedBy">
+            <Label className="text-xs">Your name</Label>
+            <Input
+              variant="secondary"
+              value={ackBy}
+              onChange={(e) => setAckBy(e.target.value)}
+              placeholder="on-call"
+            />
+          </TextField>
+          <Button
+            size="sm"
+            variant="secondary"
+            isDisabled={busy || alert.status === "acknowledged"}
+            onPress={() => void acknowledge()}
+          >
             Acknowledge
           </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void snooze(120)}>Snooze 2h</Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void snooze(480)}>Snooze 8h</Button>
+          <Button size="sm" variant="secondary" isDisabled={busy} onPress={() => void snooze(120)}>
+            Snooze 2h
+          </Button>
+          <Button size="sm" variant="secondary" isDisabled={busy} onPress={() => void snooze(480)}>
+            Snooze 8h
+          </Button>
         </div>
-      </CardContent>
+      </Card.Content>
     </Card>
   )
 }
@@ -313,8 +542,10 @@ export function AlertDetail({
   run?: MonitorRun
   onAlertUpdated?: () => void | Promise<void>
 }) {
+  const router = useRouter()
   const failedStep = run?.steps?.find((step) => step.status === "failed" || String(step.status).toLowerCase() === "failed")
   const failureText = run?.failureReason || failedStep?.errorMessage || alert.description || "Monitor run did not complete successfully."
+  const failureCategory = alert.failureCategory || run?.failureCategory || "Failure reason"
 
   return (
     <PageShell
@@ -322,121 +553,134 @@ export function AlertDetail({
       title={alert.title}
       description={monitor ? monitor.name : alert.monitorId}
       action={
-        <Link href="/alerts" className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-semibold hover:bg-muted">
-          <ArrowLeft className="size-3.5" /> Alerts
-        </Link>
+        <Button variant="secondary" size="sm" className="gap-1" onPress={() => router.push("/alerts")}>
+          <ArrowLeft className="size-3.5" />
+          Alerts
+        </Button>
       }
     >
-      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
-        <div className="space-y-5">
+      <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="flex flex-col gap-6">
           <Card>
-            <CardHeader className="border-b pb-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <CardTitle className="text-base font-semibold">{alert.title}</CardTitle>
-                  <CardDescription className="mt-1 break-words">{alert.description || "Failure alert from monitor execution."}</CardDescription>
+            <Card.Header className="gap-2  pb-5">
+              <div className="flex w-full flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Card.Title className="text-lg leading-7">{alert.title}</Card.Title>
+                  <Card.Description className="text-sm leading-6">
+                    {alert.description || "Failure alert from monitor execution."}
+                  </Card.Description>
                 </div>
-                <AlertStatusPill status={alert.status} />
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-4">
-              <div className="rounded-md border border-rose-200/60 bg-rose-500/5 p-4 text-sm text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300">
-                <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-rose-500">
-                  <AlertTriangle className="size-3.5" />
-                  {alert.failureCategory || run?.failureCategory || "Failure reason"}
+                <div className="shrink-0 sm:pt-0.5">
+                  <AlertStatusPill status={alert.status} />
                 </div>
-                <p className="whitespace-pre-wrap break-words font-mono text-xs leading-5">{failureText}</p>
+              </div>
+            </Card.Header>
+            <Card.Content className="gap-6">
+              <Alert status="danger">
+                <Alert.Indicator />
+                <Alert.Content className="gap-2">
+                  <Alert.Title className="flex items-center gap-2 text-[11px] uppercase tracking-wider">
+                    <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+                    {failureCategory}
+                  </Alert.Title>
+                  <Alert.Description className="whitespace-pre-wrap break-words font-mono text-xs leading-6">
+                    {failureText}
+                  </Alert.Description>
+                </Alert.Content>
+              </Alert>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                <AlertDetailField label="First triggered" value={formatDate(alert.firstTriggeredAt)} />
+                <AlertDetailField label="Last triggered" value={formatDate(alert.lastTriggeredAt)} />
+                <AlertDetailField label="Resolved at" value={alert.resolvedAt ? formatDate(alert.resolvedAt) : "Still open"} />
               </div>
 
-              <div className="grid gap-3 md:grid-cols-3">
-                <Field label="First triggered" value={formatDate(alert.firstTriggeredAt)} />
-                <Field label="Last triggered" value={formatDate(alert.lastTriggeredAt)} />
-                <Field label="Resolved at" value={alert.resolvedAt ? formatDate(alert.resolvedAt) : "Still open"} />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <AlertDetailField label="Monitor" value={monitor?.name || alert.monitorId} />
+                <AlertDetailField label="Run" value={alert.runId || "No run attached"} />
               </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="Monitor" value={monitor?.name || alert.monitorId} />
-                <Field label="Run" value={alert.runId || "No run attached"} />
-              </div>
-
-              <div className="flex flex-wrap gap-2 pt-1">
-                {monitor ? (
-                  <Link href={`/monitors/${monitor.id}/runs`} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-semibold hover:bg-muted">
-                    Monitor runs <ExternalLink className="size-3" />
-                  </Link>
-                ) : null}
-                {alert.runId ? (
-                  <Link href={`/runs/${alert.runId}`} className="inline-flex h-8 items-center gap-1 rounded-md border bg-background px-3 text-xs font-semibold hover:bg-muted">
-                    Run diagnostics <ExternalLink className="size-3" />
-                  </Link>
-                ) : null}
-              </div>
-            </CardContent>
+            </Card.Content>
+            <Card.Footer className="flex-wrap gap-3 pt-1">
+              {monitor ? (
+                <Button variant="secondary" size="sm" className="gap-1.5" onPress={() => router.push(`/monitors/${monitor.id}/runs`)}>
+                  Monitor runs <ExternalLink className="size-3.5" />
+                </Button>
+              ) : null}
+              {alert.runId ? (
+                <Button size="sm" className="gap-1.5" onPress={() => router.push(`/runs/${alert.runId}`)}>
+                  Run diagnostics <ExternalLink className="size-3.5" />
+                </Button>
+              ) : null}
+            </Card.Footer>
           </Card>
 
           <Card>
-            <CardHeader className="border-b pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                <TerminalSquare className="size-4 text-primary" />
+            <Card.Header className="gap-1.5  pb-4">
+              <Card.Title className="flex items-center gap-2">
+                <TerminalSquare className="size-4 shrink-0 text-accent" aria-hidden />
                 Delivery attempts
-              </CardTitle>
-              <CardDescription>Channel-level notification result persisted with this alert.</CardDescription>
-            </CardHeader>
-            <CardContent className="pt-4">
-              {(!alert.deliveries || alert.deliveries.length === 0) ? (
-                <Empty className="border-0 bg-transparent py-6">
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <Bell className="size-5 text-muted-foreground" />
-                    </EmptyMedia>
-                    <EmptyTitle>No delivery attempts</EmptyTitle>
-                    <EmptyDescription>This alert was persisted before notification delivery was attempted.</EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
+              </Card.Title>
+              <Card.Description>Channel-level notification result persisted with this alert.</Card.Description>
+            </Card.Header>
+            <Card.Content className="gap-4">
+              {!alert.deliveries || alert.deliveries.length === 0 ? (
+                <EmptyState className="flex flex-col items-center gap-3 py-10 text-center">
+                  <Bell className="size-6 text-muted" aria-hidden />
+                  <p className="text-sm font-semibold text-foreground">No delivery attempts</p>
+                  <Card.Description className="max-w-sm text-center">
+                    This alert was persisted before notification delivery was attempted.
+                  </Card.Description>
+                </EmptyState>
               ) : (
-                <div className="space-y-3">
+                <div className="flex flex-col gap-4">
                   {alert.deliveries.map((delivery, index) => {
                     const Icon = channelIcon(delivery.channel)
                     return (
-                      <div key={`${delivery.channel}-${index}`} className="grid gap-3 rounded-md border bg-muted/10 p-3 text-xs md:grid-cols-[140px_110px_1fr_120px] md:items-center">
-                        <div className="flex items-center gap-2 font-semibold text-foreground">
-                          <Icon className="size-4 text-muted-foreground" />
-                          <span className="capitalize">{delivery.channel}</span>
+                      <div
+                        key={`${delivery.channel}-${index}`}
+                        className="flex flex-col gap-3 rounded-2xl oklch(0.5441 0.1703 253.55) bg-surface-secondary px-4 py-4"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5">
+                            <Icon className="size-4 shrink-0 text-muted" aria-hidden />
+                            <span className="text-sm font-semibold capitalize text-foreground">{delivery.channel}</span>
+                          </div>
+                          <DeliveryStatusPill status={delivery.status} />
                         </div>
-                        <DeliveryStatusPill status={delivery.status} />
-                        <div className="min-w-0 text-muted-foreground">
-                          <p className="truncate" title={delivery.detail}>{delivery.detail || "No provider detail"}</p>
-                        </div>
-                        <div className="text-muted-foreground md:text-right">{delivery.sentAt ? formatDate(delivery.sentAt) : "Not sent"}</div>
+                        <Description className="text-sm leading-6" title={delivery.detail}>
+                          {delivery.detail || "No provider detail"}
+                        </Description>
+                        <Description className="text-xs">
+                          {delivery.sentAt ? formatDate(delivery.sentAt) : "Not sent"}
+                        </Description>
                       </div>
                     )
                   })}
                 </div>
               )}
-            </CardContent>
+            </Card.Content>
           </Card>
 
           {run ? <RunTimeline run={run} defaultExpanded={false} /> : null}
         </div>
 
-        <div className="space-y-4">
+        <div className="flex flex-col gap-5">
           <AlertOpsBar alert={alert} onUpdated={onAlertUpdated} />
-          <Section title="Alert state" icon={Bell}>
-            <div className="space-y-2">
-              <Field label="Severity" value={alert.severity || "warning"} />
-              <Field label="State" value={alert.status} />
-              <Field label="Channels" value={alert.channels?.length ? alert.channels.join(", ") : "None"} />
-              <Field label="Last delivery" value={alert.lastDeliveredAt ? formatDate(alert.lastDeliveredAt) : "Not delivered"} />
-            </div>
-          </Section>
-          <Section title="Run context" icon={TerminalSquare}>
-            <div className="space-y-2">
-              <Field label="Run status" value={run?.status || "Unknown"} />
-              <Field label="Triggered by" value={run?.triggeredBy || "Unknown"} />
-              <Field label="Duration" value={run ? `${run.durationMs}ms` : "Unknown"} />
-              <Field label="Failed step" value={failedStep?.stepName || "Not available"} />
-            </div>
-          </Section>
+          <AlertSidebarSection title="Alert state" icon={Bell}>
+            <AlertDetailField label="Severity" value={alert.severity || "warning"} />
+            <AlertDetailField label="State" value={alert.status} />
+            <AlertDetailField label="Channels" value={alert.channels?.length ? alert.channels.join(", ") : "None"} />
+            <AlertDetailField
+              label="Last delivery"
+              value={alert.lastDeliveredAt ? formatDate(alert.lastDeliveredAt) : "Not delivered"}
+            />
+          </AlertSidebarSection>
+          <AlertSidebarSection title="Run context" icon={TerminalSquare}>
+            <AlertDetailField label="Run status" value={run?.status || "Unknown"} />
+            <AlertDetailField label="Triggered by" value={run?.triggeredBy || "Unknown"} />
+            <AlertDetailField label="Duration" value={run ? `${run.durationMs}ms` : "Unknown"} />
+            <AlertDetailField label="Failed step" value={failedStep?.stepName || "Not available"} />
+          </AlertSidebarSection>
           <AlertAiPreviews run={run} />
         </div>
       </div>
@@ -485,87 +729,92 @@ function AlertAiPreviews({ run }: { run?: MonitorRun }) {
   if (!run) return null
 
   return (
-    <Card className="border border-primary/20 bg-primary/[0.02] p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Sparkles className="size-4 text-primary animate-pulse" />
-          <h3 className="font-bold text-xs uppercase tracking-wider text-primary">Pulse Notification Previews</h3>
-        </div>
-        {!result && !loading && (
-          <Button size="sm" onClick={generate} className="h-7 text-[10px] px-2.5 bg-primary text-primary-foreground cursor-pointer">
-            Generate Previews
+    <Card variant="secondary" className="border border-accent/20 bg-accent/5">
+      <Card.Header className="flex-row flex-wrap items-center justify-between gap-3 pb-1">
+        <Card.Title className="flex items-center gap-2 text-xs uppercase tracking-wider text-accent">
+          <Sparkles className="size-4 shrink-0 animate-pulse" aria-hidden />
+          Pulse notification previews
+        </Card.Title>
+        {!result && !loading ? (
+          <Button size="sm" onPress={() => void generate()}>
+            Generate previews
           </Button>
-        )}
-      </div>
+        ) : null}
+      </Card.Header>
 
-      {loading && (
-        <div className="flex flex-col items-center justify-center py-6 text-muted-foreground text-xs gap-2">
-          <Loader2 className="size-5 animate-spin text-primary" />
-          <span>Generating rephrased notification drafts...</span>
-        </div>
-      )}
-
-      {error && (
-        <div className="text-xs text-rose-500 font-medium py-2">
-          Failed to generate: {error}
-        </div>
-      )}
-
-      {result && (
-        <div className="space-y-4 text-xs animate-in fade-in duration-200">
-          {/* Slack Trigger */}
-          <div className="space-y-1">
-            <div className="flex justify-between items-center">
-              <span className="font-semibold text-foreground/80">Slack (Markdown)</span>
-              <button
-                onClick={() => handleCopy("slack", result.slackMessage)}
-                className="text-[10px] text-primary font-medium hover:underline flex items-center gap-1 cursor-pointer font-sans"
-              >
-                {copiedKey === "slack" ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
-                {copiedKey === "slack" ? "Copied!" : "Copy"}
-              </button>
-            </div>
-            <div className="rounded border bg-muted/40 p-2.5 font-mono text-[10px] text-muted-foreground whitespace-pre-wrap leading-relaxed">
-              {result.slackMessage}
-            </div>
+      <Card.Content className="gap-5">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center gap-2 py-6">
+            <Loader2 className="size-5 animate-spin text-accent" aria-hidden />
+            <Description>Generating rephrased notification drafts...</Description>
           </div>
+        ) : null}
 
-          {/* Email Trigger */}
-          <div className="space-y-1">
-            <div className="flex justify-between items-center">
-              <span className="font-semibold text-foreground/80 font-sans">Email Draft</span>
-              <button
-                onClick={() => handleCopy("email", `Subject: ${result.emailSubject}\n\n${result.emailBody}`)}
-                className="text-[10px] text-primary font-medium hover:underline flex items-center gap-1 cursor-pointer font-sans"
-              >
-                {copiedKey === "email" ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
-                {copiedKey === "email" ? "Copied!" : "Copy"}
-              </button>
-            </div>
-            <div className="rounded border bg-muted/40 p-2.5 space-y-1.5 leading-relaxed text-muted-foreground">
-              <div className="font-semibold text-foreground">Subject: {result.emailSubject}</div>
-              <div className="font-mono text-[10px] whitespace-pre-wrap">{result.emailBody}</div>
-            </div>
-          </div>
+        {error ? (
+          <Alert status="danger">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Description>Failed to generate: {error}</Alert.Description>
+            </Alert.Content>
+          </Alert>
+        ) : null}
 
-          {/* MS Teams trigger */}
-          <div className="space-y-1">
-            <div className="flex justify-between items-center">
-              <span className="font-semibold text-foreground/80">MS Teams Card Summary</span>
-              <button
-                onClick={() => handleCopy("teams", result.teamsCardText)}
-                className="text-[10px] text-primary font-medium hover:underline flex items-center gap-1 cursor-pointer font-sans"
-              >
-                {copiedKey === "teams" ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />}
-                {copiedKey === "teams" ? "Copied!" : "Copy"}
-              </button>
-            </div>
-            <div className="rounded border bg-muted/40 p-2.5 font-mono text-[10px] text-muted-foreground whitespace-pre-wrap leading-relaxed">
-              {result.teamsCardText}
-            </div>
+        {result ? (
+          <div className="space-y-4 text-xs">
+            <AlertPreviewBlock
+              title="Slack (Markdown)"
+              copied={copiedKey === "slack"}
+              onCopy={() => handleCopy("slack", result.slackMessage)}
+            >
+              <pre className="whitespace-pre-wrap font-mono text-[10px] leading-relaxed">{result.slackMessage}</pre>
+            </AlertPreviewBlock>
+
+            <AlertPreviewBlock
+              title="Email draft"
+              copied={copiedKey === "email"}
+              onCopy={() => handleCopy("email", `Subject: ${result.emailSubject}\n\n${result.emailBody}`)}
+            >
+              <p className="font-semibold text-foreground">Subject: {result.emailSubject}</p>
+              <pre className="mt-1.5 whitespace-pre-wrap font-mono text-[10px] leading-relaxed">{result.emailBody}</pre>
+            </AlertPreviewBlock>
+
+            <AlertPreviewBlock
+              title="MS Teams card summary"
+              copied={copiedKey === "teams"}
+              onCopy={() => handleCopy("teams", result.teamsCardText)}
+            >
+              <pre className="whitespace-pre-wrap font-mono text-[10px] leading-relaxed">{result.teamsCardText}</pre>
+            </AlertPreviewBlock>
           </div>
-        </div>
-      )}
+        ) : null}
+      </Card.Content>
     </Card>
+  )
+}
+
+function AlertPreviewBlock({
+  title,
+  copied,
+  onCopy,
+  children,
+}: {
+  title: string
+  copied: boolean
+  onCopy: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-foreground">{title}</p>
+        <Button size="sm" variant="tertiary" className="gap-1.5" onPress={onCopy}>
+          {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <div className="rounded-2xl oklch(0.5441 0.1703 253.55) bg-default px-4 py-3.5 text-sm leading-6 text-muted">
+        {children}
+      </div>
+    </div>
   )
 }

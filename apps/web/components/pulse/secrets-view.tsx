@@ -1,33 +1,25 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { KeyRound, Pencil, Plus, RotateCw, ShieldCheck, TestTube2, Trash2 } from "lucide-react"
+import { KeyRound, MoreHorizontal, Pencil, Plus, RotateCw, ShieldCheck, TestTube2, Trash2 } from "lucide-react"
 import type { SecretReference } from "@/lib/pulse-types"
-import { Button } from "@workspace/ui/components/button"
-import { Input } from "@workspace/ui/components/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@workspace/ui/components/card"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@workspace/ui/components/empty"
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@workspace/ui/components/sheet"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@workspace/ui/components/table"
+import {
+  Alert,
+  AlertDialog,
+  Button,
+  Card,
+  Checkbox,
+  Drawer,
+  Dropdown,
+  EmptyState,
+  Input,
+  Label,
+  Table,
+  TextArea,
+  TextField,
+} from "@heroui/react"
 import { cn } from "@workspace/ui/lib/utils"
 import { PageShell } from "./console-shared"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@workspace/ui/components/alert-dialog"
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@workspace/ui/components/dropdown-menu"
-
 
 export interface SecretInput {
   name: string
@@ -65,7 +57,6 @@ export function SecretForm({
   mode,
   value,
   onChange,
-  onCancel,
   onSubmit,
   saving,
   error,
@@ -73,7 +64,6 @@ export function SecretForm({
   mode: "create" | "edit"
   value: SecretInput
   onChange: (value: SecretInput) => void
-  onCancel: () => void
   onSubmit: () => void
   saving: boolean
   error: string
@@ -82,57 +72,89 @@ export function SecretForm({
 
   return (
     <>
-      <SheetHeader className="border-b">
-        <SheetTitle>{mode === "create" ? "New encrypted secret" : "Edit encrypted secret"}</SheetTitle>
-        <SheetDescription>
-          Values are encrypted before storage and never returned by the API. Leave value blank while editing to keep the current ciphertext.
-        </SheetDescription>
-      </SheetHeader>
-      <div className="flex-1 space-y-4 overflow-auto px-4">
-        <label className="block space-y-1.5">
-          <span className="text-xs font-semibold uppercase text-muted-foreground">Name</span>
-          <Input value={value.name} onChange={(event) => update({ name: event.target.value })} placeholder="Partner API token" />
-        </label>
-        <label className="block space-y-1.5">
-          <span className="text-xs font-semibold uppercase text-muted-foreground">Alias</span>
-          <Input value={value.alias} onChange={(event) => update({ alias: event.target.value })} placeholder="partnerApiToken" />
-        </label>
-        <label className="block space-y-1.5">
-          <span className="text-xs font-semibold uppercase text-muted-foreground">Description</span>
-          <textarea
-            className="min-h-20 w-full rounded-md border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            value={value.description}
-            onChange={(event) => update({ description: event.target.value })}
-            placeholder="Used by synthetic monitor pre-request scripts"
-          />
-        </label>
-        <label className="block space-y-1.5">
-          <span className="text-xs font-semibold uppercase text-muted-foreground">Secret value</span>
-          <Input
-            type="password"
-            value={value.value}
-            onChange={(event) => update({ value: event.target.value })}
-            placeholder={mode === "edit" ? "Leave blank to keep existing value" : "Paste secret value"}
-          />
-        </label>
-        <label className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm">
-          <input
-            type="checkbox"
-            checked={value.isActive}
-            onChange={(event) => update({ isActive: event.target.checked })}
-            className="size-4 accent-primary"
-          />
-          Active and available to monitor execution
-        </label>
-        {error ? <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      </div>
-      <SheetFooter className="border-t">
-        <Button onClick={onSubmit} disabled={saving}>
+      <Drawer.CloseTrigger />
+      <Drawer.Header>
+        <Drawer.Heading>{mode === "create" ? "New encrypted secret" : "Edit encrypted secret"}</Drawer.Heading>
+      </Drawer.Header>
+      <Drawer.Body>
+        <form
+          id="secret-form"
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onSubmit()
+          }}
+        >
+          <p className="text-sm text-muted">
+            Values are encrypted before storage and never returned by the API. Leave value blank while editing to keep
+            the current ciphertext.
+          </p>
+          <TextField className="w-full" name="name" type="text">
+            <Label>Name</Label>
+            <Input
+              placeholder="Partner API token"
+              variant="secondary"
+              value={value.name}
+              onChange={(event) => update({ name: event.target.value })}
+            />
+          </TextField>
+          <TextField className="w-full" name="alias" type="text">
+            <Label>Alias</Label>
+            <Input
+              placeholder="partnerApiToken"
+              variant="secondary"
+              value={value.alias}
+              onChange={(event) => update({ alias: event.target.value })}
+            />
+          </TextField>
+          <TextField className="w-full" name="description">
+            <Label>Description</Label>
+            <TextArea
+              placeholder="Used by synthetic monitor pre-request scripts"
+              variant="secondary"
+              fullWidth
+              className="min-h-20"
+              value={value.description}
+              onChange={(event) => update({ description: event.target.value })}
+            />
+          </TextField>
+          <TextField className="w-full" name="value" type="password">
+            <Label>Secret value</Label>
+            <Input
+              type="password"
+              placeholder={mode === "edit" ? "Leave blank to keep existing value" : "Paste secret value"}
+              variant="secondary"
+              value={value.value}
+              onChange={(event) => update({ value: event.target.value })}
+            />
+          </TextField>
+          <div className="flex items-start gap-3 rounded-md border border-border px-3 py-2 text-sm">
+            <Checkbox isSelected={value.isActive} onChange={(checked) => update({ isActive: !!checked })}>
+              <Checkbox.Control>
+                <Checkbox.Indicator />
+              </Checkbox.Control>
+            </Checkbox>
+            <span className="text-foreground">Active and available to monitor execution</span>
+          </div>
+          {error ? (
+            <Alert status="danger">
+              <Alert.Indicator />
+              <Alert.Content>
+                <Alert.Description>{error}</Alert.Description>
+              </Alert.Content>
+            </Alert>
+          ) : null}
+        </form>
+      </Drawer.Body>
+      <Drawer.Footer>
+        <Button variant="secondary" slot="close" isDisabled={saving}>
+          Cancel
+        </Button>
+        <Button onPress={onSubmit} isDisabled={saving} className="gap-2">
           {saving ? <RotateCw className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
           {mode === "create" ? "Create secret" : "Save secret"}
         </Button>
-        <Button variant="outline" onClick={onCancel} disabled={saving}>Cancel</Button>
-      </SheetFooter>
+      </Drawer.Footer>
     </>
   )
 }
@@ -224,207 +246,229 @@ export function Secrets({
   }
 
   return (
-    <PageShell eyebrow="Encrypted storage" title="Secret references" action={<Button size="sm" onClick={openCreate}><Plus className="size-4" /> New secret</Button>}>
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="sm:max-w-md">
-          <SecretForm
-            mode={editing ? "edit" : "create"}
-            value={form}
-            onChange={setForm}
-            onCancel={() => setOpen(false)}
-            onSubmit={save}
-            saving={saving}
-            error={error}
-          />
-        </SheetContent>
-      </Sheet>
-      {message ? <p className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300">{message}</p> : null}
-      {error && !open ? <p className="mb-4 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
-      
+    <PageShell
+      eyebrow="Encrypted storage"
+      title="Secret references"
+      action={
+        <Button size="sm" onPress={openCreate} className="gap-2">
+          <Plus className="size-4" />
+          New secret
+        </Button>
+      }
+    >
+      <Drawer isOpen={open} onOpenChange={setOpen}>
+        <Drawer.Backdrop>
+          <Drawer.Content placement="right">
+            <Drawer.Dialog>
+              <SecretForm
+                mode={editing ? "edit" : "create"}
+                value={form}
+                onChange={setForm}
+                onSubmit={save}
+                saving={saving}
+                error={error}
+              />
+            </Drawer.Dialog>
+          </Drawer.Content>
+        </Drawer.Backdrop>
+      </Drawer>
+
+      {message ? (
+        <Alert status="success" className="mb-4">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Description>{message}</Alert.Description>
+          </Alert.Content>
+        </Alert>
+      ) : null}
+      {error && !open ? (
+        <Alert status="danger" className="mb-4">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Description>{error}</Alert.Description>
+          </Alert.Content>
+        </Alert>
+      ) : null}
+
       <Card className="w-full">
-        <CardHeader className="flex flex-row items-center justify-between pb-4">
+        <Card.Header className="flex flex-row items-center justify-between pb-4">
           <div>
-            <CardTitle className="text-base font-semibold">Secrets Inventory</CardTitle>
-            <CardDescription>
+            <Card.Title className="text-base font-semibold">Secrets Inventory</Card.Title>
+            <Card.Description>
               Reference encrypted variables and secure tokens in your monitoring requests.
-            </CardDescription>
+            </Card.Description>
           </div>
-          <div className="w-[300px]">
+          <TextField className="w-[300px]">
             <Input
               placeholder="Search secrets..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="h-9"
+              fullWidth
             />
-          </div>
-        </CardHeader>
-        <CardContent>
+          </TextField>
+        </Card.Header>
+        <Card.Content>
           <div className="overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="px-4 font-semibold">Name</TableHead>
-                  <TableHead className="px-4 font-semibold">Alias</TableHead>
-                  <TableHead className="px-4 font-semibold">Provider</TableHead>
-                  <TableHead className="px-4 font-semibold">Status</TableHead>
-                  <TableHead className="px-4 font-semibold">Value</TableHead>
-                  <TableHead className="px-4 font-semibold">Description</TableHead>
-                  <TableHead className="px-4 font-semibold text-right pr-6">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredSecrets.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-48 text-center align-middle">
-                      <Empty className="border-0 bg-transparent py-6">
-                        <EmptyHeader>
-                          <EmptyMedia variant="icon">
-                            <KeyRound className="size-5 text-muted-foreground" />
-                          </EmptyMedia>
-                          <EmptyTitle>No secrets found</EmptyTitle>
-                          <EmptyDescription>
-                            Create a secret to store API tokens or auth credentials securely.
-                          </EmptyDescription>
-                        </EmptyHeader>
-                      </Empty>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredSecrets.map((secret) => (
-                    <TableRow key={secret.id} className="hover:bg-muted/50 transition-colors">
-                      <TableCell className="px-4 font-semibold text-foreground align-middle">
-                        <div className="flex items-center gap-2">
-                          <KeyRound className="size-4 text-muted-foreground shrink-0" />
-                          <span>{secret.name}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="px-4 font-mono text-xs align-middle">
-                        <code className="bg-muted px-1.5 py-0.5 rounded border text-[11px] font-semibold">
-                          {`{{secrets.${secret.alias}}}`}
-                        </code>
-                      </TableCell>
-                      <TableCell className="px-4 text-muted-foreground text-xs align-middle">
-                        {secret.provider === "encrypted-db" ? "Encrypted DB" : "Vault"}
-                      </TableCell>
-                      <TableCell className="px-4 align-middle">
-                        <span className={cn(
-                          "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border",
-                          secretIsActive(secret)
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200/50 dark:bg-emerald-950/20 dark:text-emerald-400"
-                            : "bg-muted text-muted-foreground border-border"
-                        )}>
-                          <span className={cn("size-1.5 rounded-full", secretIsActive(secret) ? "bg-emerald-500" : "bg-muted-foreground")} />
-                          {secretIsActive(secret) ? "active" : "inactive"}
-                        </span>
-                      </TableCell>
-                      <TableCell className="px-4 font-mono text-xs text-muted-foreground tracking-widest align-middle">
-                        ••••••••
-                      </TableCell>
-                      <TableCell className="px-4 text-muted-foreground text-xs truncate max-w-[200px] align-middle" title={secret.description}>
-                        {secret.description || "—"}
-                      </TableCell>
-                      <TableCell className="px-4 text-right pr-6 align-middle">
-                        <div className="flex items-center justify-end">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger render={
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0 cursor-pointer"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <span className="sr-only">Open menu</span>
-                                <span className="font-bold text-sm tracking-widest leading-none">...</span>
+            <Table aria-label="Secrets">
+              <Table.ScrollContainer>
+                <Table.Content className="min-w-[860px]">
+                  <Table.Header>
+                    <Table.Column isRowHeader className="px-4 font-semibold">
+                      Name
+                    </Table.Column>
+                    <Table.Column className="px-4 font-semibold">Alias</Table.Column>
+                    <Table.Column className="px-4 font-semibold">Provider</Table.Column>
+                    <Table.Column className="px-4 font-semibold">Status</Table.Column>
+                    <Table.Column className="px-4 font-semibold">Value</Table.Column>
+                    <Table.Column className="px-4 font-semibold">Description</Table.Column>
+                    <Table.Column className="px-4 pr-6 text-end font-semibold">Actions</Table.Column>
+                  </Table.Header>
+                  <Table.Body
+                    renderEmptyState={() => (
+                      <EmptyState className="flex h-48 w-full flex-col items-center justify-center gap-2 border-0 bg-transparent">
+                        <KeyRound className="size-6 text-muted" />
+                        <p className="font-semibold text-foreground">No secrets found</p>
+                        <p className="text-sm text-muted">
+                          Create a secret to store API tokens or auth credentials securely.
+                        </p>
+                      </EmptyState>
+                    )}
+                  >
+                    {filteredSecrets.map((secret) => (
+                      <Table.Row key={secret.id} id={secret.id} className="hover:bg-default/40">
+                        <Table.Cell className="px-4 align-middle font-semibold text-foreground">
+                          <div className="flex items-center gap-2">
+                            <KeyRound className="size-4 shrink-0 text-muted" />
+                            <span>{secret.name}</span>
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-middle font-mono text-xs">
+                          <code className="rounded border bg-default px-1.5 py-0.5 text-[11px] font-semibold">
+                            {`{{secrets.${secret.alias}}}`}
+                          </code>
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-middle text-xs text-muted">
+                          {secret.provider === "encrypted-db" ? "Encrypted DB" : "Vault"}
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-middle">
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold",
+                              secretIsActive(secret)
+                                ? "border-emerald-200/50 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400"
+                                : "border-border bg-default text-muted"
+                            )}
+                          >
+                            <span
+                              className={cn("size-1.5 rounded-full", secretIsActive(secret) ? "bg-emerald-500" : "bg-muted")}
+                            />
+                            {secretIsActive(secret) ? "active" : "inactive"}
+                          </span>
+                        </Table.Cell>
+                        <Table.Cell className="px-4 align-middle font-mono text-xs tracking-widest text-muted">
+                          ••••••••
+                        </Table.Cell>
+                        <Table.Cell className="max-w-[200px] truncate px-4 align-middle text-xs text-muted">
+                          <span title={secret.description}>{secret.description || "—"}</span>
+                        </Table.Cell>
+                        <Table.Cell className="px-4 pr-6 text-end align-middle">
+                          <div className="flex items-center justify-end">
+                            <Dropdown>
+                              <Button variant="ghost" size="sm" isIconOnly aria-label="Open menu">
+                                <MoreHorizontal className="size-4" />
                               </Button>
-                            } />
-                            <DropdownMenuContent align="end" className="w-36">
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  openEdit(secret)
-                                }}
-                                className="cursor-pointer gap-2"
-                              >
-                                <Pencil className="size-3.5 text-muted-foreground" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  test(secret)
-                                }}
-                                disabled={testingId === secret.id}
-                                className="cursor-pointer gap-2"
-                              >
-                                {testingId === secret.id ? (
-                                  <RotateCw className="size-3.5 animate-spin text-muted-foreground" />
-                                ) : (
-                                  <TestTube2 className="size-3.5 text-muted-foreground" />
-                                )}
-                                Test
-                              </DropdownMenuItem>
-                              {onDelete && (
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setConfirmDelete(secret)
+                              <Dropdown.Popover>
+                                <Dropdown.Menu
+                                  onAction={(key) => {
+                                    if (key === "edit") openEdit(secret)
+                                    if (key === "test") test(secret)
+                                    if (key === "delete") setConfirmDelete(secret)
                                   }}
-                                  className="text-rose-600 dark:text-rose-400 font-semibold border-t border-border/40 mt-1 cursor-pointer focus:bg-rose-50 dark:focus:bg-rose-950/20 gap-2"
                                 >
-                                  <Trash2 className="size-3.5" />
-                                  Delete
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
+                                  <Dropdown.Item id="edit" textValue="Edit" className="gap-2">
+                                    <Pencil className="size-3.5 text-muted" />
+                                    Edit
+                                  </Dropdown.Item>
+                                  <Dropdown.Item
+                                    id="test"
+                                    textValue="Test"
+                                    isDisabled={testingId === secret.id}
+                                    className="gap-2"
+                                  >
+                                    {testingId === secret.id ? (
+                                      <RotateCw className="size-3.5 animate-spin text-muted" />
+                                    ) : (
+                                      <TestTube2 className="size-3.5 text-muted" />
+                                    )}
+                                    Test
+                                  </Dropdown.Item>
+                                  {onDelete ? (
+                                    <Dropdown.Item id="delete" textValue="Delete" className="gap-2 text-danger">
+                                      <Trash2 className="size-3.5" />
+                                      Delete
+                                    </Dropdown.Item>
+                                  ) : null}
+                                </Dropdown.Menu>
+                              </Dropdown.Popover>
+                            </Dropdown>
+                          </div>
+                        </Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table.Content>
+              </Table.ScrollContainer>
             </Table>
           </div>
-        </CardContent>
+        </Card.Content>
       </Card>
 
-      <AlertDialog
-        open={confirmDelete !== null}
-        onOpenChange={(open) => {
-          if (!open) setConfirmDelete(null)
+      <AlertDialog.Backdrop
+        isOpen={confirmDelete !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setConfirmDelete(null)
         }}
       >
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Secret?</AlertDialogTitle>
-            <AlertDialogDescription className="text-left">
+        <AlertDialog.Container size="sm">
+          <AlertDialog.Dialog>
+            <AlertDialog.Header>
+              <AlertDialog.Icon status="danger" />
+              <AlertDialog.Heading>Delete secret?</AlertDialog.Heading>
+            </AlertDialog.Header>
+            <AlertDialog.Body className="text-left text-sm text-muted">
               Are you sure you want to permanently delete the secret{" "}
-              <strong className="text-foreground">"{confirmDelete?.name}"</strong>? Any active monitors referencing this secret via the alias{" "}
-              <code className="font-mono text-[11px] font-semibold text-rose-500 bg-rose-500/5 px-1 py-0.5 rounded border border-rose-500/10">{`{{secrets.${confirmDelete?.alias}}}`}</code> will fail to resolve.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              className="cursor-pointer"
-              onClick={async () => {
-                if (confirmDelete && onDelete) {
-                  try {
-                    await onDelete(confirmDelete.id)
-                    setMessage(`Secret "${confirmDelete.name}" deleted.`)
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Failed to delete secret.")
+              <strong className="text-foreground">{confirmDelete?.name}</strong>? Any active monitors referencing this
+              secret via the alias{" "}
+              <code className="rounded border border-danger/10 bg-danger/5 px-1 py-0.5 font-mono text-[11px] font-semibold text-danger">
+                {`{{secrets.${confirmDelete?.alias}}}`}
+              </code>{" "}
+              will fail to resolve.
+            </AlertDialog.Body>
+            <AlertDialog.Footer>
+              <Button variant="secondary" slot="close">
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onPress={async () => {
+                  if (confirmDelete && onDelete) {
+                    try {
+                      await onDelete(confirmDelete.id)
+                      setMessage(`Secret "${confirmDelete.name}" deleted.`)
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Failed to delete secret.")
+                    }
                   }
-                }
-                setConfirmDelete(null)
-              }}
-            >
-              Delete Secret
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+                  setConfirmDelete(null)
+                }}
+              >
+                Delete secret
+              </Button>
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
     </PageShell>
   )
 }

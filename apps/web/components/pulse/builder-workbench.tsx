@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type ComponentType } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType } from "react"
 import {
   ArrowDown,
   ArrowUp,
@@ -48,33 +48,24 @@ import { buildTemplateSuggestions, type TemplateSuggestion } from "./template-in
 import Editor from "@monaco-editor/react"
 import { useTheme } from "next-themes"
 import type { Application, CertificateProfile, Monitor, MonitorRun, MonitorStatus, MonitorStep, PulseAssertion, PulseExtractor, PreRequestAction } from "@/lib/pulse-types"
-import { Button } from "@workspace/ui/components/button"
-import { Card } from "@workspace/ui/components/card"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@workspace/ui/components/dialog"
-import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Chip,
+  Description,
+  EmptyState,
+  Input,
+  Label,
+  ListBox,
+  Modal,
   AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@workspace/ui/components/alert-dialog"
-import {
   Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@workspace/ui/components/select"
+  Tabs,
+  TextArea,
+  TextField,
+} from "@heroui/react"
 import { cn } from "@workspace/ui/lib/utils"
 
 interface BuilderWorkbenchProps {
@@ -86,10 +77,94 @@ interface BuilderWorkbenchProps {
 type ExecutionState = "idle" | "running" | "complete"
 type SaveState = "idle" | "saving" | "saved" | "error"
 
-const inputClass =
-  "border-input bg-background ring-offset-background focus-visible:ring-ring min-h-9 w-full rounded-md border px-3 py-2 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-offset-2"
+function BuilderInput({ className, ...props }: ComponentProps<typeof Input>) {
+  return <Input variant="secondary" fullWidth className={cn("min-h-9", className)} {...props} />
+}
 
-const labelClass = "text-muted-foreground mb-1.5 block text-xs font-medium"
+function BuilderTextArea({ className, ...props }: ComponentProps<typeof TextArea>) {
+  return <TextArea variant="secondary" fullWidth className={cn(className)} {...props} />
+}
+
+const builderControlClass = "h-9 text-xs"
+
+function BuilderField({
+  label,
+  className,
+  children,
+}: {
+  label: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <TextField className={cn("flex w-full min-w-0 flex-col gap-1.5", className)}>
+      <Label className="text-xs font-medium text-muted">{label}</Label>
+      {children}
+    </TextField>
+  )
+}
+
+function BuilderSelect({
+  label,
+  ariaLabel,
+  selectedKey,
+  onSelectionChange,
+  className,
+  children,
+}: {
+  label?: string
+  ariaLabel: string
+  selectedKey: string
+  onSelectionChange: (key: string) => void
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <Select
+      aria-label={ariaLabel}
+      className={cn("flex w-full min-w-0 flex-col gap-1.5", className)}
+      variant="secondary"
+      selectedKey={selectedKey}
+      onSelectionChange={(key) => {
+        if (key != null) onSelectionChange(String(key))
+      }}
+    >
+      {label ? <Label className="text-xs font-medium text-muted">{label}</Label> : null}
+      <Select.Trigger className={cn("w-full", builderControlClass)}>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>{children}</Select.Popover>
+    </Select>
+  )
+}
+
+function BuilderCheckboxField({
+  label,
+  ariaLabel,
+  isSelected,
+  onChange,
+  className,
+}: {
+  label: string
+  ariaLabel: string
+  isSelected: boolean
+  onChange: (checked: boolean) => void
+  className?: string
+}) {
+  return (
+    <div className={cn("flex w-full min-w-0 flex-col gap-1.5", className)}>
+      <Label className="text-xs font-medium text-muted">{label}</Label>
+      <div className={cn("flex items-center", builderControlClass)}>
+        <Checkbox isSelected={isSelected} onChange={onChange} aria-label={ariaLabel}>
+          <Checkbox.Control>
+            <Checkbox.Indicator />
+          </Checkbox.Control>
+        </Checkbox>
+      </div>
+    </div>
+  )
+}
 
 function configFromMonitor(monitor: Monitor) {
   return {
@@ -284,13 +359,15 @@ function Section({
   icon: typeof SlidersHorizontal
 }) {
   return (
-    <section className="border-border bg-card rounded-md border p-4">
-      <h2 className="font-heading mb-4 flex items-center gap-2 text-base font-semibold">
-        <Icon className="size-4" />
-        {title}
-      </h2>
-      {children}
-    </section>
+    <Card>
+      <Card.Header className="gap-1.5 pb-4">
+        <Card.Title className="flex items-center gap-2 text-base font-semibold">
+          <Icon className="size-4 text-accent" />
+          {title}
+        </Card.Title>
+      </Card.Header>
+      <Card.Content className="gap-4">{children}</Card.Content>
+    </Card>
   )
 }
 
@@ -314,24 +391,33 @@ function StatusPill({ status }: { status: MonitorStatus }) {
 function JsonStatus({ errors, parseError }: { errors: string[]; parseError: string | null }) {
   if (parseError) {
     return (
-      <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300">
-        {parseError}
-      </div>
+      <Alert status="danger">
+        <Alert.Indicator />
+        <Alert.Content>
+          <Alert.Description>{parseError}</Alert.Description>
+        </Alert.Content>
+      </Alert>
     )
   }
 
   if (errors.length) {
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-300">
-        {errors.join(" ")}
-      </div>
+      <Alert status="warning">
+        <Alert.Indicator />
+        <Alert.Content>
+          <Alert.Description>{errors.join(" ")}</Alert.Description>
+        </Alert.Content>
+      </Alert>
     )
   }
 
   return (
-    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300">
-      Config is valid for local execution.
-    </div>
+    <Alert status="success">
+      <Alert.Indicator />
+      <Alert.Content>
+        <Alert.Description>Config is valid for local execution.</Alert.Description>
+      </Alert.Content>
+    </Alert>
   )
 }
 
@@ -357,6 +443,8 @@ const methodColors: Record<string, string> = {
   HEAD: "text-zinc-600 dark:text-zinc-400 bg-zinc-500/10 border-zinc-500/20",
   OPTIONS: "text-cyan-600 dark:text-cyan-400 bg-cyan-500/10 border-cyan-500/20",
 }
+
+const methodChipFallback = "bg-muted/10 text-muted-foreground border-border/40"
 
 function defaultHttpConfig(): NonNullable<MonitorStep["config"]> {
   return {
@@ -428,10 +516,12 @@ function TemplateInput({
 
   return (
     <div className={cn("relative min-w-0 flex-1", containerClassName)}>
-      <input
+      <Input
         ref={inputRef}
+        variant="secondary"
+        fullWidth
         placeholder={placeholder}
-        className={className}
+        className={cn("min-h-9 font-mono text-xs", className)}
         value={value}
         onChange={(event) => {
           onChange(event.target.value)
@@ -442,29 +532,62 @@ function TemplateInput({
         onBlur={() => window.setTimeout(() => setActiveRange(null), 120)}
       />
       {visibleSuggestions.length > 0 ? (
-        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-40 max-h-64 overflow-auto rounded-md border border-border bg-popover p-1 shadow-lg">
-          {visibleSuggestions.map((suggestion) => (
-            <button
-              key={`${suggestion.kind}-${suggestion.key}`}
-              type="button"
-              onMouseDown={(event) => {
-                event.preventDefault()
-                insertSuggestion(suggestion)
+        <Card className="absolute left-0 right-0 top-[calc(100%+4px)] z-40 max-h-64 overflow-auto shadow-lg">
+          <Card.Content className="gap-0.5 p-1">
+            <ListBox
+              aria-label="Template suggestions"
+              onAction={(key) => {
+                const suggestion = visibleSuggestions.find((item) => `${item.kind}-${item.key}` === key)
+                if (suggestion) insertSuggestion(suggestion)
               }}
-              className="flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
             >
-              <span className="min-w-0">
-                <span className="block truncate font-mono font-semibold text-foreground">{suggestion.token}</span>
-                <span className="block truncate text-[10px] text-muted-foreground">{suggestion.detail}</span>
-              </span>
-              <span className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[9px] font-bold uppercase text-muted-foreground">
-                {suggestion.kind}
-              </span>
-            </button>
-          ))}
-        </div>
+              {visibleSuggestions.map((suggestion) => (
+                <ListBox.Item
+                  key={`${suggestion.kind}-${suggestion.key}`}
+                  id={`${suggestion.kind}-${suggestion.key}`}
+                  textValue={suggestion.token}
+                  className="rounded-md px-2 py-1.5 text-xs"
+                >
+                  <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                    <span className="min-w-0">
+                      <span className="block truncate font-mono font-semibold text-foreground">{suggestion.token}</span>
+                      <span className="block truncate text-[10px] text-muted-foreground">{suggestion.detail}</span>
+                    </span>
+                    <Chip size="sm" variant="soft" className="shrink-0 text-[9px] uppercase">
+                      <Chip.Label>{suggestion.kind}</Chip.Label>
+                    </Chip>
+                  </div>
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              ))}
+            </ListBox>
+          </Card.Content>
+        </Card>
       ) : null}
     </div>
+  )
+}
+
+function BuilderTemplateField({
+  label,
+  className,
+  containerClassName,
+  inputClassName,
+  ...templateProps
+}: {
+  label: string
+  className?: string
+  containerClassName?: string
+  inputClassName?: string
+} & Omit<ComponentProps<typeof TemplateInput>, "className" | "containerClassName">) {
+  return (
+    <BuilderField label={label} className={className}>
+      <TemplateInput
+        containerClassName={containerClassName}
+        className={cn("font-mono text-xs", inputClassName)}
+        {...templateProps}
+      />
+    </BuilderField>
   )
 }
 
@@ -703,10 +826,8 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
 
   useEffect(() => {
     const nextHeaders = Object.entries(step.config?.headers || {}).map(([key, value]) => ({ key, value: String(value) }))
-    if (JSON.stringify(nextHeaders) !== JSON.stringify(localHeaders)) {
-      setLocalHeaders(nextHeaders)
-    }
-  }, [step.config?.headers])
+    setLocalHeaders(nextHeaders)
+  }, [step.id])
 
   const updateLocalHeader = (idx: number, field: "key" | "value", val: string) => {
     const next = [...localHeaders]
@@ -756,10 +877,8 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
 
   useEffect(() => {
     const nextParams = queryParamsFromUrl(step.url)
-    if (JSON.stringify(nextParams) !== JSON.stringify(localParams)) {
-      setLocalParams(nextParams)
-    }
-  }, [step.url])
+    setLocalParams(nextParams)
+  }, [step.id])
 
   const updateLocalParam = (idx: number, field: "key" | "value", val: string) => {
     const next = [...localParams]
@@ -948,149 +1067,138 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
       {/* Header Info */}
       <div className="flex items-center justify-between border-b border-border/40 pb-2.5 flex-wrap">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Step Editor</span>
+          <span className="text-xs font-semibold text-muted-foreground">Step Editor</span>
           <span className="text-muted-foreground text-xs">·</span>
           <span className="font-mono text-xs font-semibold text-primary">{step.name}</span>
         </div>
-        <span className="text-[10px] font-mono font-semibold uppercase px-2 py-0.5 rounded bg-muted text-muted-foreground border border-border/30">
-          {step.type === "http"
-            ? "HTTP Request"
-            : step.type === "preRequest"
-              ? "Pre-request Action"
-              : step.type === "dns"
-                ? "DNS resolve"
-                : step.type === "tcp"
-                  ? "TCP connect"
-                  : step.type === "tls"
-                    ? "TLS certificate"
-                    : step.type === "delay"
-                      ? "Delay"
-                      : step.type}
-        </span>
+        <Chip size="sm" variant="soft" className="font-mono text-[10px]">
+          <Chip.Label>
+            {step.type === "http"
+              ? "HTTP Request"
+              : step.type === "preRequest"
+                ? "Pre-request Action"
+                : step.type === "dns"
+                  ? "DNS resolve"
+                  : step.type === "tcp"
+                    ? "TCP connect"
+                    : step.type === "tls"
+                      ? "TLS certificate"
+                      : step.type === "delay"
+                        ? "Delay"
+                        : step.type}
+          </Chip.Label>
+        </Chip>
       </div>
 
       {/* Step Settings (Name, Timeout, Retry) */}
       {step.type !== "http" && (
-        <div className="grid gap-3 grid-cols-1 md:grid-cols-3 bg-muted/15 border border-border/20 p-3 rounded-lg items-end">
-          <div>
-            <span className={labelClass}>Step Name</span>
-            <input className={inputClass} value={step.name} onChange={(event) => onUpdate({ name: event.target.value })} />
-          </div>
-          <div>
-            <span className={labelClass}>Timeout (ms)</span>
-            <input
-              type="number"
-              className={inputClass}
-              min={100}
-              value={step.timeoutMs}
-              onChange={(event) => onUpdate({ timeoutMs: Number(event.target.value) })}
-            />
-          </div>
-          <div>
-            <span className={labelClass}>Retry Count</span>
-            <input
-              type="number"
-              className={inputClass}
-              min={0}
-              value={step.retryCount}
-              onChange={(event) => onUpdate({ retryCount: Number(event.target.value) })}
-            />
-          </div>
-        </div>
+        <Card variant="secondary" className="p-3">
+          <Card.Content className="grid grid-cols-1 items-end gap-3 p-0 md:grid-cols-3">
+            <BuilderField label="Step name">
+              <BuilderInput value={step.name} onChange={(event) => onUpdate({ name: event.target.value })} />
+            </BuilderField>
+            <BuilderField label="Timeout (ms)">
+              <BuilderInput
+                type="number"
+                min={100}
+                value={String(step.timeoutMs)}
+                onChange={(event) => onUpdate({ timeoutMs: Number(event.target.value) })}
+              />
+            </BuilderField>
+            <BuilderField label="Retry count">
+              <BuilderInput
+                type="number"
+                min={0}
+                value={String(step.retryCount)}
+                onChange={(event) => onUpdate({ retryCount: Number(event.target.value) })}
+              />
+            </BuilderField>
+          </Card.Content>
+        </Card>
       )}
 
       {/* HTTP Config */}
       {step.type === "http" && (
         <div className="space-y-4">
-          {/* Request Bar */}
-          <div className="space-y-1.5">
-            <span className={labelClass}>Request URL</span>
-            <div className="flex items-center rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 overflow-hidden shadow-xs">
-              <div className="w-[110px] shrink-0 border-r border-input bg-muted/30">
-                <Select value={step.method ?? "GET"} onValueChange={(val) => onUpdate({ method: val ?? undefined })}>
-                  <SelectTrigger className="w-full h-9 border-none bg-transparent rounded-none focus-visible:ring-0 focus-visible:ring-offset-0 px-3 cursor-pointer font-bold text-xs select-none">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map((method) => (
-                      <SelectItem key={method} value={method}>
-                        {method}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          <BuilderField label="Request URL">
+            <div className="flex items-stretch overflow-hidden">
+              <BuilderSelect
+                ariaLabel="Request method"
+                selectedKey={step.method ?? "GET"}
+                onSelectionChange={(method) => onUpdate({ method })}
+                className="w-[112px] shrink-0 [&_.select__trigger]:rounded-r-none"
+              >
+                <ListBox>
+                  {["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map((method) => (
+                    <ListBox.Item key={method} id={method} textValue={method}>
+                      {method}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </BuilderSelect>
               <TemplateInput
-                className="bg-transparent px-3 py-2 text-sm outline-none border-none h-9 w-full min-w-0 font-mono text-xs"
+                containerClassName="min-w-0 flex-1"
+                className="rounded-l-none"
                 value={step.url ?? ""}
                 placeholder="https://{{variables.baseUrl}}/health"
                 onChange={(value) => onUpdate({ url: value })}
                 suggestions={suggestions}
               />
             </div>
-          </div>
+          </BuilderField>
 
-          {/* Sub-Tabs Navigation */}
-          <div className="flex gap-1 border-b border-border/40 pb-0 pt-2 overflow-x-auto scrollbar-none">
-            {(
-              [
-                { key: "params", label: "Params", icon: ListFilter, count: localParams.filter((param) => param.key.trim()).length },
-                { key: "auth", label: "Authorization", icon: KeyRound, hasIndicator: (step.config?.auth?.type ?? "noAuth") !== "noAuth" },
-                { key: "headers", label: "Headers", icon: Hash, count: Object.keys(step.config?.headers || {}).length },
-                { key: "body", label: "Body", icon: Braces, hasIndicator: !!step.config?.body },
-                { key: "scripts", label: "Pre-request", icon: Terminal, hasIndicator: !!step.preRequestScript },
-                { key: "tests", label: "Tests & Extractors", icon: CheckCircle2, count: step.assertions.length + step.extractors.length },
-                { key: "settings", label: "Settings", icon: Settings },
-                { key: "cookies", label: "Cookies", icon: Cookie, count: manualCookies.filter((cookie) => cookie.name.trim()).length, hasIndicator: cookieConfig.enabled === false },
-              { key: "certificates", label: "Certificates", icon: FileKey, hasIndicator: (mtlsConfig.mode ?? "global") !== "global" || !!mtlsConfig.enabled },
-                { key: "proxy", label: "Proxy", icon: Globe, hasIndicator: !!proxyConfig.enabled },
-              ] as Array<{
-                key: "params" | "auth" | "headers" | "body" | "cookies" | "certificates" | "proxy" | "scripts" | "tests" | "settings"
-                label: string
-                icon: ComponentType<{ className?: string }>
-                count?: number
-                hasIndicator?: boolean
-              }>
-            ).flatMap((tab) => {
-              const Icon = tab.icon
-              const elements = []
-              
-              if (tab.key === "cookies") {
-                elements.push(
-                  <div key="sep-advanced" className="w-px h-5 bg-border/40 self-center mx-2 shrink-0" />
-                )
-              }
-              
-              elements.push(
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key)}
-                  className={cn(
-                    "px-3 py-2 text-xs font-semibold rounded-t-md transition-all -mb-px border-b-2 border-transparent flex items-center gap-1.5 cursor-pointer select-none whitespace-nowrap shrink-0",
-                    activeTab === tab.key
-                      ? "bg-background text-foreground border-b-primary font-bold shadow-xs"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <Icon className={cn("size-3.5", activeTab === tab.key ? "text-primary" : "text-muted-foreground/80")} />
-                  <span>{tab.label}</span>
-                  {"count" in tab && typeof tab.count === "number" && tab.count > 0 && (
-                    <span className="bg-muted px-1.5 py-0.5 rounded-[4px] text-[10px] font-mono font-medium text-muted-foreground border border-border/20">
-                      {tab.count}
-                    </span>
-                  )}
-                  {"hasIndicator" in tab && tab.hasIndicator && (
-                    <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  )}
-                </button>
-              )
-              return elements
-            })}
-          </div>
+          <Tabs
+            selectedKey={activeTab}
+            onSelectionChange={(key) => {
+              if (key != null) setActiveTab(String(key) as typeof activeTab)
+            }}
+            variant="secondary"
+            className="w-full gap-4"
+          >
+            <Tabs.ListContainer>
+              <Tabs.List aria-label="Step editor sections" className="w-full overflow-x-auto">
+                {(
+                  [
+                    { key: "params", label: "Params", icon: ListFilter, count: localParams.filter((param) => param.key.trim()).length },
+                    { key: "auth", label: "Authorization", icon: KeyRound, hasIndicator: (step.config?.auth?.type ?? "noAuth") !== "noAuth" },
+                    { key: "headers", label: "Headers", icon: Hash, count: Object.keys(step.config?.headers || {}).length },
+                    { key: "body", label: "Body", icon: Braces, hasIndicator: !!step.config?.body },
+                    { key: "scripts", label: "Pre-request", icon: Terminal, hasIndicator: !!step.preRequestScript },
+                    { key: "tests", label: "Tests & Extractors", icon: CheckCircle2, count: step.assertions.length + step.extractors.length },
+                    { key: "settings", label: "Settings", icon: Settings },
+                    { key: "cookies", label: "Cookies", icon: Cookie, count: manualCookies.filter((cookie) => cookie.name.trim()).length, hasIndicator: cookieConfig.enabled === false },
+                    { key: "certificates", label: "Certificates", icon: FileKey, hasIndicator: (mtlsConfig.mode ?? "global") !== "global" || !!mtlsConfig.enabled },
+                    { key: "proxy", label: "Proxy", icon: Globe, hasIndicator: !!proxyConfig.enabled },
+                  ] as Array<{
+                    key: "params" | "auth" | "headers" | "body" | "cookies" | "certificates" | "proxy" | "scripts" | "tests" | "settings"
+                    label: string
+                    icon: ComponentType<{ className?: string }>
+                    count?: number
+                    hasIndicator?: boolean
+                  }>
+                ).map((tab) => {
+                  const Icon = tab.icon
+                  return (
+                    <Tabs.Tab key={tab.key} id={tab.key} className="gap-1.5 whitespace-nowrap text-xs">
+                      <Icon className="size-3.5" />
+                      {tab.label}
+                      {typeof tab.count === "number" && tab.count > 0 ? (
+                        <Chip size="sm" variant="soft" className="font-mono text-[10px]">
+                          <Chip.Label>{tab.count}</Chip.Label>
+                        </Chip>
+                      ) : null}
+                      {tab.hasIndicator ? (
+                        <span className="size-1.5 rounded-full bg-warning animate-pulse" />
+                      ) : null}
+                      <Tabs.Indicator />
+                    </Tabs.Tab>
+                  )
+                })}
+              </Tabs.List>
+            </Tabs.ListContainer>
 
-          {/* Sub-Tab Contents */}
-          {activeTab === "params" && (
+          <Tabs.Panel id="params" className="pt-0">
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
                 <span>Query Params</span>
@@ -1103,7 +1211,6 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                       <div key={idx} className="flex items-center gap-2">
                         <TemplateInput
                           placeholder="Param key"
-                          className={cn(inputClass, "font-mono text-xs bg-background")}
                           value={param.key}
                           onChange={(value) => updateLocalParam(idx, "key", value)}
                           suggestions={suggestions}
@@ -1111,7 +1218,6 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                         <span className="text-muted-foreground text-xs">=</span>
                         <TemplateInput
                           placeholder="Value"
-                          className={cn(inputClass, "font-mono text-xs bg-background")}
                           containerClassName="flex-[2]"
                           value={param.value}
                           onChange={(value) => updateLocalParam(idx, "value", value)}
@@ -1119,9 +1225,9 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                         />
                         <Button
                           variant="ghost"
-                          size="icon"
+                          isIconOnly
                           type="button"
-                          onClick={() => removeLocalParam(idx)}
+                          onPress={() => removeLocalParam(idx)}
                           className="size-8 shrink-0 text-rose-500 hover:text-rose-700"
                         >
                           <Trash2 className="size-4" />
@@ -1136,10 +1242,10 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                 )}
                 <div className="mt-1 flex justify-start border-t border-border/40 pt-2">
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     type="button"
-                    onClick={addLocalParam}
+                    onPress={addLocalParam}
                     className="h-8 gap-1 text-xs"
                   >
                     <Plus className="size-3.5" /> Add Param
@@ -1147,204 +1253,217 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                 </div>
               </div>
             </div>
-          )}
+          </Tabs.Panel>
 
-          {activeTab === "auth" && (
+          <Tabs.Panel id="auth" className="pt-0">
             <div className="space-y-4">
               <div className="grid gap-3 md:grid-cols-[220px_1fr]">
-                <div>
-                  <span className={labelClass}>Auth Type</span>
-                  <Select
-                    value={authConfig.type ?? "noAuth"}
-                    onValueChange={(value) => updateAuthConfig({ type: value })}
-                  >
-                    <SelectTrigger className="h-9 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="noAuth">No Auth</SelectItem>
-                      <SelectItem value="apiKey">API Key</SelectItem>
-                      <SelectItem value="bearer">Bearer Token</SelectItem>
-                      <SelectItem value="basic">Basic Auth</SelectItem>
-                      <SelectItem value="jwtBearer">JWT Bearer</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="rounded-md border border-border/40 bg-muted/10 p-3 text-xs text-muted-foreground">
-                  Authorization is applied after custom headers, so the selected auth type controls the final auth header or query parameter.
-                </div>
+                <BuilderSelect
+                  label="Auth type"
+                  ariaLabel="Auth type"
+                  selectedKey={authConfig.type ?? "noAuth"}
+                  onSelectionChange={(type) => updateAuthConfig({ type })}
+                >
+                  <ListBox>
+                    <ListBox.Item id="noAuth" textValue="No Auth">
+                      No Auth
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="apiKey" textValue="API Key">
+                      API Key
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="bearer" textValue="Bearer Token">
+                      Bearer Token
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="basic" textValue="Basic Auth">
+                      Basic Auth
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="jwtBearer" textValue="JWT Bearer">
+                      JWT Bearer
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  </ListBox>
+                </BuilderSelect>
+                <Card variant="secondary" className="p-3">
+                  <Description className="text-xs">
+                    Authorization is applied after custom headers, so the selected auth type controls the final auth header or query parameter.
+                  </Description>
+                </Card>
               </div>
 
               {(authConfig.type ?? "noAuth") === "apiKey" && (
                 <div className="grid gap-3 md:grid-cols-[1fr_1fr_160px]">
-                  <div>
-                    <span className={labelClass}>Key</span>
-                    <TemplateInput
-                      value={authConfig.key ?? ""}
-                      onChange={(value) => updateAuthConfig({ key: value })}
-                      suggestions={suggestions}
-                      placeholder="X-API-Key"
-                      className={cn(inputClass, "font-mono text-xs")}
-                    />
-                  </div>
-                  <div>
-                    <span className={labelClass}>Value</span>
-                    <TemplateInput
-                      value={authConfig.value ?? ""}
-                      onChange={(value) => updateAuthConfig({ value })}
-                      suggestions={suggestions}
-                      placeholder="{{secrets.apiKey}}"
-                      className={cn(inputClass, "font-mono text-xs")}
-                    />
-                  </div>
-                  <div>
-                    <span className={labelClass}>Add To</span>
-                    <Select value={authConfig.addTo ?? "header"} onValueChange={(value) => updateAuthConfig({ addTo: value })}>
-                      <SelectTrigger className="h-9 text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="header">Header</SelectItem>
-                        <SelectItem value="query">Query Param</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <BuilderTemplateField
+                    label="Key"
+                    value={authConfig.key ?? ""}
+                    onChange={(value) => updateAuthConfig({ key: value })}
+                    suggestions={suggestions}
+                    placeholder="X-API-Key"
+                  />
+                  <BuilderTemplateField
+                    label="Value"
+                    value={authConfig.value ?? ""}
+                    onChange={(value) => updateAuthConfig({ value })}
+                    suggestions={suggestions}
+                    placeholder="{{secrets.apiKey}}"
+                  />
+                  <BuilderSelect
+                    label="Add to"
+                    ariaLabel="Add API key to"
+                    selectedKey={authConfig.addTo ?? "header"}
+                    onSelectionChange={(addTo) => updateAuthConfig({ addTo })}
+                  >
+                    <ListBox>
+                      <ListBox.Item id="header" textValue="Header">
+                        Header
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="query" textValue="Query Param">
+                        Query Param
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    </ListBox>
+                  </BuilderSelect>
                 </div>
               )}
 
               {(authConfig.type ?? "noAuth") === "bearer" && (
-                <div>
-                  <span className={labelClass}>Token</span>
-                  <TemplateInput
-                    value={authConfig.token ?? ""}
-                    onChange={(value) => updateAuthConfig({ token: value })}
-                    suggestions={suggestions}
-                    placeholder="{{variables.auth_token}}"
-                    className={cn(inputClass, "font-mono text-xs")}
-                  />
-                </div>
+                <BuilderTemplateField
+                  label="Token"
+                  value={authConfig.token ?? ""}
+                  onChange={(value) => updateAuthConfig({ token: value })}
+                  suggestions={suggestions}
+                  placeholder="{{variables.auth_token}}"
+                />
               )}
 
               {(authConfig.type ?? "noAuth") === "basic" && (
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div>
-                    <span className={labelClass}>Username</span>
-                    <TemplateInput
-                      value={authConfig.username ?? ""}
-                      onChange={(value) => updateAuthConfig({ username: value })}
-                      suggestions={suggestions}
-                      placeholder="{{variables.username}}"
-                      className={cn(inputClass, "font-mono text-xs")}
-                    />
-                  </div>
-                  <div>
-                    <span className={labelClass}>Password</span>
-                    <TemplateInput
-                      value={authConfig.password ?? ""}
-                      onChange={(value) => updateAuthConfig({ password: value })}
-                      suggestions={suggestions}
-                      placeholder="{{secrets.password}}"
-                      className={cn(inputClass, "font-mono text-xs")}
-                    />
-                  </div>
+                  <BuilderTemplateField
+                    label="Username"
+                    value={authConfig.username ?? ""}
+                    onChange={(value) => updateAuthConfig({ username: value })}
+                    suggestions={suggestions}
+                    placeholder="{{variables.username}}"
+                  />
+                  <BuilderTemplateField
+                    label="Password"
+                    value={authConfig.password ?? ""}
+                    onChange={(value) => updateAuthConfig({ password: value })}
+                    suggestions={suggestions}
+                    placeholder="{{secrets.password}}"
+                  />
                 </div>
               )}
 
               {(authConfig.type ?? "noAuth") === "jwtBearer" && (
                 <div className="space-y-3">
-                  <div className="grid gap-3 md:grid-cols-[160px_1fr_180px]">
-                    <div>
-                      <span className={labelClass}>Algorithm</span>
-                      <Select value={authConfig.algorithm ?? "HS256"} onValueChange={(value) => updateAuthConfig({ algorithm: value })}>
-                        <SelectTrigger className="h-9 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="HS256">HS256</SelectItem>
-                          <SelectItem value="HS384">HS384</SelectItem>
-                          <SelectItem value="HS512">HS512</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <span className={labelClass}>Secret</span>
-                      <TemplateInput
-                        value={authConfig.secret ?? ""}
-                        onChange={(value) => updateAuthConfig({ secret: value })}
-                        suggestions={suggestions}
-                        placeholder="{{secrets.jwtSecret}}"
-                        className={cn(inputClass, "font-mono text-xs")}
-                      />
-                    </div>
-                    <label className="flex items-end gap-2 pb-2 text-xs font-medium text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={!!authConfig.secretBase64Encoded}
-                        onChange={(event) => updateAuthConfig({ secretBase64Encoded: event.target.checked })}
-                        className="size-4 rounded border-input"
-                      />
-                      Secret is Base64 encoded
-                    </label>
+                  <div className="grid gap-3 md:grid-cols-[160px_1fr_180px] items-end">
+                    <BuilderSelect
+                      label="Algorithm"
+                      ariaLabel="JWT algorithm"
+                      selectedKey={authConfig.algorithm ?? "HS256"}
+                      onSelectionChange={(algorithm) => updateAuthConfig({ algorithm })}
+                    >
+                      <ListBox>
+                        <ListBox.Item id="HS256" textValue="HS256">
+                          HS256
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                        <ListBox.Item id="HS384" textValue="HS384">
+                          HS384
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                        <ListBox.Item id="HS512" textValue="HS512">
+                          HS512
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      </ListBox>
+                    </BuilderSelect>
+                    <BuilderTemplateField
+                      label="Secret"
+                      value={authConfig.secret ?? ""}
+                      onChange={(value) => updateAuthConfig({ secret: value })}
+                      suggestions={suggestions}
+                      placeholder="{{secrets.jwtSecret}}"
+                    />
+                    <Checkbox
+                      isSelected={!!authConfig.secretBase64Encoded}
+                      onChange={(checked) => updateAuthConfig({ secretBase64Encoded: !!checked })}
+                    >
+                      <Checkbox.Control>
+                        <Checkbox.Indicator />
+                      </Checkbox.Control>
+                      <Label className="text-xs">Secret is Base64 encoded</Label>
+                    </Checkbox>
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
-                    <div>
-                      <span className={labelClass}>Payload JSON</span>
-                      <textarea
+                    <BuilderField label="Payload JSON">
+                      <BuilderTextArea
                         value={authConfig.payload ?? "{\n  \"sub\": \"{{variables.clientId}}\"\n}"}
                         onChange={(event) => updateAuthConfig({ payload: event.target.value })}
-                        className={cn(inputClass, "min-h-28 font-mono text-xs")}
+                        className="min-h-28 font-mono text-xs"
                       />
-                    </div>
-                    <div>
-                      <span className={labelClass}>JWT Headers JSON</span>
-                      <textarea
+                    </BuilderField>
+                    <BuilderField label="JWT headers JSON">
+                      <BuilderTextArea
                         value={authConfig.headers ?? ""}
                         onChange={(event) => updateAuthConfig({ headers: event.target.value })}
                         placeholder={'{\n  "kid": "key-id"\n}'}
-                        className={cn(inputClass, "min-h-28 font-mono text-xs")}
+                        className="min-h-28 font-mono text-xs"
                       />
-                    </div>
+                    </BuilderField>
                   </div>
                   <div className="grid gap-3 md:grid-cols-[160px_1fr_1fr]">
-                    <div>
-                      <span className={labelClass}>Add To</span>
-                      <Select value={authConfig.addTo ?? "header"} onValueChange={(value) => updateAuthConfig({ addTo: value })}>
-                        <SelectTrigger className="h-9 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="header">Header</SelectItem>
-                          <SelectItem value="query">Query Param</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <span className={labelClass}>Header Prefix</span>
-                      <input
+                    <BuilderSelect
+                      label="Add to"
+                      ariaLabel="Add JWT to"
+                      selectedKey={authConfig.addTo ?? "header"}
+                      onSelectionChange={(addTo) => updateAuthConfig({ addTo })}
+                    >
+                      <ListBox>
+                        <ListBox.Item id="header" textValue="Header">
+                          Header
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                        <ListBox.Item id="query" textValue="Query Param">
+                          Query Param
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      </ListBox>
+                    </BuilderSelect>
+                    <BuilderField label="Header prefix">
+                      <BuilderInput
                         value={authConfig.headerPrefix ?? "Bearer"}
                         onChange={(event) => updateAuthConfig({ headerPrefix: event.target.value })}
-                        className={cn(inputClass, "font-mono text-xs")}
+                        className="font-mono text-xs"
                       />
-                    </div>
-                    <div>
-                      <span className={labelClass}>{authConfig.addTo === "query" ? "Query Key" : "Header Name"}</span>
-                      <input
-                        value={authConfig.addTo === "query" ? authConfig.queryKey ?? "jwt" : authConfig.headerName ?? "Authorization"}
+                    </BuilderField>
+                    <BuilderField label={authConfig.addTo === "query" ? "Query key" : "Header name"}>
+                      <BuilderInput
+                        value={
+                          authConfig.addTo === "query"
+                            ? authConfig.queryKey ?? "jwt"
+                            : authConfig.headerName ?? "Authorization"
+                        }
                         onChange={(event) =>
                           authConfig.addTo === "query"
                             ? updateAuthConfig({ queryKey: event.target.value })
                             : updateAuthConfig({ headerName: event.target.value })
                         }
-                        className={cn(inputClass, "font-mono text-xs")}
+                        className="font-mono text-xs"
                       />
-                    </div>
+                    </BuilderField>
                   </div>
                 </div>
               )}
             </div>
-          )}
+          </Tabs.Panel>
 
-          {activeTab === "headers" && (
+          <Tabs.Panel id="headers" className="pt-0">
             <div className="space-y-3">
               <div className="text-xs font-semibold text-muted-foreground flex items-center justify-between">
                 <span>Headers List</span>
@@ -1355,16 +1474,15 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                   <div className="space-y-2">
                     {localHeaders.map((header, idx) => (
                       <div key={idx} className="flex gap-2 items-center">
-                        <input
-                          placeholder="Header Key (e.g. Content-Type)"
-                          className={cn(inputClass, "font-mono text-xs flex-1 bg-background")}
+                        <BuilderInput
+                          placeholder="Header key (e.g. Content-Type)"
+                          className="min-w-0 flex-1 font-mono text-xs"
                           value={header.key}
-                          onChange={(e) => updateLocalHeader(idx, "key", e.target.value)}
+                          onChange={(event) => updateLocalHeader(idx, "key", event.target.value)}
                         />
                         <span className="text-muted-foreground text-xs">:</span>
                         <TemplateInput
                           placeholder="Value"
-                          className={cn(inputClass, "font-mono text-xs bg-background")}
                           containerClassName="flex-[2]"
                           value={header.value}
                           onChange={(value) => updateLocalHeader(idx, "value", value)}
@@ -1372,9 +1490,9 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                         />
                         <Button
                           variant="ghost"
-                          size="icon"
+                          isIconOnly
                           type="button"
-                          onClick={() => removeLocalHeader(idx)}
+                          onPress={() => removeLocalHeader(idx)}
                           className="text-rose-500 hover:text-rose-700 size-8 shrink-0"
                         >
                           <Trash2 className="size-4" />
@@ -1389,10 +1507,10 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                 )}
                 <div className="pt-2 border-t border-border/40 mt-1 flex justify-start">
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     type="button"
-                    onClick={addLocalHeader}
+                    onPress={addLocalHeader}
                     className="h-8 text-xs gap-1"
                   >
                     <Plus className="size-3.5" /> Add Header
@@ -1400,12 +1518,12 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                 </div>
               </div>
             </div>
-          )}
+          </Tabs.Panel>
 
-          {activeTab === "body" && (
+          <Tabs.Panel id="body" className="pt-0">
             <div className="space-y-2">
-              <span className={labelClass}>Raw Request Body</span>
-              <div className="min-h-[180px] w-full rounded-md border border-border/50 overflow-hidden bg-[#1e1e1e] dark:bg-[#1e1e1e] light:bg-[#fffffe] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
+              <Label className="text-xs font-medium text-muted">Raw request body</Label>
+              <div className="min-h-[180px] w-full overflow-hidden rounded-md border border-border/50 bg-[#1e1e1e] dark:bg-[#1e1e1e]">
                 <TemplateBodyEditor
                   value={step.config?.body ?? ""}
                   theme={editorTheme}
@@ -1421,26 +1539,28 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                 />
               </div>
             </div>
-          )}
+          </Tabs.Panel>
 
-          {activeTab === "cookies" && (
+          <Tabs.Panel id="cookies" className="pt-0">
             <div className="space-y-3">
-              <div className="rounded-lg border border-border/40 bg-muted/5 p-3">
-                <label className="flex items-start gap-3 text-sm font-medium">
-                  <input
-                    type="checkbox"
-                    checked={cookieConfig.enabled !== false}
-                    onChange={(event) => updateCookieConfig({ enabled: event.target.checked, mode: "jar" })}
-                    className="mt-0.5 size-4 rounded border-input"
-                  />
-                  <span>
-                    <span className="block text-foreground">Use per-run cookie jar</span>
-                    <span className="block text-xs font-normal text-muted-foreground">
+              <Card variant="secondary" className="p-3">
+                <Card.Content className="flex items-start gap-3 p-0">
+                  <Checkbox
+                    isSelected={cookieConfig.enabled !== false}
+                    onChange={(checked) => updateCookieConfig({ enabled: !!checked, mode: "jar" })}
+                  >
+                    <Checkbox.Control>
+                      <Checkbox.Indicator />
+                    </Checkbox.Control>
+                  </Checkbox>
+                  <div>
+                    <Label className="text-sm font-medium text-foreground">Use per-run cookie jar</Label>
+                    <Description className="text-xs">
                       Cookies set by earlier HTTP steps are sent to later matching requests in the same run.
-                    </span>
-                  </span>
-                </label>
-              </div>
+                    </Description>
+                  </div>
+                </Card.Content>
+              </Card>
 
               <div className="space-y-2 rounded-lg border border-border/40 bg-muted/5 p-3">
                 <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
@@ -1453,37 +1573,33 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                       <div key={idx} className="grid gap-2 md:grid-cols-[1fr_1.4fr_1fr_100px_36px] items-center">
                         <TemplateInput
                           placeholder="Name"
-                          className={cn(inputClass, "font-mono text-xs bg-background")}
                           value={cookie.name}
                           onChange={(value) => updateManualCookie(idx, "name", value)}
                           suggestions={suggestions}
                         />
                         <TemplateInput
                           placeholder="{{variables.sessionId}}"
-                          className={cn(inputClass, "font-mono text-xs bg-background")}
                           value={cookie.value}
                           onChange={(value) => updateManualCookie(idx, "value", value)}
                           suggestions={suggestions}
                         />
                         <TemplateInput
                           placeholder="Domain optional"
-                          className={cn(inputClass, "font-mono text-xs bg-background")}
                           value={cookie.domain ?? ""}
                           onChange={(value) => updateManualCookie(idx, "domain", value)}
                           suggestions={suggestions}
                         />
                         <TemplateInput
                           placeholder="/"
-                          className={cn(inputClass, "font-mono text-xs bg-background")}
                           value={cookie.path ?? "/"}
                           onChange={(value) => updateManualCookie(idx, "path", value)}
                           suggestions={suggestions}
                         />
                         <Button
                           variant="ghost"
-                          size="icon"
+                          isIconOnly
                           type="button"
-                          onClick={() => removeManualCookie(idx)}
+                          onPress={() => removeManualCookie(idx)}
                           className="size-8 text-rose-500 hover:text-rose-700"
                         >
                           <Trash2 className="size-4" />
@@ -1495,173 +1611,179 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                   <div className="py-4 text-center text-xs italic text-muted-foreground">No manual cookies configured.</div>
                 )}
                 <div className="border-t border-border/40 pt-2">
-                  <Button type="button" variant="outline" size="sm" onClick={addManualCookie} className="h-8 gap-1 text-xs">
+                  <Button type="button" variant="secondary" size="sm" onPress={addManualCookie} className="h-8 gap-1 text-xs">
                     <Plus className="size-3.5" /> Add Cookie
                   </Button>
                 </div>
               </div>
             </div>
-          )}
+          </Tabs.Panel>
 
-          {activeTab === "certificates" && (
+          <Tabs.Panel id="certificates" className="pt-0">
             <div className="space-y-3">
-              <div className="rounded-lg border border-border/40 bg-muted/5 p-3">
-                <label className="flex items-start gap-3 text-sm font-medium">
-                  <input
-                    type="checkbox"
-                    checked={(mtlsConfig.mode ?? "global") === "global"}
-                    onChange={(event) => updateMTLSConfig({ mode: event.target.checked ? "global" : "none", enabled: false })}
-                    className="mt-0.5 size-4 rounded border-input"
-                  />
-                  <span>
-                    <span className="block text-foreground">Use global matching certificate</span>
-                    <span className="block text-xs font-normal text-muted-foreground">
+              <Card variant="secondary" className="p-3">
+                <Card.Content className="flex items-start gap-3 p-0">
+                  <Checkbox
+                    isSelected={(mtlsConfig.mode ?? "global") === "global"}
+                    onChange={(checked) => updateMTLSConfig({ mode: checked ? "global" : "none", enabled: false })}
+                  >
+                    <Checkbox.Control>
+                      <Checkbox.Indicator />
+                    </Checkbox.Control>
+                  </Checkbox>
+                  <div>
+                    <Label className="text-sm font-medium text-foreground">Use global matching certificate</Label>
+                    <Description className="text-xs">
                       Pulse will apply the active certificate profile matching this request host and port.
-                    </span>
-                  </span>
-                </label>
-              </div>
-              <div>
-                <span className={labelClass}>Certificate Mode</span>
-                <Select value={mtlsConfig.mode ?? "global"} onValueChange={(value) => updateMTLSConfig({ mode: value, enabled: value === "custom" })}>
-                  <SelectTrigger className="h-9 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="global">Use global host match</SelectItem>
-                    <SelectItem value="none">No client certificate</SelectItem>
-                    <SelectItem value="profile">Use specific profile</SelectItem>
-                    <SelectItem value="custom">Custom aliases</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                    </Description>
+                  </div>
+                </Card.Content>
+              </Card>
+              <BuilderSelect
+                label="Certificate mode"
+                ariaLabel="Certificate mode"
+                selectedKey={mtlsConfig.mode ?? "global"}
+                onSelectionChange={(mode) => updateMTLSConfig({ mode, enabled: mode === "custom" })}
+              >
+                <ListBox>
+                  <ListBox.Item id="global" textValue="Use global host match">
+                    Use global host match
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                  <ListBox.Item id="none" textValue="No client certificate">
+                    No client certificate
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                  <ListBox.Item id="profile" textValue="Use specific profile">
+                    Use specific profile
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                  <ListBox.Item id="custom" textValue="Custom aliases">
+                    Custom aliases
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                </ListBox>
+              </BuilderSelect>
               {(mtlsConfig.mode ?? "global") === "profile" && (
-                <div>
-                  <span className={labelClass}>Certificate Profile</span>
-                  <Select value={mtlsConfig.profileId ?? "none"} onValueChange={(value) => updateMTLSConfig({ profileId: value === "none" ? "" : value })}>
-                    <SelectTrigger className="h-9 text-xs">
-                      <SelectValue placeholder="Select profile" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select profile</SelectItem>
-                      {certificateProfiles.map((profile) => (
-                        <SelectItem key={profile.id} value={profile.id}>
-                          {profile.name} · {profile.host}:{profile.port}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <BuilderSelect
+                  label="Certificate profile"
+                  ariaLabel="Certificate profile"
+                  selectedKey={mtlsConfig.profileId || "none"}
+                  onSelectionChange={(profileId) =>
+                    updateMTLSConfig({ profileId: profileId === "none" ? "" : profileId })
+                  }
+                >
+                  <ListBox>
+                    <ListBox.Item id="none" textValue="Select profile">
+                      Select profile
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    {certificateProfiles.map((profile) => (
+                      <ListBox.Item
+                        key={profile.id}
+                        id={profile.id}
+                        textValue={`${profile.name} · ${profile.host}:${profile.port}`}
+                      >
+                        {profile.name} · {profile.host}:{profile.port}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </BuilderSelect>
               )}
               {(mtlsConfig.mode ?? "global") === "custom" && (
                 <div className="grid gap-3 md:grid-cols-3">
-                  <div>
-                    <span className={labelClass}>Client Cert Secret Alias</span>
-                    <TemplateInput
-                      value={mtlsConfig.certSecretAlias ?? ""}
-                      onChange={(value) => updateMTLSConfig({ certSecretAlias: value, enabled: true })}
-                      suggestions={suggestions}
-                      placeholder="clientCertPem"
-                      className={cn(inputClass, "font-mono text-xs")}
-                    />
-                  </div>
-                  <div>
-                    <span className={labelClass}>Client Key Secret Alias</span>
-                    <TemplateInput
-                      value={mtlsConfig.keySecretAlias ?? ""}
-                      onChange={(value) => updateMTLSConfig({ keySecretAlias: value, enabled: true })}
-                      suggestions={suggestions}
-                      placeholder="clientKeyPem"
-                      className={cn(inputClass, "font-mono text-xs")}
-                    />
-                  </div>
-                  <div>
-                    <span className={labelClass}>Custom CA Secret Alias</span>
-                    <TemplateInput
-                      value={mtlsConfig.caCertSecretAlias ?? ""}
-                      onChange={(value) => updateMTLSConfig({ caCertSecretAlias: value, enabled: true })}
-                      suggestions={suggestions}
-                      placeholder="privateCaPem"
-                      className={cn(inputClass, "font-mono text-xs")}
-                    />
-                  </div>
+                  <BuilderTemplateField
+                    label="Client cert secret alias"
+                    value={mtlsConfig.certSecretAlias ?? ""}
+                    onChange={(value) => updateMTLSConfig({ certSecretAlias: value, enabled: true })}
+                    suggestions={suggestions}
+                    placeholder="clientCertPem"
+                  />
+                  <BuilderTemplateField
+                    label="Client key secret alias"
+                    value={mtlsConfig.keySecretAlias ?? ""}
+                    onChange={(value) => updateMTLSConfig({ keySecretAlias: value, enabled: true })}
+                    suggestions={suggestions}
+                    placeholder="clientKeyPem"
+                  />
+                  <BuilderTemplateField
+                    label="Custom CA secret alias"
+                    value={mtlsConfig.caCertSecretAlias ?? ""}
+                    onChange={(value) => updateMTLSConfig({ caCertSecretAlias: value, enabled: true })}
+                    suggestions={suggestions}
+                    placeholder="privateCaPem"
+                  />
                 </div>
               )}
-              <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={!!mtlsConfig.insecureSkipVerify}
-                  onChange={(event) => updateMTLSConfig({ insecureSkipVerify: event.target.checked })}
-                  className="size-4 rounded border-input"
-                />
-                Skip server certificate verification for this request
-              </label>
+              <Checkbox
+                isSelected={!!mtlsConfig.insecureSkipVerify}
+                onChange={(checked) => updateMTLSConfig({ insecureSkipVerify: !!checked })}
+              >
+                <Checkbox.Control>
+                  <Checkbox.Indicator />
+                </Checkbox.Control>
+                <Label className="text-xs">Skip server certificate verification for this request</Label>
+              </Checkbox>
             </div>
-          )}
+          </Tabs.Panel>
 
-          {activeTab === "proxy" && (
+          <Tabs.Panel id="proxy" className="pt-0">
             <div className="space-y-3">
-              <div className="rounded-lg border border-border/40 bg-muted/5 p-3">
-                <label className="flex items-start gap-3 text-sm font-medium">
-                  <input
-                    type="checkbox"
-                    checked={!!proxyConfig.enabled}
-                    onChange={(event) => updateProxyConfig({ enabled: event.target.checked })}
-                    className="mt-0.5 size-4 rounded border-input"
-                  />
-                  <span>
-                    <span className="block text-foreground">Use a proxy for this request</span>
-                    <span className="block text-xs font-normal text-muted-foreground">
+              <Card variant="secondary" className="p-3">
+                <Card.Content className="flex items-start gap-3 p-0">
+                  <Checkbox
+                    isSelected={!!proxyConfig.enabled}
+                    onChange={(checked) => updateProxyConfig({ enabled: !!checked })}
+                  >
+                    <Checkbox.Control>
+                      <Checkbox.Indicator />
+                    </Checkbox.Control>
+                  </Checkbox>
+                  <div>
+                    <Label className="text-sm font-medium text-foreground">Use a proxy for this request</Label>
+                    <Description className="text-xs">
                       Useful for private networks, controlled egress paths, or endpoint-specific routing.
-                    </span>
-                  </span>
-                </label>
-              </div>
+                    </Description>
+                  </div>
+                </Card.Content>
+              </Card>
               <div className="grid gap-3 md:grid-cols-[1.5fr_1fr_1fr]">
-                <div>
-                  <span className={labelClass}>Proxy URL</span>
-                  <TemplateInput
-                    value={proxyConfig.url ?? ""}
-                    onChange={(value) => updateProxyConfig({ url: value })}
-                    suggestions={suggestions}
-                    placeholder="http://proxy.internal:8080"
-                    className={cn(inputClass, "font-mono text-xs")}
-                  />
-                </div>
-                <div>
-                  <span className={labelClass}>Username</span>
-                  <TemplateInput
-                    value={proxyConfig.username ?? ""}
-                    onChange={(value) => updateProxyConfig({ username: value })}
-                    suggestions={suggestions}
-                    placeholder="{{variables.proxyUser}}"
-                    className={cn(inputClass, "font-mono text-xs")}
-                  />
-                </div>
-                <div>
-                  <span className={labelClass}>Password</span>
-                  <TemplateInput
-                    value={proxyConfig.password ?? ""}
-                    onChange={(value) => updateProxyConfig({ password: value })}
-                    suggestions={suggestions}
-                    placeholder="{{secrets.proxyPassword}}"
-                    className={cn(inputClass, "font-mono text-xs")}
-                  />
-                </div>
+                <BuilderTemplateField
+                  label="Proxy URL"
+                  value={proxyConfig.url ?? ""}
+                  onChange={(value) => updateProxyConfig({ url: value })}
+                  suggestions={suggestions}
+                  placeholder="http://proxy.internal:8080"
+                />
+                <BuilderTemplateField
+                  label="Username"
+                  value={proxyConfig.username ?? ""}
+                  onChange={(value) => updateProxyConfig({ username: value })}
+                  suggestions={suggestions}
+                  placeholder="{{variables.proxyUser}}"
+                />
+                <BuilderTemplateField
+                  label="Password"
+                  value={proxyConfig.password ?? ""}
+                  onChange={(value) => updateProxyConfig({ password: value })}
+                  suggestions={suggestions}
+                  placeholder="{{secrets.proxyPassword}}"
+                />
               </div>
             </div>
-          )}
+          </Tabs.Panel>
 
-          {activeTab === "scripts" && (
+          <Tabs.Panel id="scripts" className="pt-0">
             <ScriptEditor
               value={step.preRequestScript ?? ""}
               onChange={(script) => onUpdate({ preRequestScript: script })}
               stepName={step.name}
               suggestions={suggestions}
             />
-          )}
+          </Tabs.Panel>
 
-          {activeTab === "tests" && (
+          <Tabs.Panel id="tests" className="pt-0">
             <div className="space-y-4">
               {/* Assertions Section */}
               <div className="rounded-lg border border-border/50 bg-background/50 p-4 space-y-3 flex flex-col justify-between">
@@ -1670,11 +1792,11 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                     <span>Assertions</span>
                     <Button
                       type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={suggestAssertionsWithAI}
-                      disabled={isSuggesting}
-                      className="text-primary hover:text-primary/90 gap-1 h-7 text-[10.5px] px-2 rounded-md hover:bg-muted/80"
+                      variant="secondary"
+                      size="sm"
+                      onPress={suggestAssertionsWithAI}
+                      isDisabled={isSuggesting}
+                      className="text-primary gap-1 h-7 text-[10.5px] px-2 rounded-md "
                     >
                       {isSuggesting ? (
                         <RotateCw className="size-3 animate-spin" />
@@ -1687,21 +1809,21 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                   <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
                     {step.assertions.length ? (
                       step.assertions.map((assertion) => (
-                        <div key={assertion.id} className="flex justify-between items-center bg-muted/50 px-2.5 py-1.5 rounded-md text-xs border border-border/30">
+                        <div key={assertion.id} className="flex justify-between items-center bg-muted/5 px-2.5 py-1.5 rounded-md text-xs border border-border/30">
                           <div className="truncate flex-1 mr-2">
                             <span className="font-semibold text-primary uppercase text-[10px]">{assertion.type}</span>
                             <span className="mx-1 text-muted-foreground/60">·</span>
                             <span className="font-mono text-muted-foreground">{assertion.target || "body"}</span>
                             <span className="mx-1 text-muted-foreground/60 text-[10px] font-semibold uppercase">{assertion.operator}</span>
-                            <span className="font-mono bg-muted px-1 py-0.2 rounded border border-border/20 text-foreground">{assertion.expected}</span>
+                            <span className="font-mono bg-accent px-1 py-0.2 rounded border border-border/20 text-white">{assertion.expected}</span>
                             {assertion.sensitive && <span className="ml-1.5 text-emerald-600 font-semibold text-[9px] uppercase">(masked)</span>}
                           </div>
                           <div className="flex gap-1 shrink-0">
                             <Button
                               variant="ghost"
-                              size="icon"
+                              isIconOnly
                               type="button"
-                              onClick={() => {
+                              onPress={() => {
                                 setAssertType(assertion.type)
                                 setAssertTarget(assertion.target || "")
                                 setAssertOperator(assertion.operator || "equals")
@@ -1710,17 +1832,15 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                                 handleDeleteAssertion(assertion.id)
                               }}
                               className="text-muted-foreground hover:text-foreground size-6 hover:bg-muted/80 rounded"
-                              title="Edit Assertion"
                             >
                               <Edit3 className="size-3.5" />
                             </Button>
                             <Button
                               variant="ghost"
-                              size="icon"
+                              isIconOnly
                               type="button"
-                              onClick={() => handleDeleteAssertion(assertion.id)}
+                              onPress={() => handleDeleteAssertion(assertion.id)}
                               className="text-rose-500 hover:text-rose-700 size-6 hover:bg-muted/80 rounded"
-                              title="Delete Assertion"
                             >
                               <X className="size-3.5" />
                             </Button>
@@ -1750,7 +1870,7 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                     <div className="bg-primary/5 rounded-lg border border-primary/10 p-3 space-y-2">
                       <div className="text-[10px] font-bold uppercase text-primary tracking-wider flex items-center justify-between">
                         <span>AI Suggestions</span>
-                        <Button variant="ghost" size="icon" onClick={() => setAiSuggestions([])} className="size-5 text-primary hover:bg-primary/10 rounded">
+                        <Button variant="ghost" isIconOnly onPress={() => setAiSuggestions([])} className="size-5 text-primary hover:bg-primary/10 rounded">
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -1766,9 +1886,9 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                             </div>
                             <Button
                               type="button"
-                              variant="outline"
-                              size="xs"
-                              onClick={() => addSuggestedAssertion(suggestion)}
+                              variant="secondary"
+                              size="sm"
+                              onPress={() => addSuggestedAssertion(suggestion)}
                               className="h-6 px-2 text-[10px] text-emerald-600 border-emerald-600/30 hover:bg-emerald-500/10 shrink-0"
                             >
                               Add
@@ -1780,59 +1900,118 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                   )}
                 </div>
 
-                <div className="pt-3 border-t border-border/30 mt-3 space-y-3">
-                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_1fr_45px] items-end">
-                    <div>
-                      <span className={labelClass}>Assert Type</span>
-                      <Select value={assertType} onValueChange={(val) => val && setAssertType(val)}>
-                        <SelectTrigger className="w-full h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="statusCode">Status Code</SelectItem>
-                          <SelectItem value="responseTime">Response Time</SelectItem>
-                          <SelectItem value="jsonPath">JSONPath</SelectItem>
-                          <SelectItem value="header">Header</SelectItem>
-                          <SelectItem value="bodyContains">Body Contains</SelectItem>
-                          <SelectItem value="regex">Regex Match</SelectItem>
-                          <SelectItem value="certExpiryDays">TLS cert expiry (days)</SelectItem>
-                          <SelectItem value="dnsRecords">DNS records</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <span className={labelClass}>Target</span>
-                      <input placeholder="status, latency, $.id" className={cn(inputClass, "h-8 text-xs")} value={assertTarget} onChange={(e) => setAssertTarget(e.target.value)} />
-                    </div>
-                    <div>
-                      <span className={labelClass}>Operator</span>
-                      <Select value={assertOperator} onValueChange={(val) => val && setAssertOperator(val)}>
-                        <SelectTrigger className="w-full h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="equals">equals</SelectItem>
-                          <SelectItem value="notEquals">notEquals</SelectItem>
-                          <SelectItem value="contains">contains</SelectItem>
-                          <SelectItem value="notContains">notContains</SelectItem>
-                          <SelectItem value="exists">exists</SelectItem>
-                          <SelectItem value="notExists">notExists</SelectItem>
-                          <SelectItem value="greaterThan">greaterThan</SelectItem>
-                          <SelectItem value="lessThan">lessThan</SelectItem>
-                          <SelectItem value="matchesRegex">matchesRegex</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <span className={labelClass}>Expected</span>
-                      <input placeholder="Expected val" className={cn(inputClass, "h-8 text-xs")} value={assertExpected} onChange={(e) => setAssertExpected(e.target.value)} />
-                    </div>
-                    <div className="flex flex-col items-center justify-center h-8">
-                      <span className="text-[8px] text-muted-foreground font-semibold uppercase mb-0.5">Mask</span>
-                      <input type="checkbox" checked={assertSensitive} onChange={(e) => setAssertSensitive(e.target.checked)} className="size-3.5 cursor-pointer" />
-                    </div>
+                <div className="space-y-3 border-t border-border/30 pt-3 mt-3">
+                  <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,1.1fr)_minmax(0,1.1fr)_3.5rem]">
+                    <BuilderSelect
+                      label="Assert type"
+                      ariaLabel="Assert type"
+                      selectedKey={assertType}
+                      onSelectionChange={setAssertType}
+                    >
+                      <ListBox>
+                            <ListBox.Item id="statusCode" textValue="Status Code">
+                              Status Code
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="responseTime" textValue="Response Time">
+                              Response Time
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="jsonPath" textValue="JSONPath">
+                              JSONPath
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="header" textValue="Header">
+                              Header
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="bodyContains" textValue="Body Contains">
+                              Body Contains
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="regex" textValue="Regex Match">
+                              Regex Match
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="certExpiryDays" textValue="TLS cert expiry (days)">
+                              TLS cert expiry (days)
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="dnsRecords" textValue="DNS records">
+                              DNS records
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          </ListBox>
+                    </BuilderSelect>
+                    <BuilderField label="Target">
+                      <BuilderInput
+                        placeholder="status, latency, $.id"
+                        className={builderControlClass}
+                        value={assertTarget}
+                        onChange={(event) => setAssertTarget(event.target.value)}
+                      />
+                    </BuilderField>
+                    <BuilderSelect
+                      label="Operator"
+                      ariaLabel="Assertion operator"
+                      selectedKey={assertOperator}
+                      onSelectionChange={setAssertOperator}
+                    >
+                      <ListBox>
+                            <ListBox.Item id="equals" textValue="equals">
+                              equals
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="notEquals" textValue="notEquals">
+                              notEquals
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="contains" textValue="contains">
+                              contains
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="notContains" textValue="notContains">
+                              notContains
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="exists" textValue="exists">
+                              exists
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="notExists" textValue="notExists">
+                              notExists
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="greaterThan" textValue="greaterThan">
+                              greaterThan
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="lessThan" textValue="lessThan">
+                              lessThan
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                            <ListBox.Item id="matchesRegex" textValue="matchesRegex">
+                              matchesRegex
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          </ListBox>
+                    </BuilderSelect>
+                    <BuilderField label="Expected">
+                      <BuilderInput
+                        placeholder="Expected val"
+                        className={builderControlClass}
+                        value={assertExpected}
+                        onChange={(event) => setAssertExpected(event.target.value)}
+                      />
+                    </BuilderField>
+                    <BuilderCheckboxField
+                      label="Mask"
+                      ariaLabel="Mask assertion value"
+                      isSelected={assertSensitive}
+                      onChange={(checked) => setAssertSensitive(!!checked)}
+                    />
                   </div>
-                  <Button variant="outline" size="sm" type="button" onClick={handleAddAssertion} className="w-full h-8 text-xs mt-1">
+                  <Button variant="secondary" size="sm" type="button" onPress={handleAddAssertion} className="h-8 w-full text-xs">
                     <PlusCircle className="size-3.5 mr-1" /> Add Assertion
                   </Button>
                 </div>
@@ -1845,11 +2024,11 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                     <span>Extractors</span>
                     <Button
                       type="button"
-                      variant="ghost"
-                      size="xs"
-                      onClick={suggestExtractorsWithAI}
-                      disabled={isSuggestingExtractors}
-                      className="text-primary hover:text-primary/90 gap-1 h-7 text-[10.5px] px-2 rounded-md hover:bg-muted/80"
+                      variant="secondary"
+                      size="sm"
+                      onPress={suggestExtractorsWithAI}
+                      isDisabled={isSuggestingExtractors}
+                      className="text-primary gap-1 h-7 text-[10.5px] px-2 rounded-md"
                     >
                       {isSuggestingExtractors ? (
                         <RotateCw className="size-3 animate-spin" />
@@ -1862,22 +2041,22 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                   <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
                     {step.extractors.length ? (
                       step.extractors.map((extractor) => (
-                        <div key={extractor.id} className="flex justify-between items-center bg-muted/50 px-2.5 py-1.5 rounded-md text-xs border border-border/30">
+                        <div key={extractor.id} className="flex justify-between items-center bg-muted/5 px-2.5 py-1.5 rounded-md text-xs border border-border/30">
                           <div className="truncate flex-1 mr-2">
                             <span className="font-semibold text-primary">{extractor.name}</span>
                             <span className="mx-1 text-muted-foreground/60">·</span>
                             <span className="font-mono text-muted-foreground uppercase text-[9px]">{extractor.type}</span>
                             <span className="mx-1 text-muted-foreground/60">from</span>
-                            <span className="font-mono text-muted-foreground bg-muted px-1 rounded">{extractor.source}</span>
+                            <span className="font-mono text-white bg-accent px-1 rounded">{extractor.source}</span>
                             {extractor.sensitive && <span className="ml-1.5 text-emerald-600 font-semibold text-[9px] uppercase">(masked)</span>}
                             {extractor.optional && <span className="ml-1 text-muted-foreground font-medium text-[9px]">(optional)</span>}
                           </div>
                           <div className="flex gap-1 shrink-0">
                             <Button
                               variant="ghost"
-                              size="icon"
+                              isIconOnly
                               type="button"
-                              onClick={() => {
+                              onPress={() => {
                                 setExtType(extractor.type)
                                 setExtName(extractor.name)
                                 setExtSource(extractor.source)
@@ -1886,17 +2065,15 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                                 handleDeleteExtractor(extractor.id)
                               }}
                               className="text-muted-foreground hover:text-foreground size-6 hover:bg-muted/80 rounded"
-                              title="Edit Extractor"
                             >
                               <Edit3 className="size-3.5" />
                             </Button>
                             <Button
                               variant="ghost"
-                              size="icon"
+                              isIconOnly
                               type="button"
-                              onClick={() => handleDeleteExtractor(extractor.id)}
+                              onPress={() => handleDeleteExtractor(extractor.id)}
                               className="text-rose-500 hover:text-rose-700 size-6 hover:bg-muted/80 rounded"
-                              title="Delete Extractor"
                             >
                               <X className="size-3.5" />
                             </Button>
@@ -1926,7 +2103,7 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                     <div className="bg-primary/5 rounded-lg border border-primary/10 p-3 space-y-2">
                       <div className="text-[10px] font-bold uppercase text-primary tracking-wider flex items-center justify-between">
                         <span>AI Suggestions</span>
-                        <Button variant="ghost" size="icon" onClick={() => setAiExtractorSuggestions([])} className="size-5 text-primary hover:bg-primary/10 rounded">
+                        <Button variant="ghost" isIconOnly onPress={() => setAiExtractorSuggestions([])} className="size-5 text-primary hover:bg-primary/10 rounded">
                           <X className="size-3" />
                         </Button>
                       </div>
@@ -1942,9 +2119,9 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                             </div>
                             <Button
                               type="button"
-                              variant="outline"
-                              size="xs"
-                              onClick={() => addSuggestedExtractor(suggestion)}
+                              variant="secondary"
+                              size="sm"
+                              onPress={() => addSuggestedExtractor(suggestion)}
                               className="h-6 px-2 text-[10px] text-emerald-600 border-emerald-600/30 hover:bg-emerald-500/10 shrink-0"
                             >
                               Add
@@ -1956,80 +2133,109 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                   )}
                 </div>
 
-                <div className="pt-3 border-t border-border/30 mt-3 space-y-3">
-                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-[1fr_1fr_2fr_40px_40px] items-end">
-                    <div>
-                      <span className={labelClass}>Variable Name</span>
-                      <input placeholder="token" className={cn(inputClass, "h-8 text-xs")} value={extName} onChange={(e) => setExtName(e.target.value)} />
-                    </div>
-                    <div>
-                      <span className={labelClass}>Type</span>
-                      <Select value={extType} onValueChange={(val) => val && setExtType(val)}>
-                        <SelectTrigger className="w-full h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="jsonPath">JSONPath</SelectItem>
-                          <SelectItem value="header">Header</SelectItem>
-                          <SelectItem value="cookie">Cookie</SelectItem>
-                          <SelectItem value="regex">Regex</SelectItem>
-                          <SelectItem value="statusCode">Status Code</SelectItem>
-                          <SelectItem value="responseTime">Response Time</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <span className={labelClass}>Source</span>
-                      <input placeholder="$.access_token, Authorization" className={cn(inputClass, "h-8 text-xs")} value={extSource} onChange={(e) => setExtSource(e.target.value)} />
-                    </div>
-                    <div className="flex flex-col items-center justify-center h-8">
-                      <span className="text-[8px] text-muted-foreground font-semibold uppercase mb-0.5">Mask</span>
-                      <input type="checkbox" checked={extSensitive} onChange={(e) => setExtSensitive(e.target.checked)} className="size-3.5 cursor-pointer" />
-                    </div>
-                    <div className="flex flex-col items-center justify-center h-8">
-                      <span className="text-[8px] text-muted-foreground font-semibold uppercase mb-0.5">Opt</span>
-                      <input type="checkbox" checked={extOptional} onChange={(e) => setExtOptional(e.target.checked)} className="size-3.5 cursor-pointer" />
-                    </div>
+                <div className="space-y-3 border-t border-border/30 pt-3 mt-3">
+                  <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.6fr)_3.5rem_3.5rem]">
+                    <BuilderField label="Variable name">
+                      <BuilderInput
+                        placeholder="token"
+                        className={builderControlClass}
+                        value={extName}
+                        onChange={(event) => setExtName(event.target.value)}
+                      />
+                    </BuilderField>
+                    <BuilderSelect
+                      label="Type"
+                      ariaLabel="Extractor type"
+                      selectedKey={extType}
+                      onSelectionChange={setExtType}
+                    >
+                      <ListBox>
+                        <ListBox.Item id="jsonPath" textValue="JSONPath">
+                          JSONPath
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                        <ListBox.Item id="header" textValue="Header">
+                          Header
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                        <ListBox.Item id="cookie" textValue="Cookie">
+                          Cookie
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                        <ListBox.Item id="regex" textValue="Regex">
+                          Regex
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                        <ListBox.Item id="statusCode" textValue="Status Code">
+                          Status Code
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                        <ListBox.Item id="responseTime" textValue="Response Time">
+                          Response Time
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      </ListBox>
+                    </BuilderSelect>
+                    <BuilderField label="Source">
+                      <BuilderInput
+                        placeholder="$.access_token, Authorization"
+                        className={builderControlClass}
+                        value={extSource}
+                        onChange={(event) => setExtSource(event.target.value)}
+                      />
+                    </BuilderField>
+                    <BuilderCheckboxField
+                      label="Mask"
+                      ariaLabel="Mask extractor value"
+                      isSelected={extSensitive}
+                      onChange={(checked) => setExtSensitive(!!checked)}
+                    />
+                    <BuilderCheckboxField
+                      label="Opt"
+                      ariaLabel="Optional extractor"
+                      isSelected={extOptional}
+                      onChange={(checked) => setExtOptional(!!checked)}
+                    />
                   </div>
-                  <Button variant="outline" size="sm" type="button" onClick={handleAddExtractor} className="w-full h-8 text-xs mt-1">
+                  <Button variant="secondary" size="sm" type="button" onPress={handleAddExtractor} className="h-8 w-full text-xs">
                     <PlusCircle className="size-3.5 mr-1" /> Add Extractor
                   </Button>
                 </div>
               </div>
             </div>
-          )}
+          </Tabs.Panel>
 
-          {activeTab === "settings" && (
+          <Tabs.Panel id="settings" className="pt-0">
             <div className="space-y-4">
-              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Step Configuration</div>
-              <div className="grid gap-3 grid-cols-1 md:grid-cols-3 bg-muted/15 border border-border/20 p-4 rounded-lg items-end">
-                <div>
-                  <span className={labelClass}>Step Name</span>
-                  <input className={inputClass} value={step.name} onChange={(event) => onUpdate({ name: event.target.value })} />
-                </div>
-                <div>
-                  <span className={labelClass}>Timeout (ms)</span>
-                  <input
-                    type="number"
-                    className={inputClass}
-                    min={100}
-                    value={step.timeoutMs}
-                    onChange={(event) => onUpdate({ timeoutMs: Number(event.target.value) })}
-                  />
-                </div>
-                <div>
-                  <span className={labelClass}>Retry Count</span>
-                  <input
-                    type="number"
-                    className={inputClass}
-                    min={0}
-                    value={step.retryCount}
-                    onChange={(event) => onUpdate({ retryCount: Number(event.target.value) })}
-                  />
-                </div>
-              </div>
+              <Description className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Step configuration
+              </Description>
+              <Card variant="secondary" className="p-4">
+                <Card.Content className="grid grid-cols-1 items-end gap-3 p-0 md:grid-cols-3">
+                  <BuilderField label="Step name">
+                    <BuilderInput value={step.name} onChange={(event) => onUpdate({ name: event.target.value })} />
+                  </BuilderField>
+                  <BuilderField label="Timeout (ms)">
+                    <BuilderInput
+                      type="number"
+                      min={100}
+                      value={String(step.timeoutMs)}
+                      onChange={(event) => onUpdate({ timeoutMs: Number(event.target.value) })}
+                    />
+                  </BuilderField>
+                  <BuilderField label="Retry count">
+                    <BuilderInput
+                      type="number"
+                      min={0}
+                      value={String(step.retryCount)}
+                      onChange={(event) => onUpdate({ retryCount: Number(event.target.value) })}
+                    />
+                  </BuilderField>
+                </Card.Content>
+              </Card>
             </div>
-          )}
+          </Tabs.Panel>
+          </Tabs>
         </div>
       )}
 
@@ -2064,7 +2270,7 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
                         {action.configPreview}
                       </div>
                     </div>
-                    <Button variant="ghost" size="icon" type="button" onClick={() => handleDeleteAction(action.id)} className="text-rose-500 hover:text-rose-700 size-6 shrink-0 ml-2">
+                    <Button variant="ghost" isIconOnly type="button" onPress={() => handleDeleteAction(action.id)} className="text-rose-500 hover:text-rose-700 size-6 shrink-0 ml-2">
                       <X className="size-3.5" />
                     </Button>
                   </div>
@@ -2074,68 +2280,113 @@ function StepCard({ step, index, totalSteps, mockRun, suggestions, certificatePr
               )}
             </div>
 
-            <div className="grid gap-2 grid-cols-2 md:grid-cols-[140px_1fr_1fr] pt-3 border-t border-border/30 mt-3 items-end">
-              <div>
-                <span className={labelClass}>Action Type</span>
-                <Select value={actionType} onValueChange={(val) => val && setActionType(val)}>
-                  <SelectTrigger className="w-full h-8 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="generateJWT">Generate JWT</SelectItem>
-                    <SelectItem value="hmacSha256">HMAC SHA256</SelectItem>
-                    <SelectItem value="generateUUID">Generate UUID</SelectItem>
-                    <SelectItem value="generateTimestamp">Generate Timestamp</SelectItem>
-                    <SelectItem value="base64Encode">Base64 Encode</SelectItem>
-                    <SelectItem value="base64Decode">Base64 Decode</SelectItem>
-                    <SelectItem value="urlEncode">URL Encode</SelectItem>
-                    <SelectItem value="urlDecode">URL Decode</SelectItem>
-                    <SelectItem value="sha256">SHA256 Hash</SelectItem>
-                    <SelectItem value="setVariable">Set Variable</SelectItem>
-                    <SelectItem value="readStepOutput">Read Previous Output</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <span className={labelClass}>Label</span>
-                <input placeholder="Generate client assertion" className={cn(inputClass, "h-8 text-xs")} value={actionLabel} onChange={(e) => setActionLabel(e.target.value)} />
-              </div>
-              <div>
-                <span className={labelClass}>Output Key</span>
-                <input placeholder="jwt" className={cn(inputClass, "h-8 text-xs")} value={actionOutput} onChange={(e) => setActionOutput(e.target.value)} />
-              </div>
+            <div className="grid grid-cols-2 items-end gap-2 border-t border-border/30 pt-3 mt-3 md:grid-cols-[140px_1fr_1fr]">
+              <BuilderSelect
+                label="Action type"
+                ariaLabel="Action type"
+                selectedKey={actionType}
+                onSelectionChange={setActionType}
+                className="h-8"
+              >
+                <ListBox>
+                      <ListBox.Item id="generateJWT" textValue="Generate JWT">
+                        Generate JWT
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="hmacSha256" textValue="HMAC SHA256">
+                        HMAC SHA256
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="generateUUID" textValue="Generate UUID">
+                        Generate UUID
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="generateTimestamp" textValue="Generate Timestamp">
+                        Generate Timestamp
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="base64Encode" textValue="Base64 Encode">
+                        Base64 Encode
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="base64Decode" textValue="Base64 Decode">
+                        Base64 Decode
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="urlEncode" textValue="URL Encode">
+                        URL Encode
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="urlDecode" textValue="URL Decode">
+                        URL Decode
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="sha256" textValue="SHA256 Hash">
+                        SHA256 Hash
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="setVariable" textValue="Set Variable">
+                        Set Variable
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="readStepOutput" textValue="Read Previous Output">
+                        Read Previous Output
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    </ListBox>
+              </BuilderSelect>
+              <BuilderField label="Label">
+                <BuilderInput
+                  placeholder="Generate client assertion"
+                  className="h-8 text-xs"
+                  value={actionLabel}
+                  onChange={(event) => setActionLabel(event.target.value)}
+                />
+              </BuilderField>
+              <BuilderField label="Output key">
+                <BuilderInput
+                  placeholder="jwt"
+                  className="h-8 text-xs"
+                  value={actionOutput}
+                  onChange={(event) => setActionOutput(event.target.value)}
+                />
+              </BuilderField>
             </div>
-            <div className="mt-2">
-              <span className={labelClass}>Config Parameters</span>
-              <TemplateInput
-                placeholder="iss/sub={{secrets.clientId}}, aud={{variables.audience}}"
-                className={cn(inputClass, "h-8 text-xs")}
-                value={actionConfig}
-                onChange={setActionConfig}
-                suggestions={suggestions}
-              />
-            </div>
-            <Button variant="outline" size="sm" type="button" onClick={handleAddAction} className="w-full h-8 text-xs mt-1">
+            <BuilderTemplateField
+              label="Config parameters"
+              placeholder="iss/sub={{secrets.clientId}}, aud={{variables.audience}}"
+              value={actionConfig}
+              onChange={setActionConfig}
+              suggestions={suggestions}
+              className="mt-2"
+            />
+            <Button variant="secondary" size="sm" type="button" onPress={handleAddAction} className="w-full h-8 text-xs mt-1">
               <PlusCircle className="size-3.5 mr-1" /> Add Action
             </Button>
           </div>
         </div>
       )}
 
-      {/* Continue on failure check */}
-      <div className="flex items-center justify-between pt-4 border-t border-border/20 mt-4 bg-muted/10 px-4 py-2.5 rounded-lg">
-        <div className="space-y-0.5">
-          <div className="text-xs font-semibold text-foreground">Continue on Failure</div>
-          <p className="text-[10px] text-muted-foreground">If enabled, subsequent steps will execute even if this step fails.</p>
+      <Card variant="secondary" className="mt-4 border-t border-border/20 p-4">
+        <div className="flex items-start gap-3">
+          <Checkbox
+            isSelected={step.continueOnFailure}
+            onChange={(checked) => onUpdate({ continueOnFailure: !!checked })}
+            aria-label="Continue on failure"
+            className="mt-0.5 shrink-0"
+          >
+            <Checkbox.Control>
+              <Checkbox.Indicator />
+            </Checkbox.Control>
+          </Checkbox>
+          <div className="min-w-0 space-y-0.5 flex flex-col">
+            <Label className="text-xs font-semibold text-foreground">Continue on failure</Label>
+            <Description className="text-[10px] leading-relaxed">
+              If enabled, subsequent steps will execute even if this step fails.
+            </Description>
+          </div>
         </div>
-        <input
-          type="checkbox"
-          id={`continue-${step.id}`}
-          checked={step.continueOnFailure}
-          onChange={(e) => onUpdate({ continueOnFailure: e.target.checked })}
-          className="size-4 cursor-pointer rounded border-input text-primary focus:ring-primary"
-        />
-      </div>
+      </Card>
     </div>
   )
 }
@@ -2708,66 +2959,76 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
   return (
     <div className="space-y-4">
       {/* Pinned Workbench Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border/40 pb-4 mb-4">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight font-heading flex items-center gap-2">
-            <span>{draft.id ? "Edit Monitor" : "Create Monitor"}</span>
-            <span className="text-xs font-mono font-normal bg-primary/10 text-primary px-2.5 py-0.5 rounded-full">
-              {draft.name || "Unnamed Monitor"}
-            </span>
-          </h1>
-          <p className="text-muted-foreground text-xs mt-0.5">
+      <Card >
+        <Card.Content className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="font-heading text-lg font-bold tracking-tight text-foreground">
+              {draft.id ? "Edit monitor" : "Create monitor"}
+            </h2>
+            <Chip size="sm" variant="soft" className="font-mono">
+              <Chip.Label>{draft.name || "Unnamed monitor"}</Chip.Label>
+            </Chip>
+          </div>
+          <Description className="text-xs">
             Edit draft config, publish to production, and run draft tests without affecting the scheduled monitor.
-          </p>
+          </Description>
           {draft.id ? (
-            <div className="flex flex-wrap items-center gap-2 mt-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded">
-                Published v{publishedVersion}
-              </span>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Chip size="sm" variant="soft" className="bg-success/10 text-success">
+                <Chip.Label className="text-[10px] font-semibold uppercase tracking-wider">
+                  Published v{publishedVersion}
+                </Chip.Label>
+              </Chip>
               {hasUnpublishedDraft ? (
-                <span className="text-[10px] font-semibold uppercase tracking-wider bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 px-2 py-0.5 rounded">
-                  Unpublished draft changes
-                </span>
+                <Chip size="sm" variant="soft" className="bg-warning/10 text-warning">
+                  <Chip.Label className="text-[10px] font-semibold uppercase tracking-wider">
+                    Unpublished draft changes
+                  </Chip.Label>
+                </Chip>
               ) : (
-                <span className="text-[10px] font-semibold uppercase tracking-wider bg-muted text-muted-foreground border border-border/40 px-2 py-0.5 rounded">
-                  Draft matches published
-                </span>
+                <Chip size="sm" variant="soft">
+                  <Chip.Label className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+                    Draft matches published
+                  </Chip.Label>
+                </Chip>
               )}
             </div>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-2 justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button
             size="sm"
-            variant="outline"
-            onClick={() => setIsImportExportOpen(true)}
-            className="gap-1.5 h-9"
+            variant="ghost"
+            onPress={() => setIsImportExportOpen(true)}
+            className="h-9 gap-1.5"
           >
             <Upload className="size-3.5" />
             Import / Export
           </Button>
           <Button
             size="sm"
-            variant="outline"
-            onClick={handleSaveClick}
-            disabled={saveState === "saving" || validationErrors.length > 0}
-            className="gap-1.5 h-9"
+            
+            onPress={handleSaveClick}
+            isDisabled={saveState === "saving" || validationErrors.length > 0}
+            className="h-9 gap-1.5"
           >
             {saveState === "saving" ? <RotateCw className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
             {draft.id ? "Save draft" : "Create monitor"}
           </Button>
           {draft.id ? (
             <>
-              <input
+              <Input
+                variant="secondary"
                 value={publishNote}
                 onChange={(e) => setPublishNote(e.target.value)}
                 placeholder="Publish note (optional)"
-                className="h-9 w-36 rounded-md border border-input bg-transparent px-2 text-xs hidden xl:block"
+                className="hidden h-9 w-36 text-xs xl:block"
               />
               <Button
                 size="sm"
-                onClick={() => void publishDraft()}
-                disabled={saveState === "saving" || validationErrors.length > 0}
+                onPress={() => void publishDraft()}
+                isDisabled={saveState === "saving" || validationErrors.length > 0}
                 className="gap-1.5 h-9 font-semibold"
               >
                 <Rocket className="size-3.5" />
@@ -2775,9 +3036,9 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                onClick={() => void discardDraftChanges()}
-                disabled={!hasUnpublishedDraft || saveState === "saving"}
+                variant="secondary"
+                onPress={() => void discardDraftChanges()}
+                isDisabled={!hasUnpublishedDraft || saveState === "saving"}
                 className="h-9 text-xs"
               >
                 Discard draft
@@ -2786,10 +3047,10 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
           ) : null}
           <Button
             size="sm"
-            variant="outline"
-            onClick={testMonitorRealData}
-            disabled={executionState === "running" || validationErrors.length > 0}
-            className="gap-1.5 h-9"
+            variant="secondary"
+            onPress={testMonitorRealData}
+            isDisabled={executionState === "running" || validationErrors.length > 0}
+            className="h-9 gap-1.5"
           >
             {executionState === "running" ? <RotateCw className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
             Run draft
@@ -2797,185 +3058,236 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
           {draft.id ? (
             <Button
               size="sm"
-              variant="outline"
-              onClick={() => void runPublishedMonitor()}
-              disabled={executionState === "running"}
-              className="gap-1.5 h-9"
+              variant="secondary"
+              onPress={() => void runPublishedMonitor()}
+              isDisabled={executionState === "running"}
+              className="h-9 gap-1.5"
             >
               <Play className="size-3.5" />
               Run published
             </Button>
           ) : null}
         </div>
-      </div>
+        </Card.Content>
+      </Card>
 
       {/* Main Workspace (Full Width) */}
       <div className="space-y-6">
-        {/* Config tabs block */}
-        <div className="space-y-4">
-          {/* Tab navigation */}
-          <div className="flex gap-1 border-b border-border/40 pb-0">
-            {([
-              { key: "steps", label: "Steps List", icon: Workflow },
-              { key: "variables", label: "Variables & Secrets", icon: KeyRound },
-              { key: "settings", label: "Monitor Settings", icon: SlidersHorizontal },
-              { key: "json", label: "Raw JSON Config", icon: FileJson },
-              { key: "copilot", label: "Pulse AI Copilot", icon: Sparkles },
-              ...(draft.id ? [{ key: "versions" as const, label: "Versions", icon: History }] : []),
-            ] as const).map((tab) => {
-              const Icon = tab.icon
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setBuilderTab(tab.key)}
-                  className={cn(
-                    "px-4 py-2 text-xs font-semibold rounded-t-md transition-colors flex items-center gap-1.5 -mb-px border-b-2 border-transparent",
-                    builderTab === tab.key
-                      ? "bg-background text-foreground border-b-primary font-bold shadow-sm"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  )}
-                >
-                  <Icon className="size-3.5" />
-                  {tab.label}
-                </button>
-              )
-            })}
-          </div>
+        <Tabs
+          selectedKey={builderTab}
+          onSelectionChange={(key) => {
+            if (key != null) setBuilderTab(String(key) as typeof builderTab)
+          }}
+          variant="secondary"
+          className="w-full gap-5"
+        >
+          <Tabs.ListContainer>
+            <Tabs.List aria-label="Monitor builder sections" className="w-full overflow-x-auto">
+              {([
+                { key: "steps", label: "Steps list", icon: Workflow },
+                { key: "variables", label: "Variables & secrets", icon: KeyRound },
+                { key: "settings", label: "Monitor settings", icon: SlidersHorizontal },
+                { key: "json", label: "Raw JSON config", icon: FileJson },
+                { key: "copilot", label: "Pulse AI copilot", icon: Sparkles },
+                ...(draft.id ? [{ key: "versions" as const, label: "Versions", icon: History }] : []),
+              ] as const).map((tab) => {
+                const Icon = tab.icon
+                return (
+                  <Tabs.Tab key={tab.key} id={tab.key} className="gap-1.5 whitespace-nowrap">
+                    <Icon className="size-3.5" />
+                    {tab.label}
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                )
+              })}
+            </Tabs.List>
+          </Tabs.ListContainer>
 
-          {/* Tab contents */}
-          {builderTab === "steps" && (
+          <Tabs.Panel id="steps" className="pt-0">
             <Section title="Step builder" icon={Workflow}>
-              <div className="grid grid-cols-1 lg:grid-cols-[250px_1fr] border border-border/50 rounded-lg overflow-hidden bg-background min-h-[580px] shadow-xs">
+              <Card className="grid min-h-[580px] grid-cols-1 overflow-hidden lg:grid-cols-[250px_1fr]">
                 {/* Left: Steps Explorer Sidebar */}
-                <div className="border-r border-border/40 bg-muted/5 flex flex-col justify-between select-none">
-                  <div className="flex-1 flex flex-col min-h-0">
-                    <div className="p-3 border-b border-border/40 bg-muted/10 flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Steps Explorer</span>
-                      <span className="text-[10px] font-mono font-medium bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                        {draft.steps.length} {draft.steps.length === 1 ? 'step' : 'steps'}
-                      </span>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1 max-h-[500px]">
-                      {draft.steps.map((step, idx) => {
-                        const isActive = selectedStep?.id === step.id
-                        const isPreRequest = step.type === "preRequest"
-                        return (
-                          <div
-                            key={step.id}
-                            onClick={() => setSelectedStepId(step.id)}
-                            className={cn(
-                              "group flex items-center justify-between px-2.5 py-2 rounded-md cursor-pointer transition-all border text-left",
-                              isActive
-                                ? "bg-primary/5 text-primary border-primary/25 font-semibold"
-                                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40"
-                            )}
-                          >
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <span className="font-mono text-[10px] text-muted-foreground/60 w-3.5 shrink-0 text-right">
-                                {step.order}
-                              </span>
-                              {isPreRequest ? (
-                                <span className="text-[9px] font-mono font-semibold uppercase px-1 py-0.5 rounded bg-zinc-500/10 text-zinc-500 border border-zinc-500/20 shrink-0">
-                                  PreReq
-                                </span>
-                              ) : (
-                                <span className={cn("text-[9px] font-mono font-semibold uppercase px-1 py-0.5 rounded border shrink-0", methodColors[step.method ?? "GET"] || "bg-muted text-muted-foreground border-border")}>
-                                  {step.method ?? "GET"}
-                                </span>
-                              )}
-                              <span className="text-xs truncate font-medium flex-1">
-                                {step.name}
-                              </span>
-                            </div>
-                            
-                            {/* Hover Controls for reordering/deleting */}
-                            <div className="hidden group-hover:flex items-center gap-0.5 pl-1.5 bg-transparent shrink-0">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  moveStep(idx, "up")
-                                }}
-                                disabled={idx === 0}
-                                className="text-muted-foreground hover:text-foreground disabled:opacity-30 p-0.5 rounded"
+                <div className="flex min-h-0 flex-col border border-border/40 select-none">
+                  <Card.Header className="flex-row items-center justify-between gap-2 border-b px-3 py-2.5">
+                    <Description className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Steps Explorer
+                    </Description>
+                    <Chip size="sm" variant="soft" className="font-mono text-[10px]">
+                      <Chip.Label>
+                        {draft.steps.length} {draft.steps.length === 1 ? "step" : "steps"}
+                      </Chip.Label>
+                    </Chip>
+                  </Card.Header>
+
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="max-h-[500px] flex-1 overflow-y-auto p-2">
+                      {!draft.steps.length ? (
+                        <EmptyState className="border border-dashed border-border/40 bg-muted/5 py-8 text-center">
+                          <Workflow className="mx-auto mb-2 size-5 text-muted-foreground" aria-hidden />
+                          <Description className="text-xs italic">No steps added yet.</Description>
+                        </EmptyState>
+                      ) : (
+                        <ListBox
+                          aria-label="Monitor steps"
+                          selectionMode="single"
+                          selectedKeys={selectedStepId ? [selectedStepId] : []}
+                          onSelectionChange={(keys) => {
+                            const key = keys === "all" ? null : Array.from(keys)[0]
+                            if (key) setSelectedStepId(String(key))
+                          }}
+                          className="gap-1 p-0"
+                        >
+                          {draft.steps.map((step, idx) => {
+                            const isActive = selectedStep?.id === step.id
+                            const isPreRequest = step.type === "preRequest"
+                            return (
+                              <ListBox.Item
+                                key={step.id}
+                                id={step.id}
+                                textValue={step.name}
+                                className={cn(
+                                  "group flex items-center justify-between gap-2 rounded-md border px-2.5 py-2 transition-colors",
+                                  isActive
+                                    ? "border-primary/25 bg-primary/5 font-semibold text-primary"
+                                    : "border-transparent text-muted-foreground data-[hovered=true]:bg-muted/10 data-[hovered=true]:text-foreground"
+                                )}
                               >
-                                <ArrowUp className="size-3" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  moveStep(idx, "down")
-                                }}
-                                disabled={idx === draft.steps.length - 1}
-                                className="text-muted-foreground hover:text-foreground disabled:opacity-30 p-0.5 rounded"
-                              >
-                                <ArrowDown className="size-3" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  deleteStep(step.id)
-                                }}
-                                className="text-rose-500 hover:text-rose-700 p-0.5 rounded ml-0.5"
-                              >
-                                <Trash2 className="size-3" />
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      })}
-                      {!draft.steps.length && (
-                        <div className="text-center py-8 text-xs text-muted-foreground italic px-2">
-                          No steps added yet.
-                        </div>
+                                <div className="flex min-w-0 flex-1 items-center gap-2">
+                                  <span className="w-3.5 shrink-0 text-right font-mono text-[10px] text-muted-foreground/60">
+                                    {step.order}
+                                  </span>
+                                  {isPreRequest ? (
+                                    <Chip size="sm" variant="soft" className="shrink-0 font-mono text-[9px] uppercase">
+                                      <Chip.Label>PreReq</Chip.Label>
+                                    </Chip>
+                                  ) : (
+                                    <Chip
+                                      size="sm"
+                                      variant="soft"
+                                      className={cn(
+                                        "shrink-0 border font-mono text-[9px] uppercase",
+                                        methodColors[step.method ?? "GET"] || methodChipFallback
+                                      )}
+                                    >
+                                      <Chip.Label>{step.method ?? "GET"}</Chip.Label>
+                                    </Chip>
+                                  )}
+                                  <span className="min-w-0 flex-1 truncate text-xs font-medium">{step.name}</span>
+                                </div>
+                                <div
+                                  className="hidden shrink-0 items-center gap-0.5 pl-1.5 group-hover:flex"
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    isIconOnly
+                                    size="sm"
+                                    isDisabled={idx === 0}
+                                    onPress={() => moveStep(idx, "up")}
+                                    aria-label="Move step up"
+                                    className="size-6 min-w-6"
+                                  >
+                                    <ArrowUp className="size-3" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    isIconOnly
+                                    size="sm"
+                                    isDisabled={idx === draft.steps.length - 1}
+                                    onPress={() => moveStep(idx, "down")}
+                                    aria-label="Move step down"
+                                    className="size-6 min-w-6"
+                                  >
+                                    <ArrowDown className="size-3" />
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    isIconOnly
+                                    size="sm"
+                                    onPress={() => deleteStep(step.id)}
+                                    aria-label="Delete step"
+                                    className="size-6 min-w-6 text-danger"
+                                  >
+                                    <Trash2 className="size-3" />
+                                  </Button>
+                                </div>
+                                <ListBox.ItemIndicator />
+                              </ListBox.Item>
+                            )
+                          })}
+                        </ListBox>
                       )}
                     </div>
-                  </div>
 
-                  {/* Left Sidebar Footer quick step adder buttons */}
-                  <div className="p-2 border-t border-border/40 bg-muted/10 space-y-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={addHttpStep}
-                      className="w-full text-[10px] h-7 justify-start gap-1 font-semibold"
-                    >
-                      <Plus className="size-3" /> Add HTTP Request
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={addPreRequestStep}
-                      className="w-full text-[10px] h-7 justify-start gap-1 font-semibold"
-                    >
-                      <Plus className="size-3" /> Add Pre-Request Script
-                    </Button>
-                    <Button type="button" variant="outline" size="xs" onClick={addDnsStep} className="w-full text-[10px] h-7 justify-start gap-1 font-semibold">
-                      <Plus className="size-3" /> Add DNS check
-                    </Button>
-                    <Button type="button" variant="outline" size="xs" onClick={addTcpStep} className="w-full text-[10px] h-7 justify-start gap-1 font-semibold">
-                      <Plus className="size-3" /> Add TCP check
-                    </Button>
-                    <Button type="button" variant="outline" size="xs" onClick={addTlsStep} className="w-full text-[10px] h-7 justify-start gap-1 font-semibold">
-                      <Plus className="size-3" /> Add TLS cert check
-                    </Button>
-                    <Button type="button" variant="outline" size="xs" onClick={addDelayStep} className="w-full text-[10px] h-7 justify-start gap-1 font-semibold">
-                      <Plus className="size-3" /> Add delay
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={() => setIsCurlModalOpen(true)}
-                      className="w-full text-[10px] h-7 justify-start gap-1 font-semibold text-primary hover:bg-primary/5 cursor-pointer"
-                    >
-                      <Sparkles className="size-3 text-primary animate-pulse" /> Import HTTP from cURL
-                    </Button>
+                    <Card.Footer className="flex flex-col gap-1 border-t border-border/40 bg-muted/5 p-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onPress={addHttpStep}
+                        className="h-7 w-full justify-start gap-1 text-[10px] font-semibold"
+                      >
+                        <Plus className="size-3" /> Add HTTP Request
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onPress={addPreRequestStep}
+                        className="h-7 w-full justify-start gap-1 text-[10px] font-semibold"
+                      >
+                        <Plus className="size-3" /> Add Pre-Request Script
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onPress={addDnsStep}
+                        className="h-7 w-full justify-start gap-1 text-[10px] font-semibold"
+                      >
+                        <Plus className="size-3" /> Add DNS check
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onPress={addTcpStep}
+                        className="h-7 w-full justify-start gap-1 text-[10px] font-semibold"
+                      >
+                        <Plus className="size-3" /> Add TCP check
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onPress={addTlsStep}
+                        className="h-7 w-full justify-start gap-1 text-[10px] font-semibold"
+                      >
+                        <Plus className="size-3" /> Add TLS cert check
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onPress={addDelayStep}
+                        className="h-7 w-full justify-start gap-1 text-[10px] font-semibold"
+                      >
+                        <Plus className="size-3" /> Add delay
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onPress={() => setIsCurlModalOpen(true)}
+                        className="h-7 w-full justify-start gap-1 text-[10px] font-semibold text-primary"
+                      >
+                        <Sparkles className="size-3 text-primary animate-pulse" /> Import HTTP from cURL
+                      </Button>
+                    </Card.Footer>
                   </div>
                 </div>
 
@@ -2996,83 +3308,91 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                       onMoveDown={() => moveStep(draft.steps.findIndex(s => s.id === selectedStep.id), "down")}
                     />
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-20 px-6 text-center h-full flex-1 min-h-[400px]">
-                      <div className="rounded-full bg-muted/50 p-4 mb-3 border border-border/30">
-                        <Workflow className="size-8 text-muted-foreground/60 animate-pulse" />
-                      </div>
-                      <h3 className="font-semibold text-sm">No steps added to this monitor</h3>
-                      <p className="text-xs text-muted-foreground max-w-[280px] mt-1.5 mb-5">
+                    <EmptyState className="flex h-full min-h-[400px] flex-1 flex-col items-center justify-center px-6 py-20 text-center">
+                      <Workflow className="mb-3 size-8 text-muted animate-pulse" aria-hidden />
+                      <p className="text-sm font-semibold text-foreground">No steps added to this monitor</p>
+                      <Description className="mt-1.5 mb-5 max-w-[280px]">
                         Add request steps to run in sequence. You can configure endpoints, headers, assertions, and extract variables.
-                      </p>
+                      </Description>
                       <div className="flex flex-col gap-2 w-full max-w-[320px]">
                         <div className="flex gap-2">
-                          <Button type="button" variant="outline" size="sm" onClick={addHttpStep} className="flex-1 h-9 cursor-pointer">
-                            <PlusCircle className="size-4 mr-1.5" /> Add HTTP Step
+                          <Button type="button" variant="secondary" size="sm" onPress={addHttpStep} className="h-9 flex-1">
+                            <PlusCircle className="size-4" /> Add HTTP Step
                           </Button>
-                          <Button type="button" variant="outline" size="sm" onClick={addPreRequestStep} className="flex-1 h-9 cursor-pointer">
-                            <PlusCircle className="size-4 mr-1.5" /> Add Pre-Request
+                          <Button type="button" variant="secondary" size="sm" onPress={addPreRequestStep} className="h-9 flex-1">
+                            <PlusCircle className="size-4" /> Add Pre-Request
                           </Button>
                         </div>
-                        <Button type="button" variant="outline" size="sm" onClick={() => setIsCurlModalOpen(true)} className="w-full h-9 gap-1.5 font-semibold text-primary cursor-pointer">
-                          <Sparkles className="size-4 text-primary animate-pulse" /> Import HTTP Step from cURL command
+                        <Button type="button" variant="secondary" size="sm" onPress={() => setIsCurlModalOpen(true)} className="h-9 w-full gap-1.5 font-semibold text-accent">
+                          <Sparkles className="size-4 animate-pulse text-accent" /> Import HTTP step from cURL command
                         </Button>
                       </div>
-                    </div>
+                    </EmptyState>
                   )}
                 </div>
-              </div>
+              </Card>
             </Section>
-          )}
+          </Tabs.Panel>
 
-          {builderTab === "variables" && (
+          <Tabs.Panel id="variables" className="pt-0">
             <Section title="Variables and secrets" icon={KeyRound}>
               <div className="grid gap-6 md:grid-cols-2">
-                {/* Variables */}
                 <div className="space-y-3">
-                  <div className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-2">Variables</div>
+                  <Description className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Variables
+                  </Description>
                   {Object.entries(draft.variables || {}).map(([key, value]) => (
-                    <div key={key} className="flex gap-2 items-center">
-                      <input
-                        placeholder="Key"
-                        className={cn(inputClass, "font-mono text-xs w-[140px] shrink-0 bg-muted/40")}
-                        value={key}
-                        disabled
-                      />
-                      <input
-                        placeholder="Value"
-                        className={inputClass}
-                        value={value}
-                        onChange={(e) => updateVariable(key, e.target.value)}
-                      />
+                    <div key={key} className="flex gap-2 items-end">
+                      <BuilderField label="Key" className="w-[140px] shrink-0">
+                        <BuilderInput
+                          placeholder="Key"
+                          className="font-mono text-xs"
+                          value={key}
+                          disabled
+                        />
+                      </BuilderField>
+                      <BuilderField label="Value" className="min-w-0 flex-1">
+                        <BuilderInput
+                          placeholder="Value"
+                          value={value}
+                          className="font-mono text-xs"
+                          onChange={(event) => updateVariable(key, event.target.value)}
+                        />
+                      </BuilderField>
                       <Button
                         variant="ghost"
-                        size="icon"
+                        isIconOnly
                         type="button"
-                        onClick={() => removeVariable(key)}
-                        className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 size-9 shrink-0"
+                        onPress={() => removeVariable(key)}
+                        className="text-danger shrink-0"
+                        aria-label={`Remove variable ${key}`}
                       >
                         <Trash2 className="size-4" />
                       </Button>
                     </div>
                   ))}
-                  <div className="flex gap-2 items-center pt-2 border-t border-border/40">
-                    <input
-                      placeholder="New Key"
-                      className={cn(inputClass, "font-mono text-xs w-[140px] shrink-0")}
-                      value={newVarKey}
-                      onChange={(e) => setNewVarKey(e.target.value)}
-                    />
-                    <input
-                      placeholder="New Value"
-                      className={inputClass}
-                      value={newVarValue}
-                      onChange={(e) => setNewVarValue(e.target.value)}
-                    />
+                  <div className="flex gap-2 items-end border-t border-border/40 pt-3">
+                    <BuilderField label="New key" className="w-[140px] shrink-0">
+                      <BuilderInput
+                        placeholder="New key"
+                        className="font-mono text-xs"
+                        value={newVarKey}
+                        onChange={(event) => setNewVarKey(event.target.value)}
+                      />
+                    </BuilderField>
+                    <BuilderField label="New value" className="min-w-0 flex-1">
+                      <BuilderInput
+                        placeholder="New value"
+                        value={newVarValue}
+                        className="font-mono text-xs"
+                        onChange={(event) => setNewVarValue(event.target.value)}
+                      />
+                    </BuilderField>
                     <Button
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       type="button"
-                      onClick={() => {
+                      onPress={() => {
                         if (!newVarKey.trim()) return
                         addVariable(newVarKey, newVarValue)
                         setNewVarKey("")
@@ -3080,292 +3400,351 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                       }}
                       className="h-9 shrink-0"
                     >
-                      <PlusCircle className="size-4 mr-1" /> Add
+                      <PlusCircle className="size-4" /> Add
                     </Button>
                   </div>
                 </div>
 
-                {/* Secret bindings */}
                 <div className="space-y-3">
-                  <div className="text-xs font-semibold uppercase text-muted-foreground tracking-wider mb-2">Secret Aliases</div>
+                  <Description className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Secret aliases
+                  </Description>
                   {(draft.secretAliases || []).map((alias) => (
-                    <div key={alias} className="flex gap-2 items-center rounded-md bg-muted/50 p-2 text-sm justify-between border border-border/30">
-                      <span className="font-mono text-xs flex items-center gap-2">
-                        <ShieldCheck className="size-4 text-emerald-600 shrink-0" />
-                        {`{{secrets.${alias}}}`}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        type="button"
-                        onClick={() => removeSecretAlias(alias)}
-                        className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 size-8 shrink-0"
-                      >
-                        <X className="size-4" />
-                      </Button>
-                    </div>
+                    <Card key={alias} variant="secondary" className="p-2">
+                      <Card.Content className="flex items-center justify-between gap-2 p-0">
+                        <span className="flex items-center gap-2 font-mono text-xs">
+                          <ShieldCheck className="size-4 shrink-0 text-success" />
+                          {`{{secrets.${alias}}}`}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          isIconOnly
+                          type="button"
+                          onPress={() => removeSecretAlias(alias)}
+                          className="text-danger shrink-0"
+                          aria-label={`Remove secret alias ${alias}`}
+                        >
+                          <X className="size-4" />
+                        </Button>
+                      </Card.Content>
+                    </Card>
                   ))}
-                  <div className="flex gap-2 items-center pt-2 border-t border-border/40">
-                    <input
-                      placeholder="New secret alias"
-                      className={cn(inputClass, "font-mono text-xs")}
-                      value={newSecretAlias}
-                      onChange={(e) => setNewSecretAlias(e.target.value)}
-                    />
+                  <div className="flex gap-2 items-end border-t border-border/40 pt-3">
+                    <BuilderField label="New secret alias" className="min-w-0 flex-1">
+                      <BuilderInput
+                        placeholder="New secret alias"
+                        className="font-mono text-xs"
+                        value={newSecretAlias}
+                        onChange={(event) => setNewSecretAlias(event.target.value)}
+                      />
+                    </BuilderField>
                     <Button
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       type="button"
-                      onClick={() => {
+                      onPress={() => {
                         if (!newSecretAlias.trim()) return
                         addSecretAlias(newSecretAlias)
                         setNewSecretAlias("")
                       }}
                       className="h-9 shrink-0"
                     >
-                      <PlusCircle className="size-4 mr-1" /> Bind
+                      <PlusCircle className="size-4" /> Bind
                     </Button>
                   </div>
                 </div>
               </div>
             </Section>
-          )}
+          </Tabs.Panel>
 
-          {builderTab === "settings" && (
-            <div className="space-y-4">
+          <Tabs.Panel id="settings" className="flex flex-col gap-4 pt-0">
               <Section title="Basic details" icon={SlidersHorizontal}>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label>
-                    <span className={labelClass}>Application</span>
-                    <Select
-                      value={draft.applicationId ? draft.applicationId : "none"}
-                      onValueChange={(value) => updateDraft({ ...draft, applicationId: !value || value === "none" ? "" : value })}
-                    >
-                      <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Select application" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Unassigned</SelectItem>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Select
+                    aria-label="Application"
+                    className="w-full"
+                    variant="secondary"
+                    selectedKey={draft.applicationId || "none"}
+                    onSelectionChange={(key) =>
+                      updateDraft({
+                        ...draft,
+                        applicationId: !key || key === "none" ? "" : String(key),
+                      })
+                    }
+                  >
+                    <Label className="text-xs font-medium text-muted">Application</Label>
+                    <Select.Trigger>
+                      <Select.Value />
+                      <Select.Indicator />
+                    </Select.Trigger>
+                    <Select.Popover>
+                      <ListBox>
+                        <ListBox.Item id="none" textValue="Unassigned">
+                          Unassigned
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
                         {applications.map((application) => (
-                          <SelectItem key={application.id} value={application.id}>
+                          <ListBox.Item
+                            key={application.id}
+                            id={application.id}
+                            textValue={`${application.name} · CAR ${application.carId}`}
+                          >
                             {application.name} · CAR {application.carId}
-                          </SelectItem>
+                            <ListBox.ItemIndicator />
+                          </ListBox.Item>
                         ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <label>
-                    <span className={labelClass}>Monitor name</span>
-                    <input
-                      className={inputClass}
+                      </ListBox>
+                    </Select.Popover>
+                  </Select>
+                  <BuilderField label="Monitor name">
+                    <BuilderInput
                       value={draft.name}
                       onChange={(event) => updateDraft({ ...draft, name: event.target.value })}
                     />
-                  </label>
-                  <label>
-                    <span className={labelClass}>Schedule cron</span>
-                    <input
-                      className={inputClass}
+                  </BuilderField>
+                  <BuilderField label="Schedule cron">
+                    <BuilderInput
                       value={draft.cron}
-                      onChange={(event) => updateDraft({ ...draft, cron: event.target.value, scheduleLabel: "Custom cron" })}
+                      onChange={(event) =>
+                        updateDraft({ ...draft, cron: event.target.value, scheduleLabel: "Custom cron" })
+                      }
                     />
-                  </label>
-                  <label>
-                    <span className={labelClass}>Timeout (ms)</span>
-                    <input
-                      className={inputClass}
-                      min={1000}
+                  </BuilderField>
+                  <BuilderField label="Timeout (ms)">
+                    <BuilderInput
                       type="number"
-                      value={draft.timeoutMs}
+                      min={1000}
+                      value={String(draft.timeoutMs)}
                       onChange={(event) => updateDraft({ ...draft, timeoutMs: Number(event.target.value) })}
                     />
-                  </label>
-                  <label>
-                    <span className={labelClass}>Response body limit KB</span>
-                    <input
-                      className={inputClass}
-                      min={1}
+                  </BuilderField>
+                  <BuilderField label="Response body limit KB">
+                    <BuilderInput
                       type="number"
-                      value={draft.responseBodyLimitKb}
-                      onChange={(event) => updateDraft({ ...draft, responseBodyLimitKb: Number(event.target.value) })}
+                      min={1}
+                      value={String(draft.responseBodyLimitKb)}
+                      onChange={(event) =>
+                        updateDraft({ ...draft, responseBodyLimitKb: Number(event.target.value) })
+                      }
                     />
-                  </label>
+                  </BuilderField>
                 </div>
               </Section>
 
               {/* Alert & failure policy */}
               <Section title="Alert & failure policy" icon={ShieldCheck}>
                 <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="alert-enabled"
-                      checked={draft.alertPolicy?.enabled ?? false}
-                      className="size-4 cursor-pointer"
-                      onChange={(e) => updateDraft({
-                        ...draft,
-                        alertPolicy: {
-                          ...(draft.alertPolicy || {
-                            threshold: 3,
-                            responseTimeMs: 2000,
-                            email: true,
-                            slackWebhook: false,
-                            cooldownMinutes: 30,
-                          }),
-                          enabled: e.target.checked
-                        }
-                      })}
-                    />
-                    <label htmlFor="alert-enabled" className="text-sm font-medium cursor-pointer text-foreground select-none">
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      isSelected={draft.alertPolicy?.enabled ?? false}
+                      onChange={(checked) =>
+                        updateDraft({
+                          ...draft,
+                          alertPolicy: {
+                            ...(draft.alertPolicy || {
+                              threshold: 3,
+                              responseTimeMs: 2000,
+                              email: true,
+                              slackWebhook: false,
+                              cooldownMinutes: 30,
+                            }),
+                            enabled: !!checked,
+                          },
+                        })
+                      }
+                    >
+                      <Checkbox.Control>
+                        <Checkbox.Indicator />
+                      </Checkbox.Control>
+                    </Checkbox>
+                    <Description className="text-sm font-medium text-foreground">
                       Enable automated alerting for this monitor
-                    </label>
+                    </Description>
                   </div>
 
                   {(draft.alertPolicy?.enabled ?? false) && (
-                    <div className="grid gap-4 md:grid-cols-2 p-4 rounded-lg border border-border/50 bg-background/50">
-                      <label>
-                        <span className={labelClass}>Consecutive Failure Threshold</span>
-                        <input
-                          type="number"
-                          min={1}
-                          className={inputClass}
-                          value={draft.alertPolicy.threshold}
-                          onChange={(e) => updateDraft({
-                            ...draft,
-                            alertPolicy: { ...draft.alertPolicy, threshold: Number(e.target.value) }
-                          })}
-                        />
-                      </label>
-                      <label>
-                        <span className={labelClass}>Response Time Alert Limit (ms)</span>
-                        <input
-                          type="number"
-                          min={100}
-                          className={inputClass}
-                          value={draft.alertPolicy.responseTimeMs}
-                          onChange={(e) => updateDraft({
-                            ...draft,
-                            alertPolicy: { ...draft.alertPolicy, responseTimeMs: Number(e.target.value) }
-                          })}
-                        />
-                      </label>
-                      <label>
-                        <span className={labelClass}>Alert Cooldown (minutes)</span>
-                        <input
-                          type="number"
-                          min={1}
-                          className={inputClass}
-                          value={draft.alertPolicy.cooldownMinutes}
-                          onChange={(e) => updateDraft({
-                            ...draft,
-                            alertPolicy: { ...draft.alertPolicy, cooldownMinutes: Number(e.target.value) }
-                          })}
-                        />
-                      </label>
-
-                      <div className="flex flex-col gap-2 justify-center pt-2">
-                        <span className={labelClass}>Notification Channels</span>
-                        <div className="flex gap-4">
-                          <label className="flex items-center gap-1.5 cursor-pointer text-xs">
-                            <input
-                              type="checkbox"
-                              checked={draft.alertPolicy.email}
-                              onChange={(e) => updateDraft({
+                    <Card  className="md:col-span-2">
+                      <Card.Content className="grid gap-4 md:grid-cols-2">
+                        <BuilderField label="Consecutive failure threshold">
+                          <BuilderInput
+                            type="number"
+                            min={1}
+                            value={String(draft.alertPolicy.threshold)}
+                            onChange={(event) =>
+                              updateDraft({
                                 ...draft,
-                                alertPolicy: { ...draft.alertPolicy, email: e.target.checked }
-                              })}
-                            />
-                            Email Notifications
-                          </label>
-                          <label className="flex items-center gap-1.5 cursor-pointer text-xs">
-                            <input
-                              type="checkbox"
-                              checked={draft.alertPolicy.slackWebhook}
-                              onChange={(e) => updateDraft({
+                                alertPolicy: { ...draft.alertPolicy, threshold: Number(event.target.value) },
+                              })
+                            }
+                          />
+                        </BuilderField>
+                        <BuilderField label="Response time alert limit (ms)">
+                          <BuilderInput
+                            type="number"
+                            min={100}
+                            value={String(draft.alertPolicy.responseTimeMs)}
+                            onChange={(event) =>
+                              updateDraft({
                                 ...draft,
-                                alertPolicy: { ...draft.alertPolicy, slackWebhook: e.target.checked }
-                              })}
-                            />
-                            Slack Webhook
-                          </label>
+                                alertPolicy: { ...draft.alertPolicy, responseTimeMs: Number(event.target.value) },
+                              })
+                            }
+                          />
+                        </BuilderField>
+                        <BuilderField label="Alert cooldown (minutes)">
+                          <BuilderInput
+                            type="number"
+                            min={1}
+                            value={String(draft.alertPolicy.cooldownMinutes)}
+                            onChange={(event) =>
+                              updateDraft({
+                                ...draft,
+                                alertPolicy: { ...draft.alertPolicy, cooldownMinutes: Number(event.target.value) },
+                              })
+                            }
+                          />
+                        </BuilderField>
+                        <div className="flex flex-col gap-2 justify-center">
+                          <Label className="text-xs font-medium text-muted">Notification channels</Label>
+                          <div className="flex flex-wrap gap-4">
+                            <Checkbox
+                              isSelected={draft.alertPolicy.email}
+                              onChange={(checked) =>
+                                updateDraft({
+                                  ...draft,
+                                  alertPolicy: { ...draft.alertPolicy, email: !!checked },
+                                })
+                              }
+                            >
+                              <Checkbox.Control>
+                                <Checkbox.Indicator />
+                              </Checkbox.Control>
+                              <Label className="text-xs">Email notifications</Label>
+                            </Checkbox>
+                            <Checkbox
+                              isSelected={draft.alertPolicy.slackWebhook}
+                              onChange={(checked) =>
+                                updateDraft({
+                                  ...draft,
+                                  alertPolicy: { ...draft.alertPolicy, slackWebhook: !!checked },
+                                })
+                              }
+                            >
+                              <Checkbox.Control>
+                                <Checkbox.Indicator />
+                              </Checkbox.Control>
+                              <Label className="text-xs">Slack webhook</Label>
+                            </Checkbox>
+                          </div>
                         </div>
-                      </div>
-                      <label className="md:col-span-2">
-                        <span className={labelClass}>Severity override</span>
-                        <select
-                          className={inputClass}
-                          value={draft.alertPolicy.severity || "inherit"}
-                          onChange={(e) => updateDraft({
-                            ...draft,
-                            alertPolicy: { ...draft.alertPolicy, severity: e.target.value }
-                          })}
+                        <Select
+                          aria-label="Severity override"
+                          className="md:col-span-2 w-full"
+                          variant="secondary"
+                          selectedKey={draft.alertPolicy.severity || "inherit"}
+                          onSelectionChange={(key) =>
+                            updateDraft({
+                              ...draft,
+                              alertPolicy: { ...draft.alertPolicy, severity: key ? String(key) : "inherit" },
+                            })
+                          }
                         >
-                          <option value="inherit">Inherit from application / run</option>
-                          <option value="critical">Critical</option>
-                          <option value="warning">Warning</option>
-                        </select>
-                      </label>
-                      <label className="flex items-center gap-2 md:col-span-2 text-xs">
-                        <input
-                          type="checkbox"
-                          checked={draft.alertPolicy.inheritFromApplication ?? true}
-                          onChange={(e) => updateDraft({
-                            ...draft,
-                            alertPolicy: { ...draft.alertPolicy, inheritFromApplication: e.target.checked }
-                          })}
-                        />
-                        Inherit application default channels and routing
-                      </label>
-                      <label>
-                        <span className={labelClass}>Email recipients (override)</span>
-                        <input
-                          className={inputClass}
-                          placeholder="oncall@team.com, pager@team.com"
-                          value={(draft.alertPolicy.emailTo || []).join(", ")}
-                          onChange={(e) => updateDraft({
-                            ...draft,
-                            alertPolicy: {
-                              ...draft.alertPolicy,
-                              emailTo: e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                          <Label className="text-xs font-medium text-muted">Severity override</Label>
+                          <Select.Trigger>
+                            <Select.Value />
+                            <Select.Indicator />
+                          </Select.Trigger>
+                          <Select.Popover>
+                            <ListBox>
+                              <ListBox.Item id="inherit" textValue="Inherit from application / run">
+                                Inherit from application / run
+                                <ListBox.ItemIndicator />
+                              </ListBox.Item>
+                              <ListBox.Item id="critical" textValue="Critical">
+                                Critical
+                                <ListBox.ItemIndicator />
+                              </ListBox.Item>
+                              <ListBox.Item id="warning" textValue="Warning">
+                                Warning
+                                <ListBox.ItemIndicator />
+                              </ListBox.Item>
+                            </ListBox>
+                          </Select.Popover>
+                        </Select>
+                        <div className="flex items-start gap-3 md:col-span-2">
+                          <Checkbox
+                            isSelected={draft.alertPolicy.inheritFromApplication ?? true}
+                            onChange={(checked) =>
+                              updateDraft({
+                                ...draft,
+                                alertPolicy: { ...draft.alertPolicy, inheritFromApplication: !!checked },
+                              })
                             }
-                          })}
-                        />
-                      </label>
-                      <label>
-                        <span className={labelClass}>On-call targets</span>
-                        <input
-                          className={inputClass}
-                          placeholder="@oncall-primary, @oncall-secondary"
-                          value={(draft.alertPolicy.onCallTargets || []).join(", ")}
-                          onChange={(e) => updateDraft({
-                            ...draft,
-                            alertPolicy: {
-                              ...draft.alertPolicy,
-                              onCallTargets: e.target.value.split(",").map((s) => s.trim()).filter(Boolean)
+                          >
+                            <Checkbox.Control>
+                              <Checkbox.Indicator />
+                            </Checkbox.Control>
+                          </Checkbox>
+                          <Description className="text-xs">
+                            Inherit application default channels and routing
+                          </Description>
+                        </div>
+                        <BuilderField label="Email recipients (override)">
+                          <BuilderInput
+                            placeholder="oncall@team.com, pager@team.com"
+                            value={(draft.alertPolicy.emailTo || []).join(", ")}
+                            onChange={(event) =>
+                              updateDraft({
+                                ...draft,
+                                alertPolicy: {
+                                  ...draft.alertPolicy,
+                                  emailTo: event.target.value
+                                    .split(",")
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                },
+                              })
                             }
-                          })}
-                        />
-                      </label>
-                      <label className="md:col-span-2">
-                        <span className={labelClass}>Slack webhook secret alias</span>
-                        <input
-                          className={inputClass}
-                          placeholder="slackWebhook or custom alias"
-                          value={draft.alertPolicy.slackWebhookSecret || ""}
-                          onChange={(e) => updateDraft({
-                            ...draft,
-                            alertPolicy: { ...draft.alertPolicy, slackWebhookSecret: e.target.value }
-                          })}
-                        />
-                      </label>
-                    </div>
+                          />
+                        </BuilderField>
+                        <BuilderField label="On-call targets">
+                          <BuilderInput
+                            placeholder="@oncall-primary, @oncall-secondary"
+                            value={(draft.alertPolicy.onCallTargets || []).join(", ")}
+                            onChange={(event) =>
+                              updateDraft({
+                                ...draft,
+                                alertPolicy: {
+                                  ...draft.alertPolicy,
+                                  onCallTargets: event.target.value
+                                    .split(",")
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                },
+                              })
+                            }
+                          />
+                        </BuilderField>
+                        <BuilderField label="Slack webhook secret alias" className="md:col-span-2">
+                          <BuilderInput
+                            placeholder="slackWebhook or custom alias"
+                            value={draft.alertPolicy.slackWebhookSecret || ""}
+                            onChange={(event) =>
+                              updateDraft({
+                                ...draft,
+                                alertPolicy: { ...draft.alertPolicy, slackWebhookSecret: event.target.value },
+                              })
+                            }
+                          />
+                        </BuilderField>
+                      </Card.Content>
+                    </Card>
                   )}
                 </div>
               </Section>
-            </div>
-          )}
+          </Tabs.Panel>
 
-          {builderTab === "json" && (
+          <Tabs.Panel id="json" className="pt-0">
             <Section title="JSON config" icon={FileJson}>
               <div className="space-y-3">
                 <div className="min-h-[450px] w-full rounded-md border border-border/50 overflow-hidden bg-[#1e1e1e] dark:bg-[#1e1e1e] light:bg-[#fffffe] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">
@@ -3390,21 +3769,25 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                   />
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={handleApplyJson}>
-                    <Save className="size-4 mr-1.5" />
-                    Apply JSON Changes
+                  <Button size="sm" variant="secondary" onPress={handleApplyJson} className="gap-1.5">
+                    <Save className="size-4" />
+                    Apply JSON changes
                   </Button>
                 </div>
-                {parseError && (
-                  <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300">
-                    {parseError}
-                  </div>
-                )}
+                {parseError ? (
+                  <Alert status="danger">
+                    <Alert.Indicator />
+                    <Alert.Content>
+                      <Alert.Description>{parseError}</Alert.Description>
+                    </Alert.Content>
+                  </Alert>
+                ) : null}
               </div>
             </Section>
-          )}
+          </Tabs.Panel>
 
-          {builderTab === "versions" && draft.id && (
+          {draft.id ? (
+          <Tabs.Panel id="versions" className="pt-0">
             <MonitorVersionsPanel
               monitorId={draft.id}
               published={published}
@@ -3417,24 +3800,26 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                 setJsonText(JSON.stringify(configFromMonitor(monitor), null, 2))
               }}
             />
-          )}
+          </Tabs.Panel>
+          ) : null}
 
-          {builderTab === "copilot" && (
+          <Tabs.Panel id="copilot" className="pt-0">
             <div className="grid gap-6 md:grid-cols-2">
-              {/* Left Column: AI Monitor Optimizer / Improvement suggestions */}
-              <Card className="p-4 space-y-4 border border-border/80 bg-card">
-                <div className="flex items-center gap-2 border-b border-border/40 pb-2">
-                  <Sparkles className="size-4 text-primary animate-pulse" />
-                  <h3 className="font-bold text-sm text-foreground">Pulse AI Monitor Optimizer</h3>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Get recommendations from Copilot to optimize your check coverage, performance timeouts, retries, and overall alert security.
-                </p>
-                <div className="space-y-3">
+              <Card>
+                <Card.Header className="gap-2 border-b border-border/40 pb-4">
+                  <Card.Title className="flex items-center gap-2 text-sm font-bold">
+                    <Sparkles className="size-4 text-primary animate-pulse" />
+                    Pulse AI Monitor Optimizer
+                  </Card.Title>
+                  <Description className="text-xs">
+                    Get recommendations from Copilot to optimize your check coverage, performance timeouts, retries, and overall alert security.
+                  </Description>
+                </Card.Header>
+                <Card.Content className="space-y-3">
                   <Button
                     size="sm"
-                    variant="outline"
-                    onClick={async () => {
+                    variant="secondary"
+                    onPress={async () => {
                       setOptimizing(true)
                       setOptimizationSuggestions([])
                       try {
@@ -3454,7 +3839,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                       }
                     }}
                     className="w-full text-xs font-semibold gap-1 cursor-pointer"
-                    disabled={optimizing}
+                    isDisabled={optimizing}
                   >
                     {optimizing ? <RotateCw className="size-3 animate-spin" /> : <Sparkles className="size-3 text-primary animate-pulse" />}
                     Analyze Monitor Configuration
@@ -3467,62 +3852,70 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                     </div>
                   )}
 
-                  {!optimizing && optimizationSuggestions.length === 0 && (
-                    <div className="text-center py-8 text-xs text-muted-foreground border border-dashed rounded-md bg-muted/10">
-                      No analysis run yet. Click above to run AI optimizer check.
-                    </div>
-                  )}
+                  {!optimizing && optimizationSuggestions.length === 0 ? (
+                    <EmptyState className="border border-dashed py-8 text-center">
+                      <Description className="text-xs">
+                        No analysis run yet. Click above to run AI optimizer check.
+                      </Description>
+                    </EmptyState>
+                  ) : null}
 
-                  {!optimizing && optimizationSuggestions.length > 0 && (
-                    <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+                  {!optimizing && optimizationSuggestions.length > 0 ? (
+                    <div className="max-h-[350px] space-y-3 overflow-y-auto pr-1">
                       {optimizationSuggestions.map((suggestion, idx) => (
-                        <div key={idx} className="rounded border bg-muted/20 p-3 space-y-1.5 text-xs">
-                          <div className="flex items-center gap-1.5 font-semibold text-foreground">
-                            <span className={cn(
-                              "text-[9px] uppercase px-1.5 py-0.5 rounded font-bold border",
-                              suggestion.category === "security"
-                                ? "bg-rose-500/5 text-rose-500 border-rose-500/20"
-                                : suggestion.category === "assertion"
-                                  ? "bg-emerald-500/5 text-emerald-500 border-emerald-500/20"
-                                  : "bg-blue-500/5 text-blue-500 border-blue-500/20"
-                            )}>
-                              {suggestion.category}
-                            </span>
-                            <span>{suggestion.title}</span>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground leading-relaxed">
-                            {suggestion.description}
-                          </p>
-                        </div>
+                        <Card key={idx} variant="secondary">
+                          <Card.Content className="space-y-1.5 p-3 text-xs">
+                            <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                              <Chip
+                                size="sm"
+                                variant="soft"
+                                className={cn(
+                                  "text-[9px] uppercase",
+                                  suggestion.category === "security"
+                                    ? "text-danger"
+                                    : suggestion.category === "assertion"
+                                      ? "text-success"
+                                      : "text-primary"
+                                )}
+                              >
+                                <Chip.Label>{suggestion.category}</Chip.Label>
+                              </Chip>
+                              <span>{suggestion.title}</span>
+                            </div>
+                            <Description className="text-[11px] leading-relaxed">
+                              {suggestion.description}
+                            </Description>
+                          </Card.Content>
+                        </Card>
                       ))}
                     </div>
-                  )}
-                </div>
+                  ) : null}
+                </Card.Content>
               </Card>
 
-              {/* Right Column: AI Prompt Monitor Builder */}
-              <Card className="p-4 space-y-4 border border-border/80 bg-card">
-                <div className="flex items-center gap-2 border-b border-border/40 pb-2">
-                  <Code2 className="size-4 text-primary animate-pulse" />
-                  <h3 className="font-bold text-sm text-foreground">Natural Language Monitor Builder</h3>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Describe what APIs you want to test and how often, and Pulse Copilot will write a complete configuration draft.
-                </p>
-                <div className="space-y-3 text-xs">
-                  <div className="space-y-1.5">
-                    <label className="font-semibold text-foreground">Monitor Prompt / Description</label>
-                    <textarea
+              <Card>
+                <Card.Header className="gap-2 border-b border-border/40 pb-4">
+                  <Card.Title className="flex items-center gap-2 text-sm font-bold">
+                    <Code2 className="size-4 text-primary animate-pulse" />
+                    Natural Language Monitor Builder
+                  </Card.Title>
+                  <Description className="text-xs">
+                    Describe what APIs you want to test and how often, and Pulse Copilot will write a complete configuration draft.
+                  </Description>
+                </Card.Header>
+                <Card.Content className="space-y-3 text-xs">
+                  <BuilderField label="Monitor prompt / description">
+                    <BuilderTextArea
                       value={monitorPrompt}
-                      onChange={(e) => setMonitorPrompt(e.target.value)}
+                      onChange={(event) => setMonitorPrompt(event.target.value)}
                       placeholder="e.g. Call https://api.mycompany.com/auth first with client credentials, extract the access_token variable from the response JSON body, then call https://api.mycompany.com/v1/profile using that token in the Authorization header. Run this check every 5 minutes."
-                      className="w-full min-h-[90px] border border-border rounded p-2 text-xs bg-background focus:ring-1 focus:ring-primary focus:outline-none resize-none leading-relaxed"
+                      className="min-h-[90px] resize-none text-xs leading-relaxed"
                     />
-                  </div>
+                  </BuilderField>
 
                   <Button
                     size="sm"
-                    onClick={async () => {
+                    onPress={async () => {
                       if (!monitorPrompt.trim() || promptGenerating) return
                       setPromptGenerating(true)
                       try {
@@ -3542,7 +3935,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                       }
                     }}
                     className="w-full text-xs font-semibold gap-1 cursor-pointer bg-primary text-primary-foreground"
-                    disabled={promptGenerating || !monitorPrompt.trim()}
+                    isDisabled={promptGenerating || !monitorPrompt.trim()}
                   >
                     {promptGenerating ? <RotateCw className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
                     Generate Draft Config
@@ -3578,7 +3971,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
 
                       <Button
                         size="sm"
-                        onClick={() => {
+                        onPress={() => {
                           // Apply the generated draft to current state
                           const nextSteps = (promptResult.steps || []).map((s: any, idx: number) => ({
                             id: `step-${crypto.randomUUID()}`,
@@ -3635,70 +4028,81 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                       </Button>
                     </div>
                   )}
-                </div>
+                </Card.Content>
               </Card>
             </div>
-          )}
+          </Tabs.Panel>
+        </Tabs>
 
-          {/* Validation Status Area (if errors exist) */}
-          {validationErrors.length > 0 && builderTab !== "json" && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300">
-              <div className="font-semibold mb-1">Please fix the following validation errors to save or test:</div>
-              <ul className="list-disc pl-5 space-y-0.5 text-xs">
-                {validationErrors.map((err, i) => (
-                  <li key={i}>{err}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {validationErrors.length > 0 && builderTab !== "json" ? (
+            <Alert status="danger">
+              <Alert.Indicator />
+              <Alert.Content>
+                <Alert.Title>Please fix the following validation errors to save or test</Alert.Title>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+                  {validationErrors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </Alert.Content>
+            </Alert>
+          ) : null}
 
-          {saveState === "saved" && (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300">
-              Monitor draft has been saved successfully!
-            </div>
-          )}
-          {saveState === "error" && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300">
-              Failed to save monitor draft.
-            </div>
-          )}
+          {saveState === "saved" ? (
+            <Alert status="success">
+              <Alert.Indicator />
+              <Alert.Content>
+                <Alert.Description>Monitor draft has been saved successfully!</Alert.Description>
+              </Alert.Content>
+            </Alert>
+          ) : null}
+          {saveState === "error" ? (
+            <Alert status="danger">
+              <Alert.Indicator />
+              <Alert.Content>
+                <Alert.Description>Failed to save monitor draft.</Alert.Description>
+              </Alert.Content>
+            </Alert>
+          ) : null}
         </div>
 
         {/* Test Execution Console Dialog */}
-        <Dialog open={isConsoleOpen} onOpenChange={setIsConsoleOpen}>
-          <DialogContent className="min-w-[80vw] w-full max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
-            {/* Modal Header */}
-            <DialogHeader className="px-6 py-4 border-b border-border/40 shrink-0">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <TerminalSquare className="size-5 text-primary" />
-                  <div>
-                    <DialogTitle className="text-sm font-bold tracking-tight">Test Execution Console</DialogTitle>
-                    <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                      Live dry-run of the current monitor draft — nothing is saved to history.
-                    </DialogDescription>
-                  </div>
-                  {mockRun && (
-                    <div className="flex items-center gap-2 ml-2">
-                      <span className={cn(
-                        "text-[11px] font-bold px-2.5 py-1 rounded-full border",
-                        mockRun.status === "success"
-                          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400"
-                          : "bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400"
-                      )}>
-                        {mockRun.status === "success" ? "✓ All Passed" : "✗ Failed"}
-                      </span>
-                      <span className="text-[11px] font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border/30">
-                        {mockRun.durationMs}ms total
-                      </span>
+        <Modal.Backdrop isOpen={isConsoleOpen} onOpenChange={setIsConsoleOpen}>
+          <Modal.Container>
+            <Modal.Dialog className="min-w-[80vw] w-full max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-background text-foreground">
+              <Modal.CloseTrigger />
+              {/* Modal Header */}
+              <Modal.Header className="px-6 py-4 border-b border-border/40 shrink-0">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <TerminalSquare className="size-5 text-primary" />
+                    <div className="text-left">
+                      <Modal.Heading className="text-sm font-bold tracking-tight">Test Execution Console</Modal.Heading>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Live dry-run of the current monitor draft — nothing is saved to history.
+                      </p>
                     </div>
-                  )}
+                    {mockRun && (
+                      <div className="flex items-center gap-2 ml-2">
+                        <span className={cn(
+                          "text-[11px] font-bold px-2.5 py-1 rounded-full border",
+                          mockRun.status === "success"
+                            ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400"
+                            : "bg-rose-500/10 text-rose-600 border-rose-500/30 dark:text-rose-400"
+                        )}>
+                          {mockRun.status === "success" ? "✓ All Passed" : "✗ Failed"}
+                        </span>
+                        <span className="text-[11px] font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded border border-border/30">
+                          {mockRun.durationMs}ms total
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </DialogHeader>
+              </Modal.Header>
 
-            {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+              {/* Modal Body */}
+              <Modal.Body className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
               {executionState === "running" && (
                 <div className="text-muted-foreground flex items-center gap-3 text-sm py-16 justify-center font-medium bg-muted/5 rounded-xl border border-border/20">
                   <RotateCw className="size-5 animate-spin text-primary" />
@@ -3986,49 +4390,57 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                   })}
                 </div>
               )}
-            </div>
-          </DialogContent>
-        </Dialog>
+              </Modal.Body>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
 
         {/* Secret Safety Alert Dialog */}
-        <AlertDialog open={isSafetyModalOpen} onOpenChange={setIsSafetyModalOpen}>
-          <AlertDialogContent className="sm:max-w-md">
-            <AlertDialogHeader>
-              <AlertDialogTitle className="text-base font-bold flex items-center gap-2 text-amber-600 dark:text-amber-500">
-                <AlertTriangle className="size-5" />
-                Security Check: Hardcoded Secrets
-              </AlertDialogTitle>
-              <AlertDialogDescription className="text-xs">
-                Pulse Copilot detected potential raw secrets or API keys in your monitor steps. Storing secrets in plain text is not recommended.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <div className="space-y-2 py-2 max-h-48 overflow-y-auto text-xs">
-              {safetyWarnings?.map((warning, idx) => (
-                <div key={idx} className="rounded border bg-muted/40 p-2 space-y-1">
-                  <div className="flex items-center justify-between font-semibold">
-                    <span className="text-foreground">{warning.stepName}</span>
-                    <span className="text-[10px] text-muted-foreground uppercase">{warning.location} ({warning.key})</span>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">{warning.recommendation}</p>
+        <AlertDialog.Backdrop isOpen={isSafetyModalOpen} onOpenChange={setIsSafetyModalOpen}>
+          <AlertDialog.Container>
+            <AlertDialog.Dialog className="sm:max-w-md bg-background text-foreground">
+              <AlertDialog.CloseTrigger />
+              <AlertDialog.Header>
+                <AlertDialog.Icon status="accent" />
+                <AlertDialog.Heading className="text-base font-bold flex items-center gap-2 text-amber-600 dark:text-amber-500">
+                  <AlertTriangle className="size-5 mr-1" />
+                  Security Check: Hardcoded Secrets
+                </AlertDialog.Heading>
+              </AlertDialog.Header>
+              <AlertDialog.Body>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Pulse Copilot detected potential raw secrets or API keys in your monitor steps. Storing secrets in plain text is not recommended.
+                </p>
+                <div className="space-y-2 py-2 max-h-48 overflow-y-auto text-xs">
+                  {safetyWarnings?.map((warning, idx) => (
+                    <div key={idx} className="rounded border bg-muted/40 p-2 space-y-1">
+                      <div className="flex items-center justify-between font-semibold">
+                        <span className="text-foreground">{warning.stepName}</span>
+                        <span className="text-[10px] text-muted-foreground uppercase">{warning.location} ({warning.key})</span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">{warning.recommendation}</p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <AlertDialogFooter className="border-t border-border/20 pt-3">
-              <AlertDialogCancel className="h-9 text-xs cursor-pointer" onClick={() => setIsSafetyModalOpen(false)}>
-                Cancel & Edit
-              </AlertDialogCancel>
-              <AlertDialogAction
-                className="h-9 text-xs bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
-                onClick={async () => {
-                  setIsSafetyModalOpen(false)
-                  await saveDraft()
-                }}
-              >
-                Save Anyway
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+              </AlertDialog.Body>
+              <AlertDialog.Footer className="border-t border-border/20 pt-3">
+                <Button slot="close" variant="secondary" className="h-9 text-xs cursor-pointer" onPress={() => setIsSafetyModalOpen(false)}>
+                  Cancel & Edit
+                </Button>
+                <Button
+                  slot="close"
+                  className="h-9 text-xs bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+                  onPress={async () => {
+                    setIsSafetyModalOpen(false)
+                    await saveDraft()
+                  }}
+                >
+                  Save Anyway
+                </Button>
+              </AlertDialog.Footer>
+            </AlertDialog.Dialog>
+          </AlertDialog.Container>
+        </AlertDialog.Backdrop>
 
         <MonitorImportExportDialog
           open={isImportExportOpen}
@@ -4066,115 +4478,121 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
           }}
         />
 
-        {/* cURL Import Dialog */}
-        <Dialog open={isCurlModalOpen} onOpenChange={setIsCurlModalOpen}>
-          <DialogContent className="sm:max-w-xl">
-            <DialogHeader>
-              <DialogTitle className="text-base font-bold flex items-center gap-2">
-                <Sparkles className="size-4 text-primary animate-pulse" />
-                Import HTTP Step from cURL
-              </DialogTitle>
-              <DialogDescription className="text-xs">
-                Paste a standard shell cURL command (e.g. headers, POST body, query strings) and Pulse Copilot will parse it into step settings.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2 text-xs">
-              <div className="space-y-1.5">
-                <label className="font-semibold text-foreground">cURL Command</label>
-                <textarea
-                  value={curlInput}
-                  onChange={(e) => setCurlInput(e.target.value)}
-                  placeholder='curl -X POST "https://api.example.com/v1/users" -H "Content-Type: application/json" -d "{\"name\": \"Alice\"}"'
-                  className="w-full h-32 border border-border rounded p-2 text-xs font-mono bg-background focus:ring-1 focus:ring-primary focus:outline-none resize-none leading-relaxed"
-                />
-              </div>
+        <Modal.Backdrop isOpen={isCurlModalOpen} onOpenChange={setIsCurlModalOpen}>
+          <Modal.Container>
+            <Modal.Dialog className="sm:max-w-xl bg-background text-foreground">
+              <Modal.CloseTrigger />
+              <Modal.Header>
+                <Modal.Icon className="bg-default text-foreground">
+                  <Sparkles className="size-4 text-primary animate-pulse" />
+                </Modal.Icon>
+                <Modal.Heading className="text-base font-bold flex items-center gap-2">
+                  Import HTTP Step from cURL
+                </Modal.Heading>
+              </Modal.Header>
+              <Modal.Body className="space-y-4 py-2 text-xs">
+                <p className="text-xs text-muted-foreground">
+                  Paste a standard shell cURL command (e.g. headers, POST body, query strings) and Pulse Copilot will parse it into step settings.
+                </p>
+                <TextField className="w-full" name="curlInput">
+                  <Label className="text-xs font-semibold">cURL command</Label>
+                  <TextArea
+                    variant="secondary"
+                    fullWidth
+                    className="min-h-32 font-mono text-xs leading-relaxed"
+                    value={curlInput}
+                    onChange={(e) => setCurlInput(e.target.value)}
+                    placeholder='curl -X POST "https://api.example.com/v1/users" -H "Content-Type: application/json" -d "{\"name\": \"Alice\"}"'
+                  />
+                </TextField>
 
-              {curlConverting && (
-                <div className="flex flex-col items-center justify-center py-4 text-muted-foreground text-xs gap-2">
-                  <Loader2 className="size-5 animate-spin text-primary" />
-                  <span>Copilot is parsing syntax, headers, and credentials...</span>
-                </div>
-              )}
-
-              {curlResult && (
-                <div className="space-y-3 rounded bg-muted/40 p-3 border border-border/40 max-h-40 overflow-y-auto font-mono text-[10px]">
-                  <div className="flex justify-between font-bold border-b border-border/40 pb-1.5 mb-1.5">
-                    <span className="text-foreground">{curlResult.name}</span>
-                    <span className="text-primary">{curlResult.method}</span>
+                {curlConverting && (
+                  <div className="flex flex-col items-center justify-center py-4 text-muted-foreground text-xs gap-2">
+                    <Loader2 className="size-5 animate-spin text-primary" />
+                    <span>Copilot is parsing syntax, headers, and credentials...</span>
                   </div>
-                  <div className="text-muted-foreground truncate">URL: {curlResult.url}</div>
-                  {curlResult.warnings && curlResult.warnings.length > 0 && (
-                    <div className="mt-2 p-2 rounded bg-rose-500/5 text-rose-500 border border-rose-500/10 font-sans leading-normal">
-                      <span className="font-bold flex items-center gap-1.5 mb-1">
-                        <AlertTriangle className="size-3 text-rose-500" />
-                        Security Warnings:
-                      </span>
-                      <ul className="list-disc pl-4 space-y-1">
-                        {curlResult.warnings.map((w: string, i: number) => (
-                          <li key={i}>{w}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <DialogFooter className="border-t border-border/20 pt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setIsCurlModalOpen(false)
-                  setCurlInput("")
-                  setCurlResult(null)
-                }}
-                className="h-9 text-xs cursor-pointer"
-                disabled={curlConverting}
-              >
-                Cancel
-              </Button>
-              {!curlResult ? (
-                <Button
-                  size="sm"
-                  onClick={async () => {
-                    if (!curlInput.trim() || curlConverting) return
-                    setCurlConverting(true)
-                    setCurlResult(null)
-                    try {
-                      const res = await fetch("/api/copilot/curl-convert", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ curlCommand: curlInput }),
-                      })
-                      if (res.ok) {
-                        const data = await res.json()
-                        setCurlResult(data.result)
-                      }
-                    } catch (e) {
-                      console.error(e)
-                    } finally {
-                      setCurlConverting(false)
-                    }
-                  }}
-                  className="h-9 text-xs bg-primary text-primary-foreground cursor-pointer gap-1.5"
-                  disabled={curlConverting || !curlInput.trim()}
-                >
-                  <Sparkles className="size-3.5" /> Convert to Step
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  onClick={importCurlStep}
-                  className="h-9 text-xs bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
-                >
-                  Import Step Configuration
-                </Button>
-              )}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+                )}
 
-      </div>
+                {curlResult && (
+                  <div className="space-y-3 rounded bg-muted/40 p-3 border border-border/40 max-h-40 overflow-y-auto font-mono text-[10px]">
+                    <div className="flex justify-between font-bold border-b border-border/40 pb-1.5 mb-1.5">
+                      <span className="text-foreground">{curlResult.name}</span>
+                      <span className="text-primary">{curlResult.method}</span>
+                    </div>
+                    <div className="text-muted-foreground truncate">URL: {curlResult.url}</div>
+                    {curlResult.warnings && curlResult.warnings.length > 0 && (
+                      <div className="mt-2 p-2 rounded bg-rose-500/5 text-rose-500 border border-rose-500/10 font-sans leading-normal">
+                        <span className="font-bold flex items-center gap-1.5 mb-1">
+                          <AlertTriangle className="size-3 text-rose-500" />
+                          Security Warnings:
+                        </span>
+                        <ul className="list-disc pl-4 space-y-1">
+                          {curlResult.warnings.map((w: string, i: number) => (
+                            <li key={i}>{w}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Modal.Body>
+              <Modal.Footer className="border-t border-border/20 pt-3">
+                <Button
+                  slot="close"
+                  variant="secondary"
+                  size="sm"
+                  onPress={() => {
+                    setIsCurlModalOpen(false)
+                    setCurlInput("")
+                    setCurlResult(null)
+                  }}
+                  className="h-9 text-xs cursor-pointer"
+                  isDisabled={curlConverting}
+                >
+                  Cancel
+                </Button>
+                {!curlResult ? (
+                  <Button
+                    size="sm"
+                    onPress={async () => {
+                      if (!curlInput.trim() || curlConverting) return
+                      setCurlConverting(true)
+                      setCurlResult(null)
+                      try {
+                        const res = await fetch("/api/copilot/curl-convert", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ curlCommand: curlInput }),
+                        })
+                        if (res.ok) {
+                          const data = await res.json()
+                          setCurlResult(data.result)
+                        }
+                      } catch (e) {
+                        console.error(e)
+                      } finally {
+                        setCurlConverting(false)
+                      }
+                    }}
+                    className="h-9 text-xs bg-primary text-primary-foreground cursor-pointer gap-1.5"
+                    isDisabled={curlConverting || !curlInput.trim()}
+                  >
+                    <Sparkles className="size-3.5" /> Convert to Step
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    slot="close"
+                    onPress={importCurlStep}
+                    className="h-9 text-xs bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                  >
+                    Import Step Configuration
+                  </Button>
+                )}
+              </Modal.Footer>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
     </div>
   )
 }

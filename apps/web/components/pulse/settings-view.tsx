@@ -31,20 +31,87 @@ import type {
   RetentionSettings,
 } from "@/lib/pulse-types"
 import { MaintenanceWindowsPanel } from "./maintenance-windows-panel"
-import { Button } from "@workspace/ui/components/button"
-import { Input } from "@workspace/ui/components/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@workspace/ui/components/card"
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Input,
+  Label,
+  ListBox,
+  Select,
+  Switch,
+  Tabs,
+  TextField,
+} from "@heroui/react"
 import { cn } from "@workspace/ui/lib/utils"
 import { Field, PageShell, Section } from "./console-shared"
-import { Switch } from "@workspace/ui/components/switch"
-import { Checkbox } from "@workspace/ui/components/checkbox"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@workspace/ui/components/select"
+
+const settingsTabs = [
+  { key: "notifications" as const, label: "Notifications & Alerts", desc: "SMTP and Slack configuration", icon: BellRing },
+  { key: "certificates" as const, label: "Client Certificates", desc: "mTLS profiles for secure steps", icon: FileKey },
+  { key: "maintenance" as const, label: "Maintenance Windows", desc: "Scheduled monitor blackouts", icon: Clock },
+  { key: "system" as const, label: "System & Retention", desc: "Retention window & storage purge", icon: DatabaseZap },
+]
+
+function SettingsTextField({
+  label,
+  className,
+  description,
+  ...inputProps
+}: { label: string; className?: string; description?: string } & React.ComponentProps<typeof Input>) {
+  return (
+    <TextField className={cn("w-full min-w-0 flex flex-col gap-1.5", className)}>
+      <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</Label>
+      <Input variant="secondary" fullWidth {...inputProps} className="h-10 text-sm" />
+      {description && <p className="text-[10px] text-muted-foreground mt-0.5 leading-normal">{description}</p>}
+    </TextField>
+  )
+}
+
+function SettingsSelect({
+  label,
+  selectedKey,
+  onSelectionChange,
+  options,
+  className,
+  description,
+}: {
+  label: string
+  selectedKey: string
+  onSelectionChange: (key: string) => void
+  options: { id: string; label: string }[]
+  className?: string
+  description?: string
+}) {
+  return (
+    <Select
+      className={cn("w-full min-w-0 flex flex-col gap-1.5", className)}
+      variant="secondary"
+      selectedKey={selectedKey}
+      onSelectionChange={(key) => {
+        if (key != null) onSelectionChange(String(key))
+      }}
+    >
+      <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</Label>
+      <Select.Trigger>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox>
+          {options.map((option) => (
+            <ListBox.Item key={option.id} id={option.id} textValue={option.label}>
+              {option.label}
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+      {description && <p className="text-[10px] text-muted-foreground mt-0.5 leading-normal">{description}</p>}
+    </Select>
+  )
+}
 
 export const defaultNotificationInput: NotificationSettingsInput = {
   smtpHost: "smtp.freesmtpservers.com",
@@ -59,12 +126,17 @@ export const defaultNotificationInput: NotificationSettingsInput = {
 export function ConfiguredDot({ configured }: { configured: boolean }) {
   return (
     <span className={cn(
-      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+      "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-wider shadow-xs",
       configured
-        ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-300"
-        : "border-border bg-muted/40 text-muted-foreground"
+        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+        : "border-slate-400/40 bg-slate-500/10 text-slate-700 dark:border-slate-500/40 dark:bg-slate-500/15 dark:text-slate-300"
     )}>
-      <span className={cn("size-1.5 rounded-full", configured ? "bg-emerald-500" : "bg-muted-foreground/50")} />
+      <span className={cn(
+        "size-1.5 rounded-full ring-2",
+        configured
+          ? "bg-emerald-500 ring-emerald-500/20 animate-pulse"
+          : "bg-slate-400 ring-slate-400/20 dark:bg-slate-500 dark:ring-slate-500/20"
+      )} />
       {configured ? "Configured" : "Not configured"}
     </span>
   )
@@ -79,6 +151,7 @@ interface PremiumFilePickerProps {
   onClear: () => void
   isConfigured?: boolean
   readMode?: "text" | "base64"
+  description?: string
 }
 
 function PremiumFilePicker({
@@ -89,35 +162,43 @@ function PremiumFilePicker({
   onChange,
   onClear,
   isConfigured,
-  readMode = "text"
+  readMode = "text",
+  description
 }: PremiumFilePickerProps) {
   const [fileName, setFileName] = useState<string>("")
 
   return (
-    <div className="space-y-1.5">
-      <span className="text-[11px] font-semibold uppercase text-muted-foreground">{label}</span>
+    <div className="space-y-2">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</span>
       <div className={cn(
-        "relative flex items-center justify-between gap-3 rounded-lg border border-dashed p-2.5 transition-colors text-xs bg-muted/5 hover:bg-muted/10",
-        value || isConfigured ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-800 dark:text-emerald-300" : "border-border"
+        "relative flex items-center justify-between gap-3 rounded-xl border border-dashed p-3 transition-all text-xs bg-background/50 hover:bg-background/80",
+        value || isConfigured 
+          ? "border-emerald-500/40 bg-emerald-500/5 text-emerald-800 dark:text-emerald-300" 
+          : "border-border/60 hover:border-border"
       )}>
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2.5 min-w-0">
           {value || isConfigured ? (
-            <ShieldCheck className="size-4 text-emerald-500 shrink-0" />
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+              <ShieldCheck className="size-4" />
+            </div>
           ) : (
-            <Upload className="size-4 text-muted-foreground shrink-0" />
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/5 border border-primary/10 text-primary/80">
+              <Upload className="size-4" />
+            </div>
           )}
-          <span className="truncate font-medium">
+          <span className="truncate font-semibold text-foreground">
             {fileName ? fileName : (value ? "File selected" : (isConfigured ? "Configured (encrypted)" : "No file chosen"))}
           </span>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           {(value || isConfigured) && (
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="size-7 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 cursor-pointer"
-              onClick={() => {
+              isIconOnly
+              size="sm"
+              className="size-7 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 cursor-pointer rounded-lg"
+              onPress={() => {
                 setFileName("")
                 onClear()
               }}
@@ -125,7 +206,7 @@ function PremiumFilePicker({
               <Trash2 className="size-3.5" />
             </Button>
           )}
-          <label className="relative cursor-pointer rounded bg-background px-2.5 py-1 text-[11px] font-semibold text-foreground border border-border shadow-xs hover:bg-accent hover:text-accent-foreground select-none">
+          <label className="relative inline-flex h-8 items-center justify-center rounded-lg bg-background border border-border/80 hover:border-border hover:bg-accent px-3 text-[11px] font-semibold text-foreground shadow-xs transition-colors cursor-pointer select-none">
             Browse
             <input
               type="file"
@@ -158,6 +239,7 @@ function PremiumFilePicker({
           </label>
         </div>
       </div>
+      {description && <p className="text-[10px] text-muted-foreground mt-0.5 leading-normal">{description}</p>}
     </div>
   )
 }
@@ -386,66 +468,81 @@ export function SettingsView({
     >
       <div className="space-y-6">
         {message ? (
-          <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/70 dark:bg-emerald-950/40 dark:text-emerald-300">
-            {message}
-          </p>
+          <Alert status="success">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Description>{message}</Alert.Description>
+            </Alert.Content>
+          </Alert>
         ) : null}
         {error ? (
-          <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </p>
+          <Alert status="danger">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Description>{error}</Alert.Description>
+            </Alert.Content>
+          </Alert>
         ) : null}
 
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          {/* Settings Navigation Sidebar */}
-          <aside className="w-full shrink-0 flex flex-row gap-1 border-b border-border/40 pb-2 overflow-x-auto scrollbar-none lg:flex-col lg:border-b-0 lg:pb-0 lg:w-64 lg:space-y-1">
-            {[
-              { key: "notifications", label: "Notifications & Alerts", desc: "SMTP and Slack configuration", icon: BellRing },
-              { key: "certificates", label: "Client Certificates", desc: "mTLS profiles for secure steps", icon: FileKey },
-              { key: "maintenance", label: "Maintenance Windows", desc: "Scheduled monitor blackouts", icon: Clock },
-              { key: "system", label: "System & Retention", desc: "Retention window & storage purge", icon: DatabaseZap },
-            ].map((tab) => {
-              const Icon = tab.icon
-              const isActive = activeTab === tab.key
-              return (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setActiveTab(tab.key as any)}
-                  className={cn(
-                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all hover:bg-muted/40 cursor-pointer select-none whitespace-nowrap shrink-0 lg:w-full",
-                    isActive
-                      ? "bg-muted/80 text-foreground font-medium shadow-xs border-b-2 border-primary rounded-b-none lg:border-b-0 lg:border-l-2 lg:border-primary lg:rounded-l-none"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <Icon className={cn("size-4 shrink-0", isActive ? "text-primary animate-pulse" : "text-muted-foreground/80")} />
-                  <div className="hidden sm:block text-left">
-                    <div className="text-xs font-semibold">{tab.label}</div>
-                    <div className="text-[10px] text-muted-foreground leading-tight">{tab.desc}</div>
-                  </div>
-                  <div className="sm:hidden text-xs font-semibold">{tab.label.split(" ")[0]}</div>
-                </button>
-              )
-            })}
-          </aside>
+        <Tabs
+          selectedKey={activeTab}
+          onSelectionChange={(key) => setActiveTab(String(key) as typeof activeTab)}
+          variant="secondary"
+        >
+          <Tabs.ListContainer >
+            <Tabs.List aria-label="Settings sections" >
+              {settingsTabs.map((tab) => {
+                const Icon = tab.icon
+                return (
+                  <Tabs.Tab
+                    key={tab.key}
+                    id={tab.key}
+                    className=" gap-2"
+                  >
+                    <Icon className="size-4 shrink-0 text-muted-foreground data-[selected=true]:text-primary" />
+                    <span className="text-xs font-semibold text-foreground">{tab.label}</span>
+                    <Tabs.Indicator className="bg-primary" />
+                  </Tabs.Tab>
+                )
+              })}
+            </Tabs.List>
+          </Tabs.ListContainer>
 
-          {/* Main content area */}
-          <div className="flex-1 min-w-0 space-y-6">
-            {activeTab === "notifications" && (
-              <Card>
-                <CardHeader className="border-b pb-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                        <Mail className="size-4 text-primary" />
-                        Alert delivery
-                      </CardTitle>
-                      <CardDescription>
-                        Saved values are stored as encrypted secret references and are not returned by the API.
-                      </CardDescription>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
+          <Tabs.Panel id="notifications" className="w-full min-w-0 pt-2">
+            <Card className="w-full border-border/40 rounded-2xl">
+              <Card.Header className="border-b pb-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <Card.Title className="flex items-center gap-2 text-base font-semibold">
+                      <Mail className="size-4 text-primary" />
+                      Alert delivery
+                    </Card.Title>
+                    <Card.Description>
+                      Saved values are stored as encrypted secret references and are not returned by the API.
+                    </Card.Description>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <ConfiguredDot
+                      configured={Boolean(
+                        notificationSettings?.smtp.addrConfigured &&
+                          notificationSettings?.smtp.fromConfigured &&
+                          notificationSettings?.smtp.toConfigured
+                      )}
+                    />
+                    <ConfiguredDot configured={Boolean(notificationSettings?.slack.webhookConfigured)} />
+                  </div>
+                </div>
+              </Card.Header>
+              <Card.Content className="space-y-6 pt-6">
+                <div className="grid gap-6 lg:grid-cols-2">
+                  <section className="space-y-5 rounded-2xl border border-border/30 bg-background p-6 shadow-xs">
+                    <div className="flex items-center justify-between gap-3 border-b border-border/20 pb-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-foreground">SMTP Email</h3>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Use no-auth SMTP by leaving username and password blank.
+                        </p>
+                      </div>
                       <ConfiguredDot
                         configured={Boolean(
                           notificationSettings?.smtp.addrConfigured &&
@@ -453,590 +550,562 @@ export function SettingsView({
                             notificationSettings?.smtp.toConfigured
                         )}
                       />
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
+                      <SettingsTextField
+                        label="SMTP host"
+                        value={form.smtpHost}
+                        onChange={(event) => update({ smtpHost: event.target.value })}
+                        placeholder="smtp.freesmtpservers.com"
+                      />
+                      <SettingsTextField
+                        label="Port"
+                        value={form.smtpPort}
+                        onChange={(event) => update({ smtpPort: event.target.value })}
+                        placeholder="25"
+                      />
+                    </div>
+                    <SettingsTextField
+                      label="From address"
+                      value={form.smtpFrom}
+                      onChange={(event) => update({ smtpFrom: event.target.value })}
+                      placeholder={
+                        notificationSettings?.smtp.fromConfigured
+                          ? "Configured, enter a new value to replace"
+                          : "pulse-alerts@example.com"
+                      }
+                    />
+                    <SettingsTextField
+                      label="Recipients"
+                      value={form.smtpTo}
+                      onChange={(event) => update({ smtpTo: event.target.value })}
+                      placeholder={
+                        notificationSettings?.smtp.toConfigured
+                          ? "Configured, enter comma-separated replacements"
+                          : "oncall@example.com, platform@example.com"
+                      }
+                    />
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <SettingsTextField
+                        label="SMTP username"
+                        value={form.smtpUser}
+                        onChange={(event) => update({ smtpUser: event.target.value })}
+                        placeholder="Optional"
+                      />
+                      <SettingsTextField
+                        label="SMTP password"
+                        type="password"
+                        value={form.smtpPassword}
+                        onChange={(event) => update({ smtpPassword: event.target.value })}
+                        placeholder={notificationSettings?.smtp.passwordConfigured ? "Configured" : "Optional"}
+                      />
+                    </div>
+                  </section>
+
+                  <section className="space-y-5 rounded-2xl border border-border/30 bg-background p-6 shadow-xs">
+                    <div className="flex items-center justify-between gap-3 border-b border-border/20 pb-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-foreground">Slack Webhook</h3>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Paste an incoming webhook URL from Slack app settings.
+                        </p>
+                      </div>
                       <ConfiguredDot configured={Boolean(notificationSettings?.slack.webhookConfigured)} />
                     </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-6 pt-5">
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <section className="space-y-4 rounded-md border bg-muted/5 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <h2 className="text-sm font-semibold">SMTP email</h2>
-                          <p className="text-xs text-muted-foreground">
-                            Use no-auth SMTP by leaving username and password blank.
-                          </p>
-                        </div>
-                        <ConfiguredDot
-                          configured={Boolean(
-                            notificationSettings?.smtp.addrConfigured &&
-                              notificationSettings?.smtp.fromConfigured &&
-                              notificationSettings?.smtp.toConfigured
-                          )}
-                        />
-                      </div>
-                      <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-semibold uppercase text-muted-foreground">SMTP host</span>
-                          <Input
-                            value={form.smtpHost}
-                            onChange={(event) => update({ smtpHost: event.target.value })}
-                            placeholder="smtp.freesmtpservers.com"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-semibold uppercase text-muted-foreground">Port</span>
-                          <Input
-                            value={form.smtpPort}
-                            onChange={(event) => update({ smtpPort: event.target.value })}
-                            placeholder="25"
-                          />
-                        </div>
-                      </div>
-                      <div className="block space-y-1.5">
-                        <span className="text-xs font-semibold uppercase text-muted-foreground">From address</span>
-                        <Input
-                          value={form.smtpFrom}
-                          onChange={(event) => update({ smtpFrom: event.target.value })}
-                          placeholder={
-                            notificationSettings?.smtp.fromConfigured
-                              ? "Configured, enter a new value to replace"
-                              : "pulse-alerts@example.com"
-                          }
-                        />
-                      </div>
-                      <div className="block space-y-1.5">
-                        <span className="text-xs font-semibold uppercase text-muted-foreground">Recipients</span>
-                        <Input
-                          value={form.smtpTo}
-                          onChange={(event) => update({ smtpTo: event.target.value })}
-                          placeholder={
-                            notificationSettings?.smtp.toConfigured
-                              ? "Configured, enter comma-separated replacements"
-                              : "oncall@example.com, platform@example.com"
-                          }
-                        />
-                      </div>
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-semibold uppercase text-muted-foreground">SMTP username</span>
-                          <Input
-                            value={form.smtpUser}
-                            onChange={(event) => update({ smtpUser: event.target.value })}
-                            placeholder="Optional"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-semibold uppercase text-muted-foreground">SMTP password</span>
-                          <Input
-                            type="password"
-                            value={form.smtpPassword}
-                            onChange={(event) => update({ smtpPassword: event.target.value })}
-                            placeholder={notificationSettings?.smtp.passwordConfigured ? "Configured" : "Optional"}
-                          />
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="space-y-4 rounded-md border bg-muted/5 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <h2 className="text-sm font-semibold">Slack webhook</h2>
-                          <p className="text-xs text-muted-foreground">
-                            Paste an incoming webhook URL from Slack app settings.
-                          </p>
-                        </div>
-                        <ConfiguredDot configured={Boolean(notificationSettings?.slack.webhookConfigured)} />
-                      </div>
-                      <div className="block space-y-1.5">
-                        <span className="text-xs font-semibold uppercase text-muted-foreground">
-                          Incoming webhook URL
-                        </span>
-                        <Input
-                          type="password"
-                          value={form.slackWebhookUrl}
-                          onChange={(event) => update({ slackWebhookUrl: event.target.value })}
-                          placeholder={
-                            notificationSettings?.slack.webhookConfigured
-                              ? "Configured, paste a new URL to replace"
-                              : "https://hooks.slack.com/services/..."
-                          }
-                        />
-                      </div>
-                      <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
-                        Your Slack channel link opens the channel, but Pulse needs a Slack incoming webhook URL.
-                        Create one from Slack API app settings, then select the target channel during webhook setup.
-                      </div>
-                    </section>
-                  </div>
-
-                  {testResult ? (
-                    <div className="rounded-md border bg-muted/20 p-3 text-sm">
-                      <p className="mb-2 font-semibold">Test delivery results</p>
-                      <ul className="space-y-1.5 text-muted-foreground">
-                        {testResult.deliveries.map((delivery) => (
-                          <li key={`${delivery.channel}-${delivery.sentAt}`} className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium text-foreground">{delivery.channel}</span>
-                            <span
-                              className={cn(
-                                "rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase",
-                                delivery.status === "sent"
-                                  ? "border-emerald-500/20 text-emerald-600"
-                                  : delivery.status === "failed"
-                                    ? "border-destructive/20 text-destructive"
-                                    : "border-border text-muted-foreground"
-                              )}
-                            >
-                              {delivery.status}
-                            </span>
-                            <span>{delivery.detail}</span>
-                          </li>
-                        ))}
-                      </ul>
+                    <SettingsTextField
+                      label="Incoming webhook URL"
+                      type="password"
+                      value={form.slackWebhookUrl}
+                      onChange={(event) => update({ slackWebhookUrl: event.target.value })}
+                      placeholder={
+                        notificationSettings?.slack.webhookConfigured
+                          ? "Configured, paste a new URL to replace"
+                          : "https://hooks.slack.com/services/..."
+                      }
+                    />
+                    <div className="rounded-xl border border-border/40 bg-background/50 p-4 text-[11px] leading-relaxed text-muted-foreground">
+                      Your Slack channel link opens the channel, but Pulse needs a Slack incoming webhook URL.
+                      Create one from Slack API app settings, then select the target channel during webhook setup.
                     </div>
-                  ) : null}
+                  </section>
+                </div>
 
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={sendTestAlert}
-                      disabled={testing || saving}
-                      className="gap-2 cursor-pointer"
-                    >
-                      {testing ? <RotateCw className="size-4 animate-spin" /> : <BellRing className="size-4" />}
-                      Send test alert
-                    </Button>
-                    <Button onClick={save} disabled={saving || testing} className="gap-2 cursor-pointer">
-                      {saving ? <RotateCw className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-                      Save notification settings
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {activeTab === "certificates" && (
-              <Card>
-                <CardHeader className="border-b pb-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                        <FileKey className="size-4 text-primary" />
-                        Client certificates
-                      </CardTitle>
-                      <CardDescription>
-                        Configure host-level client certificates. Request steps can use the matching profile automatically or override it.
-                      </CardDescription>
-                    </div>
-                    <ConfiguredDot configured={certificateProfiles.length > 0} />
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-5 pt-5">
-                  <div className="grid gap-6 lg:grid-cols-[1.2fr_1.8fr]">
-                    <section className="space-y-4 rounded-xl border bg-muted/5 p-5">
-                      <div>
-                        <h2 className="text-sm font-semibold flex items-center gap-2">
-                          <Lock className="size-4 text-primary" />
-                          {editingCertificateId ? "Edit Certificate Profile" : "Add Certificate Profile"}
-                        </h2>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Match by host and port to automatically authenticate monitor requests.
-                        </p>
-                      </div>
-                      
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-semibold uppercase text-muted-foreground">Profile name</span>
-                          <Input
-                            value={certificateForm.name}
-                            onChange={(event) => updateCertificate({ name: event.target.value })}
-                            placeholder="CertaaS Search API"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-semibold uppercase text-muted-foreground">Type</span>
-                          <Select
-                            value={certificateForm.certType}
-                            onValueChange={(val) => updateCertificate({ certType: val as "pem" | "pfx" })}
+                {testResult ? (
+                  <div className="rounded-xl border border-border/50 bg-muted/15 p-4 text-sm space-y-3">
+                    <p className="font-semibold text-foreground flex items-center gap-2">
+                      <Sliders className="size-4 text-primary" />
+                      Test delivery results
+                    </p>
+                    <ul className="space-y-2">
+                      {testResult.deliveries.map((delivery) => (
+                        <li key={`${delivery.channel}-${delivery.sentAt}`} className="flex flex-wrap items-center justify-between gap-2 border-b border-border/10 pb-2 last:border-b-0 last:pb-0">
+                          <div className="flex items-center gap-2.5">
+                            <span className="font-semibold text-foreground text-xs">{delivery.channel}</span>
+                            <span className="text-xs text-muted-foreground">{delivery.detail}</span>
+                          </div>
+                          <span
+                            className={cn(
+                              "rounded-full border px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+                              delivery.status === "sent"
+                                ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600"
+                                : delivery.status === "failed"
+                                  ? "border-destructive/20 bg-destructive/5 text-destructive"
+                                  : "border-border text-muted-foreground"
+                            )}
                           >
-                            <SelectTrigger className="w-full h-9">
-                              <SelectValue placeholder="Select type" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="pem">CRT + KEY</SelectItem>
-                              <SelectItem value="pfx">PFX / P12</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
+                            {delivery.status}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
 
-                      <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-semibold uppercase text-muted-foreground">Host</span>
-                          <Input
-                            value={certificateForm.host}
-                            onChange={(event) => updateCertificate({ host: event.target.value })}
-                            placeholder="certaasapi.aexp.com"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-semibold uppercase text-muted-foreground">Port</span>
-                          <Input
-                            value={String(certificateForm.port || 443)}
-                            onChange={(event) => updateCertificate({ port: Number(event.target.value) || 443 })}
-                            placeholder="443"
-                          />
-                        </div>
-                      </div>
+                <div className="flex flex-wrap justify-end gap-3 border-t border-border/20 pt-4">
+                  <Button
+                    variant="outline"
+                    onPress={sendTestAlert}
+                    isDisabled={testing || saving}
+                    className="gap-2 cursor-pointer rounded-xl h-10 px-4"
+                  >
+                    {testing ? <RotateCw className="size-4 animate-spin" /> : <BellRing className="size-4" />}
+                    Send test alert
+                  </Button>
+                  <Button onPress={save} isDisabled={saving || testing} className="gap-2 cursor-pointer rounded-xl h-10 px-4">
+                    {saving ? <RotateCw className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                    Save settings
+                  </Button>
+                </div>
+              </Card.Content>
+            </Card>
+          </Tabs.Panel>
 
-                      {certificateForm.certType === "pem" ? (
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <PremiumFilePicker
-                            id="crt-file"
-                            label="CRT file"
-                            accept=".crt,.cer,.pem"
-                            value={certificateForm.certFile}
-                            isConfigured={Boolean(activeEditingProfile?.certSecretAlias)}
-                            onChange={(certFile) => updateCertificate({ certFile })}
-                            onClear={() => updateCertificate({ certFile: undefined })}
-                          />
-                          <PremiumFilePicker
-                            id="key-file"
-                            label="KEY file"
-                            accept=".key,.pem"
-                            value={certificateForm.keyFile}
-                            isConfigured={Boolean(activeEditingProfile?.keySecretAlias)}
-                            onChange={(keyFile) => updateCertificate({ keyFile })}
-                            onClear={() => updateCertificate({ keyFile: undefined })}
-                          />
-                        </div>
-                      ) : (
+          <Tabs.Panel id="certificates" className="w-full min-w-0 pt-2">
+            <Card className="w-full border-border/40 rounded-2xl">
+              <Card.Header className="border-b pb-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <Card.Title className="flex items-center gap-2 text-base font-semibold">
+                      <FileKey className="size-4 text-primary" />
+                      Client certificates
+                    </Card.Title>
+                    <Card.Description>
+                      Configure host-level client certificates. Request steps can use the matching profile automatically or override it.
+                    </Card.Description>
+                  </div>
+                  <ConfiguredDot configured={certificateProfiles.length > 0} />
+                </div>
+              </Card.Header>
+              <Card.Content className="space-y-6 pt-6">
+                <div className="grid gap-6 lg:grid-cols-2">
+                  <section className="space-y-5 rounded-2xl border border-border/30 bg-background p-6 shadow-xs h-fit">
+                    <div className="border-b border-border/20 pb-3">
+                      <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                        <Lock className="size-4 text-primary" />
+                        {editingCertificateId ? "Edit Certificate Profile" : "Add Certificate Profile"}
+                      </h3>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Match by host and port to automatically authenticate monitor requests.
+                      </p>
+                    </div>
+                    
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <SettingsTextField
+                        label="Profile name"
+                        value={certificateForm.name}
+                        onChange={(event) => updateCertificate({ name: event.target.value })}
+                        placeholder="CertaaS Search API"
+                        description="Friendly name to identify this client certificate profile."
+                      />
+                      <SettingsSelect
+                        label="Type"
+                        selectedKey={certificateForm.certType}
+                        onSelectionChange={(val) => updateCertificate({ certType: val as "pem" | "pfx" })}
+                        options={[
+                          { id: "pem", label: "CRT + KEY" },
+                          { id: "pfx", label: "PFX / P12" },
+                        ]}
+                        description="Select PEM (CRT + KEY files) or PKCS#12 (PFX / P12) archive type."
+                      />
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
+                      <SettingsTextField
+                        label="Host"
+                        value={certificateForm.host}
+                        onChange={(event) => updateCertificate({ host: event.target.value })}
+                        placeholder="certaasapi.aexp.com"
+                        description="Domain name to match automatically during request steps."
+                      />
+                      <SettingsTextField
+                        label="Port"
+                        value={String(certificateForm.port || 443)}
+                        onChange={(event) => updateCertificate({ port: Number(event.target.value) || 443 })}
+                        placeholder="443"
+                        description="Target port (default 443)."
+                      />
+                    </div>
+
+                    {certificateForm.certType === "pem" ? (
+                      <div className="flex flex-col gap-4">
                         <PremiumFilePicker
-                          id="pfx-file"
-                          label="PFX/P12 file"
-                          accept=".pfx,.p12"
-                          readMode="base64"
-                          value={certificateForm.pfxFile}
-                          isConfigured={Boolean(activeEditingProfile?.pfxSecretAlias)}
-                          onChange={(pfxFile) => updateCertificate({ pfxFile })}
-                          onClear={() => updateCertificate({ pfxFile: undefined })}
-                        />
-                      )}
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <PremiumFilePicker
-                          id="ca-cert-file"
-                          label="CA cert file"
+                          id="crt-file"
+                          label="CRT file"
                           accept=".crt,.cer,.pem"
-                          value={certificateForm.caCertFile}
-                          isConfigured={Boolean(activeEditingProfile?.caCertSecretAlias)}
-                          onChange={(caCertFile) => updateCertificate({ caCertFile })}
-                          onClear={() => updateCertificate({ caCertFile: undefined })}
+                          value={certificateForm.certFile}
+                          isConfigured={Boolean(activeEditingProfile?.certSecretAlias)}
+                          onChange={(certFile) => updateCertificate({ certFile })}
+                          onClear={() => updateCertificate({ certFile: undefined })}
+                          description="PEM-formatted public certificate file (.crt, .pem)."
                         />
-                        <div className="space-y-1.5">
-                          <span className="text-xs font-semibold uppercase text-muted-foreground">Passphrase</span>
-                          <Input
-                            type="password"
-                            value={certificateForm.passphrase ?? ""}
-                            onChange={(event) => updateCertificate({ passphrase: event.target.value })}
-                            placeholder={activeEditingProfile?.passphraseSecretAlias ? "Configured" : "Optional"}
-                          />
-                        </div>
+                        <PremiumFilePicker
+                          id="key-file"
+                          label="KEY file"
+                          accept=".key,.pem"
+                          value={certificateForm.keyFile}
+                          isConfigured={Boolean(activeEditingProfile?.keySecretAlias)}
+                          onChange={(keyFile) => updateCertificate({ keyFile })}
+                          onClear={() => updateCertificate({ keyFile: undefined })}
+                          description="PEM-formatted private key file (.key, .pem)."
+                        />
                       </div>
+                    ) : (
+                      <PremiumFilePicker
+                        id="pfx-file"
+                        label="PFX/P12 file"
+                        accept=".pfx,.p12"
+                        readMode="base64"
+                        value={certificateForm.pfxFile}
+                        isConfigured={Boolean(activeEditingProfile?.pfxSecretAlias)}
+                        onChange={(pfxFile) => updateCertificate({ pfxFile })}
+                        onClear={() => updateCertificate({ pfxFile: undefined })}
+                        description="PKCS#12 archive containing both certificate and private key."
+                      />
+                    )}
 
-                      <div className="flex flex-col gap-3 rounded-lg border border-border/40 bg-muted/5 p-3 text-xs text-muted-foreground space-y-2">
-                        <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                          <Checkbox
-                            checked={certificateForm.isActive}
-                            onCheckedChange={(checked) => updateCertificate({ isActive: !!checked })}
-                          />
-                          <div className="space-y-0.5 -mt-0.5">
-                            <span className="font-semibold text-foreground">Active Profile</span>
-                            <p className="text-[10px] text-muted-foreground leading-tight">When checked, matching requests automatically use this profile.</p>
-                          </div>
-                        </label>
-                        <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                          <Checkbox
-                            checked={certificateForm.insecureSkipVerify}
-                            onCheckedChange={(checked) => updateCertificate({ insecureSkipVerify: !!checked })}
-                          />
-                          <div className="space-y-0.5 -mt-0.5">
-                            <span className="font-semibold text-foreground">Skip TLS Verification</span>
-                            <p className="text-[10px] text-muted-foreground leading-tight">Skip verification of server certificates (useful for self-signed certs in dev environments).</p>
-                          </div>
-                        </label>
-                      </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <PremiumFilePicker
+                        id="ca-cert-file"
+                        label="CA cert file"
+                        accept=".crt,.cer,.pem"
+                        value={certificateForm.caCertFile}
+                        isConfigured={Boolean(activeEditingProfile?.caCertSecretAlias)}
+                        onChange={(caCertFile) => updateCertificate({ caCertFile })}
+                        onClear={() => updateCertificate({ caCertFile: undefined })}
+                        description="Optional custom Root/Intermediate CA bundle if needed."
+                      />
+                      <SettingsTextField
+                        label="Passphrase"
+                        type="password"
+                        value={certificateForm.passphrase ?? ""}
+                        onChange={(event) => updateCertificate({ passphrase: event.target.value })}
+                        placeholder={activeEditingProfile?.passphraseSecretAlias ? "Configured" : "Optional"}
+                        description="Optional password to decrypt private key or PFX archive."
+                      />
+                    </div>
 
-                      <div className="flex flex-wrap justify-end gap-2">
-                        {editingCertificateId ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="cursor-pointer"
-                            onClick={() => {
-                              setEditingCertificateId(null)
-                              setCertificateForm({
-                                name: "",
-                                host: "",
-                                port: 443,
-                                certType: "pem",
-                                insecureSkipVerify: false,
-                                isActive: true,
-                              })
-                            }}
-                          >
-                            Cancel edit
-                          </Button>
-                        ) : null}
-                        <Button
-                          onClick={saveCertificate}
-                          disabled={savingCertificate}
-                          className="gap-2 cursor-pointer"
+                    <div className="flex flex-col gap-3.5 rounded-xl border border-border/40 bg-background/50 p-4 text-xs text-muted-foreground space-y-1">
+                      <label className="flex items-start gap-3 cursor-pointer select-none">
+                        <Checkbox
+                          isSelected={certificateForm.isActive}
+                          onChange={(checked) => updateCertificate({ isActive: !!checked })}
                         >
-                          {savingCertificate ? <RotateCw className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-                          Save Certificate
-                        </Button>
-                      </div>
-                    </section>
+                          <Checkbox.Control>
+                            <Checkbox.Indicator />
+                          </Checkbox.Control>
+                        </Checkbox>
+                        <div className="space-y-0.5 -mt-0.5">
+                          <span className="font-semibold text-foreground">Active Profile</span>
+                          <p className="text-[10px] text-muted-foreground leading-normal">When checked, matching requests automatically use this profile.</p>
+                        </div>
+                      </label>
+                      <label className="flex items-start gap-3 cursor-pointer select-none">
+                        <Checkbox
+                          isSelected={certificateForm.insecureSkipVerify}
+                          onChange={(checked) => updateCertificate({ insecureSkipVerify: !!checked })}
+                        >
+                          <Checkbox.Control>
+                            <Checkbox.Indicator />
+                          </Checkbox.Control>
+                        </Checkbox>
+                        <div className="space-y-0.5 -mt-0.5">
+                          <span className="font-semibold text-foreground">Skip TLS Verification</span>
+                          <p className="text-[10px] text-muted-foreground leading-normal">Skip verification of server certificates (useful for self-signed certs in dev environments).</p>
+                        </div>
+                      </label>
+                    </div>
 
-                    <section className="space-y-3 rounded-xl border bg-muted/5 p-5">
-                      <div>
-                        <h2 className="text-sm font-semibold">Configured TLS Profiles</h2>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Active certificate profiles matched automatically by target endpoint.
-                        </p>
-                      </div>
-                      {certificateProfiles.length ? (
-                        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                          {certificateProfiles.map((profile) => (
-                            <div
-                              key={profile.id}
-                              className="relative overflow-hidden rounded-xl border border-border/60 bg-card p-4 transition-all hover:shadow-xs hover:border-border/100"
-                            >
-                              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="space-y-1.5 min-w-0">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="font-semibold text-sm text-foreground truncate">{profile.name}</span>
-                                    <span
-                                      className={cn(
-                                        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold",
-                                        profile.isActive
-                                          ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
-                                          : "border-border bg-muted text-muted-foreground"
-                                      )}
-                                    >
-                                      <span className={cn("size-1 rounded-full", profile.isActive ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50")} />
-                                      {profile.isActive ? "Active" : "Inactive"}
-                                    </span>
-                                    {profile.insecureSkipVerify && (
-                                      <span className="bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded text-[10px] font-mono border border-amber-500/20 flex items-center gap-1">
-                                        <AlertTriangle className="size-2.5" />
-                                        Skip Verify
-                                      </span>
+                    <div className="flex flex-wrap justify-end gap-3 border-t border-border/20 pt-4">
+                      {editingCertificateId ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="cursor-pointer rounded-xl h-10 px-4"
+                          onPress={() => {
+                            setEditingCertificateId(null)
+                            setCertificateForm({
+                              name: "",
+                              host: "",
+                              port: 443,
+                              certType: "pem",
+                              insecureSkipVerify: false,
+                              isActive: true,
+                            })
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      ) : null}
+                      <Button
+                        onPress={saveCertificate}
+                        isDisabled={savingCertificate}
+                        className="gap-2 cursor-pointer rounded-xl h-10 px-4"
+                      >
+                        {savingCertificate ? <RotateCw className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                        Save certificate
+                      </Button>
+                    </div>
+                  </section>
+
+                  <section className="space-y-5 rounded-2xl border border-border/30 bg-background p-6 shadow-xs">
+                    <div className="border-b border-border/20 pb-3">
+                      <h3 className="text-sm font-semibold text-foreground">Configured TLS Profiles</h3>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Active certificate profiles matched automatically by target endpoint.
+                      </p>
+                    </div>
+                    {certificateProfiles.length ? (
+                      <div className="space-y-4 max-h-[560px] overflow-y-auto pr-1">
+                        {certificateProfiles.map((profile) => (
+                          <div
+                            key={profile.id}
+                            className="relative overflow-hidden rounded-xl border border-border/60 bg-background p-4.5 transition-all hover:shadow-xs hover:border-border/100"
+                          >
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="space-y-2.5 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-bold text-sm text-foreground truncate">{profile.name}</span>
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider",
+                                      profile.isActive
+                                        ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                                        : "border-border bg-muted text-muted-foreground"
                                     )}
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-1.5 font-mono text-xs text-muted-foreground bg-muted/40 px-2 py-0.5 rounded-md border border-border/20 w-fit">
-                                    <Globe className="size-3 text-muted-foreground/80" />
-                                    <span className="truncate">{profile.host}:{profile.port}</span>
-                                    <span className="text-muted-foreground/30">|</span>
-                                    <span className="uppercase text-[9px] font-bold tracking-wider">{profile.certType === "pfx" ? "PFX/P12" : "CRT + KEY"}</span>
-                                  </div>
-                                  
-                                  {/* File configuration details */}
-                                  <div className="flex flex-wrap gap-1 pt-0.5">
-                                    {profile.certType === "pem" ? (
-                                      <>
-                                        <span
-                                          className={cn(
-                                            "px-1.5 py-0.5 rounded text-[10px] font-mono border",
-                                            profile.certSecretAlias
-                                              ? "bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                                              : "bg-muted text-muted-foreground border-border"
-                                          )}
-                                        >
-                                          CRT: {profile.certSecretAlias ? "Loaded" : "Missing"}
-                                        </span>
-                                        <span
-                                          className={cn(
-                                            "px-1.5 py-0.5 rounded text-[10px] font-mono border",
-                                            profile.keySecretAlias
-                                              ? "bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                                              : "bg-muted text-muted-foreground border-border"
-                                          )}
-                                        >
-                                          KEY: {profile.keySecretAlias ? "Loaded" : "Missing"}
-                                        </span>
-                                      </>
-                                    ) : (
+                                  >
+                                    <span className={cn("size-1 rounded-full", profile.isActive ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground/50")} />
+                                    {profile.isActive ? "Active" : "Inactive"}
+                                  </span>
+                                  {profile.insecureSkipVerify && (
+                                    <span className="bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border border-amber-500/20 flex items-center gap-1">
+                                      <AlertTriangle className="size-2.5 animate-bounce" />
+                                      Skip verify
+                                    </span>
+                                  )}
+                                </div>
+                                
+                                <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground bg-muted/40 px-2.5 py-1 rounded-lg border border-border/20 w-fit">
+                                  <Globe className="size-3.5 text-muted-foreground/80" />
+                                  <span className="truncate font-semibold">{profile.host}:{profile.port}</span>
+                                  <span className="text-muted-foreground/30">|</span>
+                                  <span className="uppercase text-[9px] font-bold tracking-wider">{profile.certType === "pfx" ? "PFX/P12" : "CRT+KEY"}</span>
+                                </div>
+                                
+                                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                  {profile.certType === "pem" ? (
+                                    <>
                                       <span
                                         className={cn(
-                                          "px-1.5 py-0.5 rounded text-[10px] font-mono border",
-                                          profile.pfxSecretAlias
-                                            ? "bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 border-indigo-500/20"
+                                          "px-2 py-0.5 rounded text-[10px] font-mono font-medium border",
+                                          profile.certSecretAlias
+                                            ? "bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 border-emerald-500/10"
                                             : "bg-muted text-muted-foreground border-border"
                                         )}
                                       >
-                                        PFX: {profile.pfxSecretAlias ? "Loaded" : "Missing"}
+                                        CRT: {profile.certSecretAlias ? "Loaded" : "Missing"}
                                       </span>
-                                    )}
-                                    {profile.caCertSecretAlias && (
-                                      <span className="bg-amber-500/5 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded text-[10px] font-mono border border-amber-500/20">
-                                        CA Cert
+                                      <span
+                                        className={cn(
+                                          "px-2 py-0.5 rounded text-[10px] font-mono font-medium border",
+                                          profile.keySecretAlias
+                                            ? "bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 border-emerald-500/10"
+                                            : "bg-muted text-muted-foreground border-border"
+                                        )}
+                                      >
+                                        KEY: {profile.keySecretAlias ? "Loaded" : "Missing"}
                                       </span>
-                                    )}
-                                    {profile.passphraseSecretAlias && (
-                                      <span className="bg-slate-500/5 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded text-[10px] font-mono border border-slate-500/20">
-                                        Passphrase
-                                      </span>
-                                    )}
-                                  </div>
-                                  
-                                  <p className="text-[10px] text-muted-foreground flex items-center gap-1 pt-1">
-                                    <Clock className="size-3" />
-                                    {profile.lastTestedAt ? `Validated ${new Date(profile.lastTestedAt).toLocaleString()}` : "Never validated"}
-                                  </p>
+                                    </>
+                                  ) : (
+                                    <span
+                                      className={cn(
+                                        "px-2 py-0.5 rounded text-[10px] font-mono font-medium border",
+                                        profile.pfxSecretAlias
+                                          ? "bg-indigo-500/5 text-indigo-600 dark:text-indigo-400 border-indigo-500/10"
+                                          : "bg-muted text-muted-foreground border-border"
+                                      )}
+                                    >
+                                      PFX: {profile.pfxSecretAlias ? "Loaded" : "Missing"}
+                                    </span>
+                                  )}
+                                  {profile.caCertSecretAlias && (
+                                    <span className="bg-amber-500/5 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded text-[10px] font-mono border border-amber-500/10">
+                                      CA Cert
+                                    </span>
+                                  )}
+                                  {profile.passphraseSecretAlias && (
+                                    <span className="bg-slate-500/5 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded text-[10px] font-mono border border-slate-500/10">
+                                      Passphrase
+                                    </span>
+                                  )}
                                 </div>
                                 
-                                <div className="flex flex-wrap gap-1.5 sm:self-start shrink-0">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 text-xs gap-1 cursor-pointer"
-                                    onClick={() => editCertificate(profile)}
-                                  >
-                                    <Edit3 className="size-3.5" />
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-8 text-xs gap-1 cursor-pointer"
-                                    onClick={() => testCertificate(profile)}
-                                    disabled={testingCertificateId === profile.id}
-                                  >
-                                    {testingCertificateId === profile.id ? (
-                                      <RotateCw className="size-3.5 animate-spin" />
-                                    ) : (
-                                      <Play className="size-3.5 text-primary" />
-                                    )}
-                                    Test
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 cursor-pointer"
-                                    onClick={() => onDeleteCertificateProfile(profile.id)}
-                                  >
-                                    <Trash2 className="size-3.5" />
-                                  </Button>
-                                </div>
+                                <p className="text-[10px] text-muted-foreground flex items-center gap-1.5 pt-1">
+                                  <Clock className="size-3 text-muted-foreground/60" />
+                                  {profile.lastTestedAt ? `Validated ${new Date(profile.lastTestedAt).toLocaleString()}` : "Never validated"}
+                                </p>
+                              </div>
+                              
+                              <div className="flex flex-wrap gap-1.5 sm:self-start shrink-0">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 text-xs gap-1.5 cursor-pointer rounded-lg"
+                                  onPress={() => editCertificate(profile)}
+                                >
+                                  <Edit3 className="size-3.5 text-muted-foreground" />
+                                  Edit
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 text-xs gap-1.5 cursor-pointer rounded-lg"
+                                  onPress={() => testCertificate(profile)}
+                                  isDisabled={testingCertificateId === profile.id}
+                                >
+                                  {testingCertificateId === profile.id ? (
+                                    <RotateCw className="size-3.5 animate-spin" />
+                                  ) : (
+                                    <Play className="size-3.5 text-primary" />
+                                  )}
+                                  Test
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  isIconOnly
+                                  size="sm"
+                                  className="h-8 w-8 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/20 cursor-pointer rounded-lg"
+                                  onPress={() => onDeleteCertificateProfile(profile.id)}
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </Button>
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-xl border border-dashed bg-background p-8 text-center text-sm text-muted-foreground flex flex-col items-center justify-center gap-2">
-                          <Lock className="size-6 text-muted-foreground/50" />
-                          <div>No client certificates configured yet.</div>
-                        </div>
-                      )}
-                    </section>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {activeTab === "maintenance" && (
-              <MaintenanceWindowsPanel applications={applications} monitors={monitors} />
-            )}
-
-            {activeTab === "system" && (
-              <div className="space-y-6">
-                <Card>
-                  <CardHeader className="border-b pb-4">
-                    <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                      <DatabaseZap className="size-4 text-primary" />
-                      Run retention
-                    </CardTitle>
-                    <CardDescription>
-                      Automatically purge monitor runs older than the retention window to keep Postgres storage predictable.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4 pt-5">
-                    <label className="flex items-center gap-2.5 text-sm font-medium cursor-pointer select-none">
-                      <Switch
-                        checked={retention.enabled}
-                        onCheckedChange={(checked) => setRetention((current) => ({ ...current, enabled: !!checked }))}
-                      />
-                      Enable automatic purge (hourly)
-                    </label>
-                    <div className="block space-y-1.5 max-w-xs">
-                      <span className="text-xs font-semibold uppercase text-muted-foreground">Retention window</span>
-                      <Select
-                        value={String(retention.runsRetentionDays)}
-                        onValueChange={(val) =>
-                          setRetention((current) => ({
-                            ...current,
-                            runsRetentionDays: Number(val),
-                          }))
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Select window" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="30">30 days</SelectItem>
-                          <SelectItem value="90">90 days</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {purgeResult ? (
-                      <p className="text-xs text-muted-foreground font-medium">
-                        Last purge removed {purgeResult.deleted} run{purgeResult.deleted === 1 ? "" : "s"}.
-                      </p>
-                    ) : null}
-                    <div className="flex flex-wrap gap-2 pt-2">
-                      <Button
-                        variant="outline"
-                        onClick={saveRetention}
-                        disabled={savingRetention || purging}
-                        className="gap-2 cursor-pointer"
-                      >
-                        {savingRetention ? <RotateCw className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
-                        Save retention
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={purgeNow}
-                        disabled={purging || savingRetention}
-                        className="gap-2 cursor-pointer"
-                      >
-                        {purging ? <RotateCw className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                        Purge expired runs now
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Section title="Scheduler" icon={Clock}>
-                    <div className="space-y-2">
-                      <Field label="Timing" value="Configurable: manual, fixed intervals, custom cron" />
-                      <Field label="Duplicate prevention" value="Reserve monitor/run key before queue enqueue" />
-                    </div>
-                  </Section>
-                  <Section title="Config editing" icon={Braces}>
-                    <div className="space-y-2">
-                      <Field label="Builder" value="Form UI plus raw JSON config preview/editing path" />
-                      <Field label="Authentication" value="None for MVP local mode" />
-                    </div>
-                  </Section>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed bg-background/50 p-8 text-center text-sm text-muted-foreground flex flex-col items-center justify-center gap-2">
+                        <Lock className="size-7 text-muted-foreground/45" />
+                        <div className="font-semibold text-foreground">No client certificates</div>
+                        <p className="text-xs text-muted-foreground max-w-xs leading-normal">
+                          Client certificates configured here can automatically authenticate secure calls on target endpoints.
+                        </p>
+                      </div>
+                    )}
+                  </section>
                 </div>
+              </Card.Content>
+            </Card>
+          </Tabs.Panel>
+
+          <Tabs.Panel id="maintenance" className="w-full min-w-0 pt-2">
+            <MaintenanceWindowsPanel applications={applications} monitors={monitors} />
+          </Tabs.Panel>
+
+          <Tabs.Panel id="system" className="w-full min-w-0 pt-2">
+            <div className="space-y-6">
+              <Card className="w-full border-border/40 rounded-2xl">
+                <Card.Header className="border-b pb-4">
+                  <Card.Title className="flex items-center gap-2 text-base font-semibold">
+                    <DatabaseZap className="size-4 text-primary" />
+                    Run retention
+                  </Card.Title>
+                  <Card.Description>
+                    Automatically purge monitor runs older than the retention window to keep Postgres storage predictable.
+                  </Card.Description>
+                </Card.Header>
+                <Card.Content className="space-y-5 pt-6">
+                  <Switch
+                    isSelected={retention.enabled}
+                    onChange={(checked) => setRetention((current) => ({ ...current, enabled: !!checked }))}
+                  >
+                    <Switch.Control>
+                      <Switch.Thumb />
+                    </Switch.Control>
+                    <Switch.Content>
+                      <Label className="text-sm font-medium">Enable automatic purge (hourly)</Label>
+                    </Switch.Content>
+                  </Switch>
+                  <SettingsSelect
+                    className="max-w-xs"
+                    label="Retention window"
+                    selectedKey={String(retention.runsRetentionDays)}
+                    onSelectionChange={(val) =>
+                      setRetention((current) => ({
+                        ...current,
+                        runsRetentionDays: Number(val),
+                      }))
+                    }
+                    options={[
+                      { id: "30", label: "30 days" },
+                      { id: "90", label: "90 days" },
+                    ]}
+                  />
+                  {purgeResult ? (
+                    <p className="text-xs text-muted-foreground font-semibold bg-muted/30 px-3 py-2 rounded-lg border border-border/20 w-fit">
+                      Last purge removed {purgeResult.deleted} run{purgeResult.deleted === 1 ? "" : "s"}.
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-3 pt-2">
+                    <Button
+                      variant="outline"
+                      onPress={saveRetention}
+                      isDisabled={savingRetention || purging}
+                      className="gap-2 cursor-pointer rounded-xl h-10 px-4"
+                    >
+                      {savingRetention ? <RotateCw className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+                      Save retention
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onPress={purgeNow}
+                      isDisabled={purging || savingRetention}
+                      className="gap-2 cursor-pointer rounded-xl h-10 px-4"
+                    >
+                      {purging ? <RotateCw className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                      Purge expired runs now
+                    </Button>
+                  </div>
+                </Card.Content>
+              </Card>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <Section title="Scheduler" icon={Clock}>
+                  <div className="space-y-3">
+                    <Field label="Timing" value="Configurable: manual, fixed intervals, custom cron" />
+                    <Field label="Duplicate prevention" value="Reserve monitor/run key before queue enqueue" />
+                  </div>
+                </Section>
+                <Section title="Config editing" icon={Braces}>
+                  <div className="space-y-3">
+                    <Field label="Builder" value="Form UI plus raw JSON config preview/editing path" />
+                    <Field label="Authentication" value="None for MVP local mode" />
+                  </div>
+                </Section>
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          </Tabs.Panel>
+        </Tabs>
       </div>
     </PageShell>
   )

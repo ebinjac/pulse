@@ -16,19 +16,10 @@ import {
   Sun,
   Moon,
 } from "lucide-react"
-
-import { Button } from "@workspace/ui/components/button"
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarGroup,
-  SidebarGroupContent,
-} from "@workspace/ui/components/sidebar"
+import { Button, Description, Drawer, Separator } from "@heroui/react"
+import { cn } from "@workspace/ui/lib/utils"
+import rythmLogo from "@/assets/amexlogo.svg"
+import { useAppShell } from "./app-shell"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: Activity },
@@ -38,10 +29,58 @@ const navItems = [
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/secrets", label: "Secrets", icon: KeyRound },
   { href: "/settings", label: "Settings", icon: Settings },
-]
+] as const
 
-export function AppSidebar() {
+function isLinkActive(pathname: string, href: string) {
+  if (href === "/dashboard") {
+    return pathname === "/dashboard" || pathname === "/"
+  }
+  return pathname.startsWith(href)
+}
+
+function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
+
+  return (
+    <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Main navigation">
+      {navItems.map((item) => {
+        const active = isLinkActive(pathname, item.href)
+        const Icon = item.icon
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            onClick={onNavigate}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              active
+                ? "bg-accent text-white"
+                : "text-muted hover:bg-accent/10 hover:text-foreground"
+            )}
+          >
+            <Icon className={cn("size-4 shrink-0", active ? "text-white" : "text-muted")} />
+            <span>{item.label}</span>
+          </Link>
+        )
+      })}
+    </nav>
+  )
+}
+
+function SidebarBrand() {
+  return (
+    <Link href="/dashboard" className="flex items-center gap-1 px-2">
+      <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg">
+        <img src={(rythmLogo as { src: string }).src} alt="" className="size-14" />
+      </span>
+      <div className="min-w-0">
+        <span className="font-heading block truncate text-lg font-semibold text-foreground">Rythm</span>
+      </div>
+    </Link>
+  )
+}
+
+function SidebarFooter() {
   const { setTheme, resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
@@ -49,74 +88,93 @@ export function AppSidebar() {
     setMounted(true)
   }, [])
 
-  const isLinkActive = (href: string) => {
-    if (href === "/dashboard") {
-      return pathname === "/dashboard" || pathname === "/"
-    }
-    return pathname.startsWith(href)
-  }
+  return (
+    <div className="space-y-3 border-t border-separator p-3">
+      <div className="flex items-start gap-2 text-left">
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" />
+        <div className="min-w-0">
+          <span className="block text-[10px] font-semibold uppercase tracking-wider text-foreground">
+            Secrets protected
+          </span>
+          <Description className="mt-0.5 text-[9px] leading-snug">
+            Values are masked in execution logs
+          </Description>
+        </div>
+      </div>
+      <Separator />
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-full justify-start gap-2 px-2 text-xs font-semibold text-muted"
+        onPress={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+      >
+        {mounted && resolvedTheme === "dark" ? (
+          <>
+            <Sun className="size-3.5 text-warning" />
+            Light mode
+          </>
+        ) : (
+          <>
+            <Moon className="size-3.5 text-accent" />
+            Dark mode
+          </>
+        )}
+      </Button>
+    </div>
+  )
+}
+
+function SidebarPanel({ className }: { className?: string }) {
+  return (
+    <div className={cn("flex h-full flex-col bg-background", className)}>
+      <div className=" p-4">
+        <SidebarBrand />
+      </div>
+      <SidebarNav />
+      <SidebarFooter />
+    </div>
+  )
+}
+
+export function AppSidebar() {
+  const pathname = usePathname()
+  const { isMobile, mobileOpen, setMobileOpen, desktopOpen } = useAppShell()
+
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [pathname, setMobileOpen])
 
   return (
-    <Sidebar>
-      <SidebarHeader className="p-4 border-b">
-        <Link href="/dashboard" className="flex items-center gap-3">
-          <span className="bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-md shrink-0">
-            <Activity className="size-4" />
-          </span>
-          <div className="min-w-0">
-            <span className="font-heading block text-sm font-semibold truncate text-foreground">Pulse</span>
-            <span className="text-muted-foreground/60 text-[9px] block truncate font-semibold tracking-wider uppercase">Synthetic Monitors</span>
-          </div>
-        </Link>
-      </SidebarHeader>
-      <SidebarContent className="p-2">
-        <SidebarGroup className="p-0">
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton 
-                    render={<Link href={item.href} />}
-                    isActive={isLinkActive(item.href)}
-                  >
-                    <item.icon className="size-4 shrink-0 text-muted-foreground group-data-[active=true]/menu-button:text-primary" />
-                    <span>{item.label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
-      <SidebarFooter className="p-3 border-t bg-muted/5 space-y-3">
-        <div className="flex gap-2 items-start text-muted-foreground text-left">
-          <ShieldCheck className="text-emerald-600 size-4 shrink-0 mt-0.5" />
-          <div className="min-w-0">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground block">Secrets protected</span>
-            <span className="text-[9px] text-muted-foreground/80 block mt-0.5 font-medium leading-3">Values are masked in execution logs</span>
-          </div>
-        </div>
-        <div className="border-t border-border/60 pt-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start h-8 px-2 text-xs font-semibold gap-2 hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
-            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-          >
-            {mounted && resolvedTheme === "dark" ? (
-              <>
-                <Sun className="size-3.5 text-amber-500" />
-                <span>Light Mode</span>
-              </>
-            ) : (
-              <>
-                <Moon className="size-3.5 text-blue-500" />
-                <span>Dark Mode</span>
-              </>
-            )}
-          </Button>
-        </div>
-      </SidebarFooter>
-    </Sidebar>
+    <>
+      <div
+        aria-hidden
+        className={cn(
+          "relative hidden shrink-0 transition-[width] duration-200 ease-linear md:block",
+          desktopOpen ? "w-64" : "w-0"
+        )}
+      />
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-20 hidden h-svh w-64 flex-col border-r border-separator bg-background transition-[transform,width] duration-200 ease-linear md:flex",
+          !desktopOpen && "-translate-x-full"
+        )}
+        aria-hidden={!desktopOpen}
+      >
+        <SidebarPanel />
+      </aside>
+
+      {isMobile ? (
+        <Drawer isOpen={mobileOpen} onOpenChange={setMobileOpen}>
+          <Drawer.Backdrop>
+            <Drawer.Content placement="left" className="w-[min(18rem,85vw)] max-w-[18rem] p-0">
+              <Drawer.Dialog className="p-0">
+                <Drawer.CloseTrigger />
+                <SidebarPanel />
+              </Drawer.Dialog>
+            </Drawer.Content>
+          </Drawer.Backdrop>
+        </Drawer>
+      ) : null}
+    </>
   )
 }

@@ -15,7 +15,7 @@ import {
 import Editor from "@monaco-editor/react"
 import { useTheme } from "next-themes"
 
-import { Button } from "@workspace/ui/components/button"
+import { Button } from "@heroui/react"
 import { cn } from "@workspace/ui/lib/utils"
 import type { TemplateSuggestion } from "./template-intelligence"
 
@@ -241,7 +241,7 @@ export function ScriptEditor({ value, onChange, stepName, suggestions = [] }: Sc
               variant="outline"
               size="sm"
               type="button"
-              onClick={() => insertSnippet(snippet.code)}
+              onPress={() => insertSnippet(snippet.code)}
               className="h-7 text-[11px] px-2 gap-1 cursor-pointer"
             >
               <Icon className="size-3" />

@@ -8,25 +8,22 @@ import {
   Upload,
   Workflow,
   Braces,
-  AlertTriangle,
 } from "lucide-react"
-
-import { Button } from "@workspace/ui/components/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@workspace/ui/components/dialog"
-import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Description,
+  Input,
+  Label,
+  ListBox,
+  Modal,
   Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@workspace/ui/components/select"
+  Tabs,
+  TextArea,
+  TextField,
+} from "@heroui/react"
 import { cn } from "@workspace/ui/lib/utils"
 import type { Application, Monitor, MonitorStep } from "@/lib/pulse-types"
 import type {
@@ -38,6 +35,67 @@ import type {
 
 type DialogTab = "postman" | "openapi" | "bundle" | "export"
 type DialogMode = "builder" | "inventory"
+
+const DIALOG_TABS = [
+  { key: "postman" as const, label: "Postman", icon: Upload },
+  { key: "openapi" as const, label: "OpenAPI", icon: Braces },
+  { key: "bundle" as const, label: "Pulse bundle", icon: FileJson },
+  { key: "export" as const, label: "Export", icon: Download },
+] as const
+
+const POSTMAN_MODE_OPTIONS: { id: PostmanImportMode; label: string }[] = [
+  { id: "workflow", label: "One monitor — all requests as steps" },
+  { id: "per-request", label: "One monitor per request" },
+]
+
+const EXPORT_FORMAT_OPTIONS: { id: ExportFormat; label: string }[] = [
+  { id: "json", label: "JSON" },
+  { id: "yaml", label: "YAML" },
+]
+
+function ImportSelectField<T extends string>({
+  label,
+  ariaLabel,
+  selectedKey,
+  onSelectionChange,
+  options,
+  className,
+}: {
+  label: string
+  ariaLabel: string
+  selectedKey: T
+  onSelectionChange: (key: T) => void
+  options: ReadonlyArray<{ id: T; label: string }>
+  className?: string
+}) {
+  return (
+    <Select
+      aria-label={ariaLabel}
+      className={cn("w-full", className)}
+      variant="secondary"
+      selectedKey={selectedKey}
+      onSelectionChange={(key) => {
+        if (key != null) onSelectionChange(String(key) as T)
+      }}
+    >
+      <Label className="text-xs font-medium text-muted">{label}</Label>
+      <Select.Trigger>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox>
+          {options.map((option) => (
+            <ListBox.Item key={option.id} id={option.id} textValue={option.label}>
+              {option.label}
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  )
+}
 
 interface MonitorImportExportDialogProps {
   open: boolean
@@ -82,12 +140,27 @@ export function MonitorImportExportDialog({
     return monitors
   }, [mode, monitors])
 
+  const applicationOptions = useMemo(
+    () => [
+      { id: "__none__" as const, label: "No application" },
+      ...applications.map((app) => ({ id: app.id, label: app.name })),
+    ],
+    [applications]
+  )
+
   function resetPreview() {
     setError(null)
     setWarnings([])
     setPreviewMonitors([])
     setOpenapiOps([])
     setSelectedOps(new Set())
+  }
+
+  function handleTabChange(key: React.Key | null) {
+    if (key == null) return
+    setTab(String(key) as DialogTab)
+    resetPreview()
+    setError(null)
   }
 
   async function parsePostman() {
@@ -263,282 +336,294 @@ export function MonitorImportExportDialog({
     }
   }
 
-  function toggleOperation(key: string) {
+  function toggleOperation(key: string, checked: boolean) {
     setSelectedOps((prev) => {
       const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
+      if (checked) next.add(key)
+      else next.delete(key)
       return next
     })
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/40">
-          <DialogTitle className="font-heading flex items-center gap-2">
-            <Workflow className="size-4 text-primary" />
-            Import &amp; export monitors
-          </DialogTitle>
-          <DialogDescription>
-            {mode === "builder"
-              ? "Import Postman workflows into the builder, or export the current monitor for version control."
-              : "Bulk import from Postman, OpenAPI, or Pulse export files; export your monitor inventory."}
-          </DialogDescription>
-        </DialogHeader>
+  const importStatusBlock = (
+    <>
+      {error ? (
+        <Alert status="danger">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Description>{error}</Alert.Description>
+          </Alert.Content>
+        </Alert>
+      ) : null}
 
-        <div className="flex gap-1 px-6 pt-3 border-b border-border/30">
-          {(
-            [
-              { key: "postman" as const, label: "Postman", icon: Upload },
-              { key: "openapi" as const, label: "OpenAPI", icon: Braces },
-              { key: "bundle" as const, label: "Pulse bundle", icon: FileJson },
-              { key: "export" as const, label: "Export", icon: Download },
-            ] as const
-          ).map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => {
-                setTab(item.key)
-                resetPreview()
-                setError(null)
-              }}
-              className={cn(
-                "px-3 py-2 text-xs font-semibold rounded-t-md flex items-center gap-1.5 -mb-px border-b-2",
-                tab === item.key
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <item.icon className="size-3.5" />
-              {item.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-          {tab !== "export" && applications.length > 0 && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Application</label>
-              <Select
-                value={applicationId || "__none__"}
-                onValueChange={(v) => setApplicationId(!v || v === "__none__" ? "" : v)}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Optional application" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">No application</SelectItem>
-                  {applications.map((app) => (
-                    <SelectItem key={app.id} value={app.id}>
-                      {app.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {tab === "postman" && (
-            <>
-              {mode === "inventory" && (
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Import mode</label>
-                  <Select
-                    value={postmanMode}
-                    onValueChange={(v) => v && setPostmanMode(v as PostmanImportMode)}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="workflow">One monitor — all requests as steps</SelectItem>
-                      <SelectItem value="per-request">One monitor per request</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {mode === "builder" && (
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={replaceSteps}
-                    onChange={(e) => setReplaceSteps(e.target.checked)}
-                    className="rounded border-input"
-                  />
-                  Replace existing steps (unchecked = append imported steps)
-                </label>
-              )}
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Postman Collection v2.1 JSON</label>
-                <textarea
-                  value={documentText}
-                  onChange={(e) => setDocumentText(e.target.value)}
-                  placeholder='Paste collection JSON exported from Postman ("Collection v2.1")...'
-                  className="min-h-40 w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs font-mono"
-                />
-              </div>
-              <Button type="button" size="sm" onClick={() => void parsePostman()} disabled={loading || !documentText.trim()}>
-                {loading ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                Parse collection
-              </Button>
-            </>
-          )}
-
-          {tab === "openapi" && (
-            <>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Base URL override (optional)</label>
-                <input
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  placeholder="https://api.example.com"
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">OpenAPI 3.x or Swagger 2.0 JSON</label>
-                <textarea
-                  value={documentText}
-                  onChange={(e) => setDocumentText(e.target.value)}
-                  placeholder="Paste openapi.json or swagger.json..."
-                  className="min-h-32 w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs font-mono"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button type="button" size="sm" variant="outline" onClick={() => void parseOpenApi(true)} disabled={loading || !documentText.trim()}>
-                  List operations
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => void parseOpenApi(false)}
-                  disabled={loading || !documentText.trim() || selectedOps.size === 0}
-                >
-                  Import {selectedOps.size || "…"} operation(s)
-                </Button>
-              </div>
-              {openapiOps.length > 0 && (
-                <div className="max-h-48 overflow-y-auto rounded-md border border-border/40 divide-y divide-border/30">
-                  {openapiOps.map((op) => (
-                    <label key={op.key} className="flex items-start gap-2 px-3 py-2 text-xs cursor-pointer hover:bg-muted/30">
-                      <input
-                        type="checkbox"
-                        checked={selectedOps.has(op.key)}
-                        onChange={() => toggleOperation(op.key)}
-                        className="mt-0.5"
-                      />
-                      <span>
-                        <span className="font-mono font-semibold text-primary">{op.method}</span>{" "}
-                        <span className="font-mono">{op.path}</span>
-                        {op.summary ? <span className="block text-muted-foreground mt-0.5">{op.summary}</span> : null}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          {tab === "bundle" && (
-            <>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Pulse export file (JSON or YAML)</label>
-                <textarea
-                  value={documentText}
-                  onChange={(e) => setDocumentText(e.target.value)}
-                  placeholder="Paste a pulse-monitors export or single monitor JSON/YAML..."
-                  className="min-h-40 w-full rounded-md border border-input bg-transparent px-3 py-2 text-xs font-mono"
-                />
-              </div>
-              <Button type="button" size="sm" onClick={() => void parseBundle()} disabled={loading || !documentText.trim()}>
-                Parse export
-              </Button>
-            </>
-          )}
-
-          {tab === "export" && (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Export {exportTargets.length} monitor{exportTargets.length === 1 ? "" : "s"} for version control or disaster recovery.
-                Runtime fields (status, last run) are omitted.
-              </p>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Format</label>
-                <Select
-                  value={exportFormat}
-                  onValueChange={(v) => v && setExportFormat(v as ExportFormat)}
-                >
-                  <SelectTrigger className="h-9 w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="json">JSON</SelectItem>
-                    <SelectItem value="yaml">YAML</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <Button type="button" size="sm" onClick={() => void downloadExport()} disabled={loading || !exportTargets.length} className="gap-1.5">
-                {loading ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
-                Download export
-              </Button>
-            </div>
-          )}
-
-          {error && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/40 dark:text-rose-300">
-              {error}
-            </div>
-          )}
-
-          {warnings.length > 0 && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/40 dark:text-amber-300 space-y-1">
-              <div className="font-semibold flex items-center gap-1">
-                <AlertTriangle className="size-3.5" />
-                Import warnings
-              </div>
+      {warnings.length > 0 ? (
+        <Alert status="warning">
+          <Alert.Indicator />
+          <Alert.Content>
+            <Alert.Title>Import warnings</Alert.Title>
+            <div className="mt-1 space-y-1">
               {warnings.slice(0, 8).map((w, i) => (
-                <p key={`${w.code}-${i}`}>
+                <Alert.Description key={`${w.code}-${i}`}>
                   {w.path ? `${w.path}: ` : ""}
                   {w.message}
-                </p>
+                </Alert.Description>
               ))}
             </div>
-          )}
+          </Alert.Content>
+        </Alert>
+      ) : null}
 
-          {previewMonitors.length > 0 && tab !== "export" && (
-            <div className="rounded-md border border-border/40 bg-muted/10 p-3 space-y-2">
-              <p className="text-xs font-semibold text-foreground">
-                Preview: {previewMonitors.length} monitor{previewMonitors.length === 1 ? "" : "s"},{" "}
-                {previewMonitors.reduce((n, m) => n + m.steps.length, 0)} total steps
-              </p>
-              <ul className="text-xs text-muted-foreground space-y-1 max-h-32 overflow-y-auto">
-                {previewMonitors.map((m) => (
-                  <li key={m.name + m.steps.length}>
-                    <span className="font-medium text-foreground">{m.name}</span> — {m.steps.length} step(s)
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
+      {previewMonitors.length > 0 && tab !== "export" ? (
+        <Card variant="secondary">
+          <Card.Header className="pb-2">
+            <Card.Title className="text-xs">
+              Preview: {previewMonitors.length} monitor{previewMonitors.length === 1 ? "" : "s"},{" "}
+              {previewMonitors.reduce((n, m) => n + m.steps.length, 0)} total steps
+            </Card.Title>
+          </Card.Header>
+          <Card.Content>
+            <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-muted">
+              {previewMonitors.map((m) => (
+                <li key={m.name + m.steps.length}>
+                  <span className="font-medium text-foreground">{m.name}</span> — {m.steps.length} step(s)
+                </li>
+              ))}
+            </ul>
+          </Card.Content>
+        </Card>
+      ) : null}
+    </>
+  )
 
-        {tab !== "export" && (
-          <DialogFooter className="px-6 py-4 border-t border-border/40 gap-2">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={applyPreview}
-              disabled={loading || !previewMonitors.length}
-            >
-              {mode === "builder" ? "Apply to builder" : `Save ${previewMonitors.length} monitor(s)`}
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
-    </Dialog>
+  return (
+    <Modal isOpen={open} onOpenChange={onOpenChange}>
+      <Modal.Backdrop>
+        <Modal.Container size="full" scroll="inside">
+          <Modal.Dialog>
+            <Modal.CloseTrigger />
+            <Modal.Header>
+              <Modal.Heading className="flex items-center gap-2">
+                <Workflow className="size-4 text-accent" />
+                Import &amp; export monitors
+              </Modal.Heading>
+              <Description className="text-sm text-muted">
+                {mode === "builder"
+                  ? "Import Postman workflows into the builder, or export the current monitor for version control."
+                  : "Bulk import from Postman, OpenAPI, or Pulse export files; export your monitor inventory."}
+              </Description>
+            </Modal.Header>
+
+            <Modal.Body className="gap-5">
+              {tab !== "export" && applications.length > 0 ? (
+                <ImportSelectField
+                  label="Application"
+                  ariaLabel="Application"
+                  selectedKey={applicationId || "__none__"}
+                  onSelectionChange={(key) => setApplicationId(key === "__none__" ? "" : key)}
+                  options={applicationOptions}
+                />
+              ) : null}
+
+              <Tabs selectedKey={tab} onSelectionChange={handleTabChange} variant="secondary" className="w-full gap-5">
+                <Tabs.ListContainer>
+                  <Tabs.List aria-label="Import and export sections" className="w-full">
+                    {DIALOG_TABS.map((item) => {
+                      const Icon = item.icon
+                      return (
+                        <Tabs.Tab key={item.key} id={item.key} className="gap-1.5">
+                          <Icon className="size-3.5" />
+                          {item.label}
+                          <Tabs.Indicator />
+                        </Tabs.Tab>
+                      )
+                    })}
+                  </Tabs.List>
+                </Tabs.ListContainer>
+
+                <Tabs.Panel id="postman" className="flex flex-col gap-4 pt-0">
+                  {mode === "inventory" ? (
+                    <ImportSelectField
+                      label="Import mode"
+                      ariaLabel="Postman import mode"
+                      selectedKey={postmanMode}
+                      onSelectionChange={setPostmanMode}
+                      options={POSTMAN_MODE_OPTIONS}
+                    />
+                  ) : null}
+                  {mode === "builder" ? (
+                    <div className="flex items-start gap-3 text-sm">
+                      <Checkbox isSelected={replaceSteps} onChange={(checked) => setReplaceSteps(!!checked)}>
+                        <Checkbox.Control>
+                          <Checkbox.Indicator />
+                        </Checkbox.Control>
+                      </Checkbox>
+                      <Description className="text-xs">
+                        Replace existing steps (unchecked = append imported steps)
+                      </Description>
+                    </div>
+                  ) : null}
+                  <TextField className="w-full" name="postmanDocument">
+                    <Label className="text-xs font-medium text-muted">Postman Collection v2.1 JSON</Label>
+                    <TextArea
+                      variant="secondary"
+                      fullWidth
+                      className="min-h-40 font-mono text-xs"
+                      value={documentText}
+                      onChange={(event) => setDocumentText(event.target.value)}
+                      placeholder='Paste collection JSON exported from Postman ("Collection v2.1")...'
+                    />
+                  </TextField>
+                  <Button
+                    size="sm"
+                    onPress={() => void parsePostman()}
+                    isDisabled={loading || !documentText.trim()}
+                  >
+                    {loading ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                    Parse collection
+                  </Button>
+                  {importStatusBlock}
+                </Tabs.Panel>
+
+                <Tabs.Panel id="openapi" className="flex flex-col gap-4 pt-0">
+                  <TextField className="w-full" name="baseUrl" type="url">
+                    <Label className="text-xs font-medium text-muted">Base URL override (optional)</Label>
+                    <Input
+                      variant="secondary"
+                      fullWidth
+                      value={baseUrl}
+                      onChange={(event) => setBaseUrl(event.target.value)}
+                      placeholder="https://api.example.com"
+                    />
+                  </TextField>
+                  <TextField className="w-full" name="openapiDocument">
+                    <Label className="text-xs font-medium text-muted">OpenAPI 3.x or Swagger 2.0 JSON</Label>
+                    <TextArea
+                      variant="secondary"
+                      fullWidth
+                      className="min-h-32 font-mono text-xs"
+                      value={documentText}
+                      onChange={(event) => setDocumentText(event.target.value)}
+                      placeholder="Paste openapi.json or swagger.json..."
+                    />
+                  </TextField>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onPress={() => void parseOpenApi(true)}
+                      isDisabled={loading || !documentText.trim()}
+                    >
+                      List operations
+                    </Button>
+                    <Button
+                      size="sm"
+                      onPress={() => void parseOpenApi(false)}
+                      isDisabled={loading || !documentText.trim() || selectedOps.size === 0}
+                    >
+                      Import {selectedOps.size || "…"} operation(s)
+                    </Button>
+                  </div>
+                  {openapiOps.length > 0 ? (
+                    <Card variant="secondary" className="max-h-48 overflow-hidden">
+                      <Card.Content className="gap-0 divide-y divide-separator p-0">
+                        {openapiOps.map((op) => (
+                          <label
+                            key={op.key}
+                            className="flex cursor-pointer items-start gap-3 px-3 py-2 text-xs hover:bg-default"
+                          >
+                            <Checkbox
+                              isSelected={selectedOps.has(op.key)}
+                              onChange={(checked) => toggleOperation(op.key, !!checked)}
+                            >
+                              <Checkbox.Control>
+                                <Checkbox.Indicator />
+                              </Checkbox.Control>
+                            </Checkbox>
+                            <span className="min-w-0 flex-1">
+                              <span className="font-mono font-semibold text-accent">{op.method}</span>{" "}
+                              <span className="font-mono">{op.path}</span>
+                              {op.summary ? (
+                                <Description className="mt-0.5 block text-xs">{op.summary}</Description>
+                              ) : null}
+                            </span>
+                          </label>
+                        ))}
+                      </Card.Content>
+                    </Card>
+                  ) : null}
+                  {importStatusBlock}
+                </Tabs.Panel>
+
+                <Tabs.Panel id="bundle" className="flex flex-col gap-4 pt-0">
+                  <TextField className="w-full" name="bundleDocument">
+                    <Label className="text-xs font-medium text-muted">Pulse export file (JSON or YAML)</Label>
+                    <TextArea
+                      variant="secondary"
+                      fullWidth
+                      className="min-h-40 font-mono text-xs"
+                      value={documentText}
+                      onChange={(event) => setDocumentText(event.target.value)}
+                      placeholder="Paste a pulse-monitors export or single monitor JSON/YAML..."
+                    />
+                  </TextField>
+                  <Button
+                    size="sm"
+                    onPress={() => void parseBundle()}
+                    isDisabled={loading || !documentText.trim()}
+                  >
+                    {loading ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                    Parse export
+                  </Button>
+                  {importStatusBlock}
+                </Tabs.Panel>
+
+                <Tabs.Panel id="export" className="flex flex-col gap-4 pt-0">
+                  <Description className="text-sm">
+                    Export {exportTargets.length} monitor{exportTargets.length === 1 ? "" : "s"} for version control or
+                    disaster recovery. Runtime fields (status, last run) are omitted.
+                  </Description>
+                  <ImportSelectField
+                    label="Format"
+                    ariaLabel="Export format"
+                    className="w-40"
+                    selectedKey={exportFormat}
+                    onSelectionChange={setExportFormat}
+                    options={EXPORT_FORMAT_OPTIONS}
+                  />
+                  <Button
+                    size="sm"
+                    className="gap-1.5 self-start"
+                    onPress={() => void downloadExport()}
+                    isDisabled={loading || !exportTargets.length}
+                  >
+                    {loading ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
+                    Download export
+                  </Button>
+                  {error ? (
+                    <Alert status="danger">
+                      <Alert.Indicator />
+                      <Alert.Content>
+                        <Alert.Description>{error}</Alert.Description>
+                      </Alert.Content>
+                    </Alert>
+                  ) : null}
+                </Tabs.Panel>
+              </Tabs>
+            </Modal.Body>
+
+            {tab !== "export" ? (
+              <Modal.Footer>
+                <Button variant="secondary" slot="close" isDisabled={loading}>
+                  Cancel
+                </Button>
+                <Button onPress={applyPreview} isDisabled={loading || !previewMonitors.length}>
+                  {mode === "builder" ? "Apply to builder" : `Save ${previewMonitors.length} monitor(s)`}
+                </Button>
+              </Modal.Footer>
+            ) : null}
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
   )
 }

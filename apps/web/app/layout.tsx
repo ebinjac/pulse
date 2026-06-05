@@ -1,19 +1,9 @@
-import { DM_Sans, Figtree, Geist_Mono } from "next/font/google"
-
 import "@workspace/ui/globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
-import { SidebarProvider, SidebarInset } from "@workspace/ui/components/sidebar"
+import { AppShellInset, AppShellProvider } from "@/components/pulse/app-shell"
 import { AppSidebar } from "@/components/pulse/app-sidebar"
+import { bentonSans, fontMono } from "@/lib/fonts"
 import { cn } from "@workspace/ui/lib/utils"
-
-const dmSansHeading = DM_Sans({ subsets: ["latin"], variable: "--font-heading" })
-
-const figtree = Figtree({ subsets: ["latin"], variable: "--font-sans" })
-
-const fontMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-})
 
 export default function RootLayout({
   children,
@@ -24,21 +14,14 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={cn(
-        "font-sans antialiased",
-        fontMono.variable,
-        figtree.variable,
-        dmSansHeading.variable
-      )}
+      className={cn("font-sans antialiased", bentonSans.variable, fontMono.variable)}
     >
       <body>
         <ThemeProvider>
-          <SidebarProvider>
+          <AppShellProvider>
             <AppSidebar />
-            <SidebarInset className="flex flex-col min-w-0">
-              {children}
-            </SidebarInset>
-          </SidebarProvider>
+            <AppShellInset className="min-w-0">{children}</AppShellInset>
+          </AppShellProvider>
         </ThemeProvider>
       </body>
     </html>

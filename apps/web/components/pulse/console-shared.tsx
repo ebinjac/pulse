@@ -1,15 +1,33 @@
 "use client"
 
 import { useMemo } from "react"
-import { Activity, AlertTriangle, Bell, CheckCircle2, Clock, Mail, MessageSquare, XCircle } from "lucide-react"
+import { Activity, AlertTriangle, Bell, CheckCircle2, Clock, LineChart, Mail, MessageSquare, XCircle } from "lucide-react"
 import type { AlertEvent, MonitorRun, MonitorStatus } from "@/lib/pulse-types"
 import { cn } from "@workspace/ui/lib/utils"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@workspace/ui/components/card"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@workspace/ui/components/empty"
-import { SidebarTrigger } from "@workspace/ui/components/sidebar"
+import { Card as HeroCard, Chip, Description, EmptyState, Header, Separator } from "@heroui/react"
+import { AppShellTrigger } from "@/components/pulse/app-shell"
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@workspace/ui/components/chart"
-import { Separator } from "@workspace/ui/components/separator"
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ComposedChart, Line, BarChart, Bar } from "recharts"
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ComposedChart, Line, BarChart, Bar, Cell } from "recharts"
+
+const CHART_CONTAINER_CLASS =
+  "aspect-auto h-[280px] w-full min-h-[280px] [&_.recharts-surface]:outline-none"
+const CHART_CONTAINER_SM_CLASS =
+  "aspect-auto h-[220px] w-full min-h-[220px] [&_.recharts-surface]:outline-none"
+
+export const PULSE_CHART_COLORS = {
+  accent: "oklch(0.544 0.1704 253.5)",
+  success: "oklch(0.7329 0.1935 150.81)",
+  danger: "oklch(0.6532 0.2328 25.74)",
+  warning: "oklch(0.7819 0.1585 72.33)",
+  muted: "oklch(0.5517 0 253.83)",
+  series: [
+    "oklch(0.544 0.1704 253.5)",
+    "oklch(0.7329 0.1935 150.81)",
+    "oklch(0.6532 0.2328 25.74)",
+    "oklch(0.7819 0.1585 72.33)",
+    "oklch(0.55 0.15 300)",
+  ],
+} as const
 
 export type ConsoleView =
   | "dashboard"
@@ -113,85 +131,106 @@ export function channelIcon(channel: string) {
   return Bell
 }
 
-export function PageShell({ 
-  children, 
-  eyebrow, 
-  title, 
-  description, 
-  action 
-}: { 
+export function PageShell({
+  children,
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
   children: React.ReactNode
   eyebrow: string
   title: string
   description?: string
-  action?: React.ReactNode 
+  action?: React.ReactNode
 }) {
   return (
-    <div className="flex flex-col flex-1 min-w-0 h-full">
-      <header className="flex h-16 shrink-0 items-center justify-between border-b px-4 lg:px-8 gap-3 bg-background">
-        <div className="flex items-center gap-2 min-w-0">
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="mr-2 h-4" />
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      <Header className="flex h-16 shrink-0 items-center justify-between border-b border- gap-3 bg-background px-4 lg:px-8">
+        <div className="flex min-w-0 items-center gap-2">
+          <AppShellTrigger />
+          <Separator orientation="vertical" className="mr-1 h-4" />
           <div className="min-w-0">
-            <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">{eyebrow}</p>
-            <h1 className="font-heading text-lg font-bold tracking-tight truncate leading-tight">{title}</h1>
-            {description && <p className="text-muted-foreground text-xs font-medium mt-0.5 truncate hidden md:block">{description}</p>}
+            <Description className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+              {eyebrow}
+            </Description>
+            <h1 className="font-heading truncate text-lg font-bold leading-tight tracking-tight text-foreground">
+              {title}
+            </h1>
+            {description ? (
+              <Description className="mt-0.5 hidden truncate text-xs font-medium md:block">{description}</Description>
+            ) : null}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {action}
-        </div>
-      </header>
-      <div className="flex-1 overflow-auto px-4 py-6 lg:px-8 bg-muted/10">{children}</div>
+        {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
+      </Header>
+      <div className="flex-1 overflow-auto px-4 py-6 lg:px-8">{children}</div>
     </div>
   )
 }
 
-export function Metric({ 
-  label, 
-  value, 
-  icon: Icon, 
-  detail, 
+const STAT_ICON_TONE = {
+  default: "bg-default text-default-foreground",
+  accent: "bg-accent/15 text-accent",
+  success: "bg-success/15 text-success",
+  warning: "bg-warning/15 text-warning",
+  danger: "bg-danger/15 text-danger",
+} as const
+
+export function Metric({
+  label,
+  value,
+  detail,
+  icon: Icon,
+  tone = "default",
   trend,
   className,
-  onClick
-}: { 
-  label: string; 
-  value: string; 
-  detail: string; 
-  icon: typeof Activity;
-  trend?: { text: string; positive: boolean };
-  className?: string;
+  onClick,
+}: {
+  label: string
+  value: string
+  detail: string
+  icon: typeof Activity
+  tone?: keyof typeof STAT_ICON_TONE
+  trend?: { text: string; positive: boolean }
+  className?: string
   onClick?: () => void
 }) {
   return (
-    <Card 
-      className={cn(className, onClick && "cursor-pointer hover:bg-muted/10 transition-colors select-none")}
+    <HeroCard
+      className={cn(className, onClick && "cursor-pointer transition-colors select-none hover:bg-muted/30")}
       onClick={onClick}
     >
-      <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-xs font-semibold text-muted-foreground">{label}</CardTitle>
-        <Icon className="size-4 text-muted-foreground" />
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold font-heading">{value}</div>
-        <p className="text-xs text-muted-foreground mt-1">
-          {trend && (
-            <span className={cn("font-semibold mr-1.5", trend.positive ? "text-emerald-600" : "text-rose-600")}>
-              {trend.text}
-            </span>
-          )}
-          {detail}
-        </p>
-      </CardContent>
-    </Card>
+      <div className="flex items-start justify-between gap-3 p-4">
+        <div className="min-w-0 space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">{label}</p>
+          <p className="font-heading text-2xl font-bold tracking-tight text-foreground">{value}</p>
+          <HeroCard.Description>
+            {trend && (
+              <span
+                className={cn(
+                  "mr-1.5 font-semibold",
+                  trend.positive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400",
+                )}
+              >
+                {trend.text}
+              </span>
+            )}
+            {detail}
+          </HeroCard.Description>
+        </div>
+        <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-xl", STAT_ICON_TONE[tone])}>
+          <Icon className="size-4" aria-hidden />
+        </div>
+      </div>
+    </HeroCard>
   )
 }
 
 const chartConfig = {
   duration: {
     label: "Latency (ms)",
-    color: "hsl(var(--primary))",
+    color: "oklch(0.544 0.1704 253.5)",
   },
 } satisfies ChartConfig
 
@@ -210,42 +249,37 @@ export function LatencyChart({ runs }: { runs: MonitorRun[] }) {
 
   if (chartData.length === 0) {
     return (
-      <Card>
-        <CardContent className="flex h-[240px] items-center justify-center p-6">
-          <Empty className="border-0 bg-transparent py-4">
-            <EmptyHeader>
-              <EmptyTitle className="text-sm font-semibold">No data points available</EmptyTitle>
-              <EmptyDescription className="text-xs">
-                Run monitor checks to populate response time trends.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        </CardContent>
-      </Card>
+      <HeroCard>
+        <HeroCard.Content className="flex h-[240px] items-center justify-center p-6">
+          <EmptyState className="flex h-full w-full flex-col items-center justify-center gap-2 border-0 bg-transparent py-4 text-center">
+            <p className="text-sm font-semibold">No data points available</p>
+            <Description className="text-xs">Run monitor checks to populate response time trends.</Description>
+          </EmptyState>
+        </HeroCard.Content>
+      </HeroCard>
     )
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start justify-between pb-2">
-        <div className="space-y-0.5">
-          <CardTitle className="text-sm font-semibold">Response Time Trend</CardTitle>
-          <CardDescription>Response time of consecutive manual & scheduled executions</CardDescription>
+    <HeroCard>
+      <HeroCard.Header className="flex flex-row items-start justify-between">
+        <div className="space-y-1">
+          <HeroCard.Title className="text-sm font-semibold">Response Time Trend</HeroCard.Title>
+          <Description>Response time of consecutive manual & scheduled executions</Description>
         </div>
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground font-semibold shrink-0 mt-1">
-          <span className="size-2 rounded-full bg-primary" />
+        <div className="mt-1 flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+          <span className="size-2 rounded-full bg-accent" />
           <span>Response time</span>
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className="h-[180px] w-full mt-2">
-          <ChartContainer config={chartConfig} className="h-full w-full">
+      </HeroCard.Header>
+      <HeroCard.Content className="overflow-visible">
+        <div className="h-[200px] w-full mt-2">
+          <ChartContainer config={chartConfig} className="h-full w-full [&_svg]:outline-none [&_rect]:outline-none">
             <AreaChart
-              accessibilityLayer
               data={chartData}
               margin={{
-                left: -10,
-                right: 5,
+                left: 12,
+                right: 12,
                 top: 5,
                 bottom: 5,
               }}
@@ -267,11 +301,12 @@ export function LatencyChart({ runs }: { runs: MonitorRun[] }) {
                 tickLine={false}
                 axisLine={false}
                 tickMargin={8}
+                width={50}
                 tickFormatter={(value) => `${value}ms`}
               />
               <ChartTooltip
-                cursor={false}
-                content={<ChartTooltipContent hideLabel />}
+                cursor={{ stroke: "var(--color-duration)", strokeOpacity: 0.4 }}
+                content={<ChartTooltipContent hideLabel indicator="line" />}
               />
               <defs>
                 <linearGradient id="fillDuration" x1="0" y1="0" x2="0" y2="1">
@@ -299,28 +334,32 @@ export function LatencyChart({ runs }: { runs: MonitorRun[] }) {
             </AreaChart>
           </ChartContainer>
         </div>
-      </CardContent>
-    </Card>
+      </HeroCard.Content>
+    </HeroCard>
   )
 }
 
 export function Section({ title, icon: Icon, children }: { title: string; icon: typeof Activity; children: React.ReactNode }) {
   return (
-    <section className="border-border bg-card rounded-md border p-4">
-      <h2 className="font-heading mb-4 flex items-center gap-2 text-base font-semibold">
-        <Icon className="size-4" />
-        {title}
-      </h2>
-      {children}
-    </section>
+    <HeroCard>
+      <HeroCard.Header>
+        <HeroCard.Title className="font-heading flex items-center gap-2 text-base font-semibold">
+          <Icon className="size-4" />
+          {title}
+        </HeroCard.Title>
+      </HeroCard.Header>
+      <HeroCard.Content className="space-y-2">
+        {children}
+      </HeroCard.Content>
+    </HeroCard>
   )
 }
 
 export function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-muted p-3">
-      <div className="text-muted-foreground text-xs">{label}</div>
-      <div className="mt-1 break-words text-sm font-medium">{value}</div>
+    <div className="rounded-md bg-muted/5 p-3">
+      <Description className="text-xs">{label}</Description>
+      <div className="mt-1 break-words text-sm font-medium text-foreground">{value}</div>
     </div>
   )
 }
@@ -357,18 +396,10 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
       }
     }
 
-    const colors = [
-      "var(--chart-1)",
-      "var(--chart-2)",
-      "var(--chart-3)",
-      "var(--chart-4)",
-      "var(--chart-5)",
-    ]
-
     return names.slice(0, 5).map((label, index) => ({
       key: `step${index + 1}` as `step${number}`,
       label,
-      color: colors[index % colors.length] || "var(--chart-1)",
+      color: PULSE_CHART_COLORS.series[index % PULSE_CHART_COLORS.series.length]!,
     }))
   }, [visibleRuns])
 
@@ -395,7 +426,7 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
     const config: ChartConfig = {
       overall: {
         label: "Total latency",
-        color: "var(--chart-2)",
+        color: PULSE_CHART_COLORS.accent,
       },
     }
 
@@ -412,15 +443,15 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
   const outcomeConfig = {
     success: {
       label: "Success",
-      color: "var(--chart-2)",
+      color: PULSE_CHART_COLORS.success,
     },
     failed: {
       label: "Failed",
-      color: "var(--destructive)",
+      color: PULSE_CHART_COLORS.danger,
     },
     other: {
       label: "Other",
-      color: "var(--chart-4)",
+      color: PULSE_CHART_COLORS.warning,
     },
   } satisfies ChartConfig
 
@@ -454,9 +485,9 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
 
   const outcomeData = useMemo(() => {
     return [
-      { status: "Success", count: metrics.success, fill: "var(--color-success)" },
-      { status: "Failed", count: metrics.failed, fill: "var(--color-failed)" },
-      { status: "Other", count: metrics.other, fill: "var(--color-other)" },
+      { status: "Success", count: metrics.success, fill: PULSE_CHART_COLORS.success },
+      { status: "Failed", count: metrics.failed, fill: PULSE_CHART_COLORS.danger },
+      { status: "Other", count: metrics.other, fill: PULSE_CHART_COLORS.warning },
     ]
   }, [metrics])
 
@@ -490,18 +521,17 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
 
   if (runs.length === 0) {
     return (
-      <Card>
-        <CardContent className="flex h-[240px] items-center justify-center p-6">
-          <Empty className="border-0 bg-transparent py-4">
-            <EmptyHeader>
-              <EmptyTitle className="text-sm font-semibold">No runs data available</EmptyTitle>
-              <EmptyDescription className="text-xs">
-                Run this monitor to display performance breakdown.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        </CardContent>
-      </Card>
+      <HeroCard>
+        <HeroCard.Content className="flex h-[240px] items-center justify-center p-6">
+          <EmptyState className="flex flex-col items-center justify-center gap-2 border-0 bg-transparent py-4 text-center">
+            <LineChart className="size-6 text-muted" aria-hidden />
+            <p className="text-sm font-semibold text-foreground">No runs data available</p>
+            <Description className="text-xs">
+              Run this monitor to display performance breakdown.
+            </Description>
+          </EmptyState>
+        </HeroCard.Content>
+      </HeroCard>
     )
   }
 
@@ -530,7 +560,7 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
     return (
       <div className="min-w-48 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs shadow-xl">
         {run ? (
-          <div className="mb-2 border-b border-border/60 pb-2">
+          <div className="mb-2 pb-2">
             <div className="font-mono text-[11px] font-semibold text-foreground">{run.runId}</div>
             <div className="mt-1 flex items-center gap-2 text-[10px] font-semibold uppercase text-muted-foreground">
               <span>{run.status}</span>
@@ -561,89 +591,130 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Card className="py-4">
-          <CardContent className="space-y-1 px-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Success rate</p>
-            <div className="flex items-end justify-between gap-3">
-              <span className={cn("font-heading text-2xl font-bold", metrics.successRate >= 95 ? "text-emerald-600 dark:text-emerald-400" : metrics.successRate >= 80 ? "text-amber-600 dark:text-amber-400" : "text-rose-600 dark:text-rose-400")}>
-                {metrics.successRate}%
+    <div className="flex flex-col gap-5">
+      <div className="grid gap-4 md:grid-cols-3">
+        <HeroCard >
+          <div className="p-4 flex flex-col gap-3 h-full">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground">
+                Latency percentiles
               </span>
-              <span className="text-xs font-semibold text-muted-foreground">{metrics.success}/{metrics.total} passed</span>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="py-4 md:col-span-2">
-          <CardContent className="space-y-2 px-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Latency percentiles</p>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div>
-                <p className="text-[10px] text-muted-foreground">p50</p>
-                <p className="font-heading text-xl font-bold">{metrics.p50}ms</p>
-              </div>
-              <div>
-                <p className="text-[10px] text-muted-foreground">p95</p>
-                <p className="font-heading text-xl font-bold">{metrics.p95}ms</p>
-              </div>
-              <div>
-                <p className="text-[10px] text-muted-foreground">p99</p>
-                <p className="font-heading text-xl font-bold">{metrics.p99}ms</p>
+              <div className="flex size-6 items-center justify-center rounded-md bg-primary/5 text-primary border border-primary/10 shrink-0">
+                <Clock className="size-3.5" />
               </div>
             </div>
-            <p className="text-[11px] text-muted-foreground text-center">avg {metrics.avg}ms · peak {metrics.peak}ms</p>
-          </CardContent>
-        </Card>
-        <Card className="py-4">
-          <CardContent className="space-y-1 px-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Current streak</p>
-            <div className="flex items-end justify-between gap-3">
-              <span className={cn("font-heading text-2xl font-bold", metrics.consecutiveFailures > 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400")}>
-                {metrics.consecutiveFailures > 0 ? `${metrics.consecutiveFailures} fail` : "Healthy"}
+
+            <div className="flex items-center gap-2">
+              <div className="flex-1 rounded-lg bg-muted/5 border border-border/10 px-2 py-1.5 text-center">
+                <span className="text-[9px] font-bold text-muted-foreground/60 uppercase">p50</span>
+                <p className="font-heading text-xs font-bold text-foreground mt-0.5">{metrics.p50}ms</p>
+              </div>
+              <div className="flex-1 rounded-lg bg-muted/5 border border-border/10 px-2 py-1.5 text-center">
+                <span className="text-[9px] font-bold text-muted-foreground/60 uppercase">p95</span>
+                <p className="font-heading text-xs font-bold text-warning mt-0.5">{metrics.p95}ms</p>
+              </div>
+              <div className="flex-1 rounded-lg bg-muted/5 border border-border/10 px-2 py-1.5 text-center">
+                <span className="text-[9px] font-bold text-muted-foreground/60 uppercase">p99</span>
+                <p className="font-heading text-xs font-bold text-danger mt-0.5">{metrics.p99}ms</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground font-semibold pt-2 border-t border-border/10 mt-auto">
+              <span>avg <strong className="text-foreground font-bold">{metrics.avg}ms</strong></span>
+              <span>peak <strong className="text-foreground font-bold">{metrics.peak}ms</strong></span>
+            </div>
+          </div>
+        </HeroCard>
+
+        <HeroCard >
+          <div className="p-4 flex flex-col gap-3 h-full">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground">
+                Current streak
               </span>
-              <span className="text-xs font-semibold text-muted-foreground">{metrics.latest ? formatDate(metrics.latest.startedAt) : "Never"}</span>
+              <div className={cn(
+                "flex size-6 items-center justify-center rounded-md border shrink-0",
+                metrics.consecutiveFailures > 0 
+                  ? "bg-danger/5 text-danger border-danger/10" 
+                  : "bg-success/5 text-success border-success/10"
+              )}>
+                <Activity className="size-3.5" />
+              </div>
             </div>
-          </CardContent>
-        </Card>
-        <Card className="py-4">
-          <CardContent className="space-y-1 px-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Slowest step</p>
-            <div className="flex items-end justify-between gap-3">
-              <span className="min-w-0 truncate font-heading text-xl font-bold" title={slowestStep?.label}>
+
+            <div className="flex flex-col justify-center min-h-[36px]">
+              <p
+                className={cn(
+                  "font-heading text-lg font-bold tracking-tight",
+                  metrics.consecutiveFailures > 0 ? "text-danger" : "text-success"
+                )}
+              >
+                {metrics.consecutiveFailures > 0 ? `${metrics.consecutiveFailures} consecutive fail` : "Healthy"}
+              </p>
+            </div>
+
+            <div className="text-[11px] text-muted-foreground font-semibold pt-2 border-t border-border/10 mt-auto truncate">
+              {metrics.latest ? `Last run ${formatDate(metrics.latest.startedAt)}` : "No runs yet"}
+            </div>
+          </div>
+        </HeroCard>
+
+        <HeroCard >
+          <div className="p-4 flex flex-col gap-3 h-full min-w-0">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground">
+                Slowest step
+              </span>
+              <div className="flex size-6 items-center justify-center rounded-md bg-warning/5 text-warning border border-warning/10 shrink-0">
+                <AlertTriangle className="size-3.5" />
+              </div>
+            </div>
+
+            <div className="flex flex-col justify-center min-h-[36px] min-w-0">
+              <p className="truncate font-heading text-sm font-bold text-foreground" title={slowestStep?.label}>
                 {slowestStep?.label || "No steps"}
-              </span>
-              <span className="shrink-0 text-xs font-semibold text-muted-foreground">{slowestStep ? `${slowestStep.avg}ms avg` : "0ms"}</span>
+              </p>
             </div>
-          </CardContent>
-        </Card>
+
+            {slowestStep ? (
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground font-semibold pt-2 border-t border-border/10 mt-auto">
+                <span>avg <strong className="text-foreground font-bold">{slowestStep.avg}ms</strong></span>
+                <span>peak <strong className="text-foreground font-bold">{slowestStep.max}ms</strong></span>
+              </div>
+            ) : (
+              <div className="text-[11px] text-muted-foreground pt-2 border-t border-border/10 mt-auto">—</div>
+            )}
+          </div>
+        </HeroCard>
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-col gap-4 pb-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-0.5">
-            <CardTitle className="text-sm font-semibold">Latency trend</CardTitle>
-            <CardDescription>Last {chartData.length} runs with total latency and up to five step series.</CardDescription>
+      <HeroCard>
+        <HeroCard.Header className="flex flex-col gap-4 pb-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <HeroCard.Title className="text-sm font-semibold">Latency trend</HeroCard.Title>
+            <Description>Last {chartData.length} runs with total latency and up to five step series.</Description>
           </div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <div className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
-              <span className="size-2 rounded-full" style={{ backgroundColor: "var(--color-overall)" }} />
-              <span>Total ({chartData[chartData.length - 1]?.overall ?? 0}ms)</span>
-            </div>
+          <div className="flex flex-wrap gap-2">
+            <Chip size="sm" variant="soft" className="gap-1.5">
+              <span className="size-2 rounded-full bg-accent" />
+              <Chip.Label>Total · {chartData[chartData.length - 1]?.overall ?? 0}ms</Chip.Label>
+            </Chip>
             {stepSeries.map((series) => {
               const latestVal = chartData[chartData.length - 1]?.[series.key] ?? 0
               return (
-                <div key={series.key} className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground">
-                  <span className="size-2 rounded-full" style={{ backgroundColor: `var(--color-${series.key})` }} />
-                  <span className="max-w-[160px] truncate" title={series.label}>{series.label} ({latestVal}ms)</span>
-                </div>
+                <Chip key={series.key} size="sm" variant="soft" className="max-w-[200px] gap-1.5">
+                  <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: series.color }} />
+                  <Chip.Label className="truncate" title={series.label}>
+                    {series.label} · {latestVal}ms
+                  </Chip.Label>
+                </Chip>
               )
             })}
           </div>
-        </CardHeader>
-        <CardContent>
-          <ChartContainer config={chartConfig} className="h-[280px] w-full">
+        </HeroCard.Header>
+        <HeroCard.Content className="overflow-visible">
+          <ChartContainer config={chartConfig} className={CHART_CONTAINER_CLASS}>
             <ComposedChart
-              accessibilityLayer
               data={chartData}
               margin={{ left: 18, right: 12, top: 12, bottom: 6 }}
             >
@@ -664,7 +735,7 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
                 tickFormatter={(value) => `${Number(value).toLocaleString()}ms`}
               />
               <ChartTooltip
-                cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
+                cursor={{ stroke: PULSE_CHART_COLORS.accent, strokeOpacity: 0.35, strokeWidth: 1 }}
                 content={renderLatencyTooltip}
                 wrapperStyle={{ zIndex: 20, pointerEvents: "none" }}
               />
@@ -697,65 +768,89 @@ export function MonitorRunsChart({ runs }: { runs: MonitorRun[] }) {
               ))}
             </ComposedChart>
           </ChartContainer>
-        </CardContent>
-      </Card>
+        </HeroCard.Content>
+      </HeroCard>
 
-      <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold">Run outcomes</CardTitle>
-            <CardDescription>Pass/fail distribution across stored runs.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer config={outcomeConfig} className="h-[220px] w-full">
-              <BarChart accessibilityLayer data={outcomeData} margin={{ left: -12, right: 8, top: 8, bottom: 0 }}>
-                <CartesianGrid vertical={false} className="stroke-border/50" />
+      <div className="grid gap-4 lg:grid-cols-[minmax(280px,360px)_1fr]">
+        <HeroCard>
+          <HeroCard.Header className="pb-3">
+            <HeroCard.Title className="text-sm font-semibold">Run outcomes</HeroCard.Title>
+            <Description>Pass/fail distribution across stored runs.</Description>
+          </HeroCard.Header>
+          <HeroCard.Content className="gap-4">
+            <ChartContainer config={outcomeConfig} className={CHART_CONTAINER_SM_CLASS}>
+              <BarChart data={outcomeData} margin={{ left: -8, right: 8, top: 8, bottom: 0 }}>
+                <CartesianGrid vertical={false} className="stroke-separator" />
                 <XAxis dataKey="status" tickLine={false} axisLine={false} tickMargin={8} />
-                <YAxis allowDecimals={false} tickLine={false} axisLine={false} tickMargin={8} />
-                <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]} />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} tickMargin={8} width={32} />
+                <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel indicator="dot" />} />
+                <Bar dataKey="count" radius={[6, 6, 0, 0]}>
+                  {outcomeData.map((entry) => (
+                    <Cell key={entry.status} fill={entry.fill} />
+                  ))}
+                </Bar>
               </BarChart>
             </ChartContainer>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-semibold text-muted-foreground">
-              <div className="rounded-md border bg-muted/20 px-3 py-2">Manual: <span className="text-foreground">{metrics.manual}</span></div>
-              <div className="rounded-md border bg-muted/20 px-3 py-2">Scheduled: <span className="text-foreground">{metrics.scheduled}</span></div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-separator bg-background px-3 py-2 text-xs">
+                <Description>Manual</Description>
+                <p className="font-semibold text-foreground">{metrics.manual}</p>
+              </div>
+              <div className="rounded-lg border border-separator bg-background px-3 py-2 text-xs">
+                <Description>Scheduled</Description>
+                <p className="font-semibold text-foreground">{metrics.scheduled}</p>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </HeroCard.Content>
+        </HeroCard>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold">Step performance</CardTitle>
-            <CardDescription>Average latency, peak latency, and failure count by step.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <HeroCard>
+          <HeroCard.Header className="pb-3">
+            <HeroCard.Title className="text-sm font-semibold">Step performance</HeroCard.Title>
+            <Description>Average latency, peak latency, and failure count by step.</Description>
+          </HeroCard.Header>
+          <HeroCard.Content className="gap-4">
             {stepMetrics.length === 0 ? (
-              <Empty className="border-0 bg-transparent py-4">
-                <EmptyHeader>
-                  <EmptyTitle className="text-sm font-semibold">No step metrics available</EmptyTitle>
-                  <EmptyDescription className="text-xs">Runs without step details only show total latency.</EmptyDescription>
-                </EmptyHeader>
-              </Empty>
+              <EmptyState className="flex flex-col items-center justify-center gap-2 border-0 bg-transparent py-6 text-center">
+                <LineChart className="size-6 text-muted" aria-hidden />
+                <p className="text-sm font-semibold text-foreground">No step metrics available</p>
+                <Description className="text-xs">Runs without step details only show total latency.</Description>
+              </EmptyState>
             ) : (
-              stepMetrics.map((step) => (
-                <div key={step.label} className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-3 text-xs">
-                    <span className="truncate font-semibold text-foreground" title={step.label}>{step.label}</span>
-                    <span className="shrink-0 font-mono text-muted-foreground">
-                      avg {step.avg}ms · max {step.max}ms · {step.failures} failed
+              stepMetrics.map((step, index) => (
+                <div key={step.label} className="space-y-2">
+                  <div className="flex items-start justify-between gap-3 text-xs">
+                    <span className="min-w-0 truncate font-semibold text-foreground" title={step.label}>
+                      {step.label}
                     </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {step.failures > 0 ? (
+                        <Chip size="sm" variant="soft" className="bg-danger/10 text-danger">
+                          <Chip.Label>{step.failures} failed</Chip.Label>
+                        </Chip>
+                      ) : null}
+                      <span className="font-mono text-muted">
+                        {step.avg}ms avg · {step.max}ms max
+                      </span>
+                    </div>
                   </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                  <div className="h-2 overflow-hidden rounded-full bg-separator/60">
                     <div
-                      className={cn("h-full rounded-full", step.failures > 0 ? "bg-rose-500" : "bg-primary")}
-                      style={{ width: `${Math.max(6, Math.round((step.avg / maxStepAverage) * 100))}%` }}
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${Math.max(8, Math.round((step.avg / maxStepAverage) * 100))}%`,
+                        backgroundColor:
+                          step.failures > 0
+                            ? PULSE_CHART_COLORS.danger
+                            : PULSE_CHART_COLORS.series[index % PULSE_CHART_COLORS.series.length],
+                      }}
                     />
                   </div>
                 </div>
               ))
             )}
-          </CardContent>
-        </Card>
+          </HeroCard.Content>
+        </HeroCard>
       </div>
     </div>
   )
