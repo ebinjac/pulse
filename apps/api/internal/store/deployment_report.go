@@ -45,6 +45,14 @@ func BuildDeploymentValidationReport(validation domain.DeploymentValidation, pre
 	report.Summary.PostP95LatencyMS = percentileDuration(postRuns, 0.95)
 	report.Summary.P95LatencyDeltaMS = report.Summary.PostP95LatencyMS - report.Summary.PreP95LatencyMS
 	report.Summary.P95LatencyDeltaPct = percentDelta(report.Summary.PreP95LatencyMS, report.Summary.PostP95LatencyMS)
+	report.Summary.PreP99LatencyMS = percentileDuration(preRuns, 0.99)
+	report.Summary.PostP99LatencyMS = percentileDuration(postRuns, 0.99)
+	report.Summary.PreMaxLatencyMS = maxDuration(preRuns)
+	report.Summary.PostMaxLatencyMS = maxDuration(postRuns)
+	report.Summary.PreMeanLatencyMS = meanDuration(preRuns)
+	report.Summary.PostMeanLatencyMS = meanDuration(postRuns)
+	report.Summary.PreFailureCount = failureCount(preRuns)
+	report.Summary.PostFailureCount = failureCount(postRuns)
 
 	for _, monitorID := range monitorIDs {
 		preSamples := preByMonitor[monitorID]
@@ -175,6 +183,37 @@ func successRate(runs []domain.MonitorRun) float64 {
 		}
 	}
 	return round1((float64(success) / float64(len(runs))) * 100)
+}
+
+func meanDuration(runs []domain.MonitorRun) int {
+	if len(runs) == 0 {
+		return 0
+	}
+	sum := 0
+	for _, run := range runs {
+		sum += run.DurationMS
+	}
+	return int(math.Round(float64(sum) / float64(len(runs))))
+}
+
+func maxDuration(runs []domain.MonitorRun) int {
+	max := 0
+	for _, run := range runs {
+		if run.DurationMS > max {
+			max = run.DurationMS
+		}
+	}
+	return max
+}
+
+func failureCount(runs []domain.MonitorRun) int {
+	count := 0
+	for _, run := range runs {
+		if run.Status != domain.StatusSuccess {
+			count++
+		}
+	}
+	return count
 }
 
 func percentileDuration(runs []domain.MonitorRun, percentile float64) int {

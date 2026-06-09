@@ -1,0 +1,33 @@
+# Run once before first deploy and before rollouts that add SQL migrations.
+#   oc apply -f deploy/openshift/migrate-job.yaml
+#   oc wait --for=condition=complete job/pulse-migrate --timeout=120s
+# Delete and re-apply if you need to re-run (Job names must be unique):
+#   oc delete job pulse-migrate
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pulse-migrate
+  labels:
+    app: pulse-migrate
+    app.kubernetes.io/part-of: pulse
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: pulse-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: pulse-api:latest
+          imagePullPolicy: Always
+          command: ["/app/pulse-migrate", "up"]
+          env:
+            - name: PULSE_MIGRATIONS_PATH
+              value: "file:///app/migrations"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pulse-backend
+                  key: DATABASE_URL

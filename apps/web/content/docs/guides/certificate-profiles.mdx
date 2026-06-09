@@ -1,0 +1,29 @@
+---
+title: Certificate profiles
+description: Configure mTLS certificate profiles for monitor steps.
+---
+
+Some APIs require **mutual TLS**. Certificate profiles tell Rythm which client certificate to present for a given host and port.
+
+## Create a profile
+
+1. Open **Settings → Certificates**.
+2. **Create profile**.
+3. Enter **host** and **port** the certificate applies to.
+4. Bind **secret aliases** for:
+   - Client certificate (PEM)
+   - Private key (PEM)
+   - Optional PFX bundle and passphrase secrets
+5. Save and **test** connectivity if a test action is available.
+
+## Use in monitors
+
+When a monitor step targets a host/port with a matching profile, Rythm presents the configured mTLS material automatically. No inline certificate paste is required in the step body.
+
+## Rotate certificates
+
+1. Upload new material as new secret values.
+2. Update the profile to reference the new aliases.
+3. Test monitors that depend on the profile before decommissioning old secrets.
+
+See [Secrets and certificates](/docs/concepts/secrets-and-certificates) and [Managing secrets](/docs/guides/managing-secrets).

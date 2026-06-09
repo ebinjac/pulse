@@ -6,10 +6,10 @@ interface InvestigationRequest {
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.GROQ_API_KEY
+  const apiKey = (process.env.LLM_API_KEY || process.env.GROQ_API_KEY || "").trim()
   if (!apiKey) {
     return NextResponse.json(
-      { error: "GROQ_API_KEY is not configured on the server." },
+      { error: "LLM_API_KEY is not configured on the server." },
       { status: 500 }
     )
   }
@@ -60,14 +60,16 @@ Critical Instructions:
 2. Look at the failing assertions (e.g., if a status code assertion failed, or a JSONPath value check failed).
 3. Do NOT include any markdown code blocks, conversational greetings, or preambles. Output ONLY valid JSON.`
 
-    const groqResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const groqResponse = await fetch(process.env.LLM_API_ENDPOINT || "https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": process.env.LLM_HTTP_REFERER || "http://localhost:3000",
+      "X-Title": process.env.LLM_APP_TITLE || "Pulse",
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model: process.env.LLM_MODEL || "moonshotai/kimi-k2.6:free",
         messages: [
           {
             role: "user",
@@ -80,9 +82,9 @@ Critical Instructions:
 
     if (!groqResponse.ok) {
       const errorText = await groqResponse.text()
-      console.error("Groq API error response:", errorText)
+      console.error("LLM API error response:", errorText)
       return NextResponse.json(
-        { error: `Groq API responded with status ${groqResponse.status}: ${errorText}` },
+        { error: `LLM API responded with status ${groqResponse.status}: ${errorText}` },
         { status: 502 }
       )
     }

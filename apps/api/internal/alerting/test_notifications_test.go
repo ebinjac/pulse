@@ -21,7 +21,7 @@ func TestNotificationsUsesSavedSecretsWhenOverridesEmpty(t *testing.T) {
 		t.Fatalf("upsert slack secret: %v", err)
 	}
 
-	service := NewService(memoryStore)
+	service := NewService(memoryStore, nil)
 	deliveries := service.TestNotifications(domain.NotificationTestOverrides{})
 
 	foundSlack := false

@@ -1,0 +1,16 @@
+{
+  "title": "Guides",
+  "pages": [
+    "managing-applications",
+    "creating-a-monitor",
+    "testing-and-publishing-monitors",
+    "importing-monitors",
+    "viewing-runs-and-history",
+    "working-with-alerts",
+    "running-deployment-validation",
+    "configuring-elf-queries",
+    "managing-secrets",
+    "notification-settings",
+    "certificate-profiles"
+  ]
+}

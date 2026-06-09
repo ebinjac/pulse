@@ -49,7 +49,7 @@ func TestWorkerProcessesQueuedMonitorRun(t *testing.T) {
 	mStore := store.NewMemoryStore()
 	queue := jobqueue.NewMemoryQueue(8)
 	exec := &mockExecutor{runs: make(map[string]int)}
-	worker := NewWorker(mStore, exec, queue)
+	worker := NewWorker(mStore, exec, queue, nil)
 
 	monitor := domain.Monitor{
 		ID:           "mon-worker",
@@ -75,7 +75,7 @@ func TestWorkerSkipsInactiveMonitor(t *testing.T) {
 	mStore := store.NewMemoryStore()
 	queue := jobqueue.NewMemoryQueue(8)
 	exec := &mockExecutor{runs: make(map[string]int)}
-	worker := NewWorker(mStore, exec, queue)
+	worker := NewWorker(mStore, exec, queue, nil)
 
 	monitor := domain.Monitor{ID: "mon-inactive", Name: "Inactive", IsActive: false}
 	mStore.UpsertMonitor(monitor)
@@ -96,7 +96,7 @@ func TestWorkerSkipsDuplicateWhenRunLockHeld(t *testing.T) {
 	mStore := store.NewMemoryStore()
 	queue := jobqueue.NewMemoryQueue(8)
 	exec := &mockExecutor{runs: make(map[string]int)}
-	worker := NewWorker(mStore, exec, queue)
+	worker := NewWorker(mStore, exec, queue, nil)
 
 	monitor := domain.Monitor{ID: "mon-locked", Name: "Locked", IsActive: true}
 	mStore.UpsertMonitor(monitor)

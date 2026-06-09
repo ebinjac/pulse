@@ -1,0 +1,27 @@
+---
+title: ELF log checks
+description: Post-deploy log validation using reusable ELF queries.
+---
+
+After post-deploy monitor sampling, Rythm can run **ELF log checks** — OpenSearch queries executed against your organization’s ELF logging proxy.
+
+## Key pieces
+
+| Piece | Role |
+|-------|------|
+| **ELF query** | Reusable search definition in the ELF Queries library |
+| **elfAppId** | Application-specific index segment (configured on the application) |
+| **Pass criteria** | Rules such as max hits, min hits, or aggregation thresholds |
+| **Gate mode** | `blocking` fails the deployment validation; `advisory` warns only |
+
+## When to use log checks
+
+Monitor runs prove APIs respond correctly; log checks catch errors that might not appear in synthetic traffic — stack traces, error-level log spikes, or missing expected audit events.
+
+## Console areas
+
+- **ELF Queries** — Create, test, and maintain query definitions
+- **Settings → ELF Proxy** — Default proxy URL (usually pre-configured by your platform team)
+- **Deployment validation** — Attach queries and choose whether to auto-run log checks after post-deploy sampling
+
+See [Configuring ELF queries](/docs/guides/configuring-elf-queries).

@@ -3,12 +3,14 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Eye, Play, Plus, RotateCw, Users, Workflow } from "lucide-react"
+import { MoreHorizontal, Pencil, Play, Plus, RotateCw, Users, Workflow } from "lucide-react"
 import {
+  AlertDialog,
   Button,
   Card,
   Chip,
   Description,
+  Dropdown,
   EmptyState,
   Input,
   Label,
@@ -22,6 +24,7 @@ import {
 } from "@heroui/react"
 import { cn } from "@workspace/ui/lib/utils"
 import { isFailedStatus, PageShell } from "@/components/pulse/console-shared"
+import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
 import type { Application, ApplicationSLO, Monitor } from "@/lib/pulse-types"
 import { formatUptimePct } from "@/lib/pulse-slo"
 import { applicationHealth } from "../utils/console-utils"
@@ -35,6 +38,8 @@ const ENVIRONMENT_OPTIONS = [
 const EMPTY_DRAFT = {
   name: "",
   carId: "",
+  elfAppId: "",
+  indexPathTemplate: "",
   owner: "",
   environment: "production",
   description: "",
@@ -50,9 +55,24 @@ function environmentChipClass(environment: string) {
   return "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-300"
 }
 
-function CreateApplicationModal({
+type ApplicationDraft = typeof EMPTY_DRAFT
+
+function draftFromApplication(application: Application): ApplicationDraft {
+  return {
+    name: application.name,
+    carId: application.carId,
+    elfAppId: application.elfAppId || "",
+    indexPathTemplate: application.indexPathTemplate || "",
+    owner: application.owner || "",
+    environment: application.environment || "production",
+    description: application.description || "",
+  }
+}
+
+function ApplicationFormModal({
   open,
   onOpenChange,
+  mode,
   draft,
   onDraftChange,
   saving,
@@ -60,12 +80,14 @@ function CreateApplicationModal({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  draft: typeof EMPTY_DRAFT
-  onDraftChange: (draft: typeof EMPTY_DRAFT) => void
+  mode: "create" | "edit"
+  draft: ApplicationDraft
+  onDraftChange: (draft: ApplicationDraft) => void
   saving: boolean
   onSave: () => Promise<void>
 }) {
-  const update = (patch: Partial<typeof EMPTY_DRAFT>) => onDraftChange({ ...draft, ...patch })
+  const update = (patch: Partial<ApplicationDraft>) => onDraftChange({ ...draft, ...patch })
+  const isEdit = mode === "edit"
 
   return (
     <Modal isOpen={open} onOpenChange={onOpenChange}>
@@ -74,9 +96,11 @@ function CreateApplicationModal({
           <Modal.Dialog>
             <Modal.CloseTrigger />
             <Modal.Header>
-              <Modal.Heading>Create application group</Modal.Heading>
+              <Modal.Heading>{isEdit ? "Edit application" : "Create application group"}</Modal.Heading>
               <Description className="text-sm text-muted">
-                Register a new application group to organize and execute synthetic monitor checks.
+                {isEdit
+                  ? "Update application registry details. Monitors linked to this group are unchanged."
+                  : "Register a new application group to organize and execute synthetic monitor checks."}
               </Description>
             </Modal.Header>
             <Modal.Body className="space-y-4">
@@ -104,6 +128,31 @@ function CreateApplicationModal({
                   <Description className="text-[10px] leading-normal">
                     Central Application Registry ID. Use shorthand name if unregistered.
                   </Description>
+                </TextField>
+
+                <TextField className="w-full sm:col-span-2" name="indexPathTemplate">
+                  <Label className="text-xs font-semibold">Log index pattern</Label>
+                  <Input
+                    variant="secondary"
+                    fullWidth
+                    value={draft.indexPathTemplate}
+                    onChange={(event) => update({ indexPathTemplate: event.target.value })}
+                    placeholder="e.g., app-logs-*"
+                  />
+                  <Description className="text-[10px] leading-normal">
+                    OpenSearch index pattern for ELF log checks on this application (for example <code className="text-[10px]">app-logs-*</code>).
+                  </Description>
+                </TextField>
+
+                <TextField className="w-full" name="elfAppId">
+                  <Label className="text-xs font-semibold">ELF app ID (optional)</Label>
+                  <Input
+                    variant="secondary"
+                    fullWidth
+                    value={draft.elfAppId}
+                    onChange={(event) => update({ elfAppId: event.target.value })}
+                    placeholder="Only if your index pattern uses {{elfAppId}}"
+                  />
                 </TextField>
 
                 <TextField className="w-full" name="owner">
@@ -168,8 +217,14 @@ function CreateApplicationModal({
                 isDisabled={saving || !draft.name.trim() || !draft.carId.trim()}
                 onPress={() => void onSave()}
               >
-                {saving ? <RotateCw className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-                Create application
+                {saving ? (
+                  <RotateCw className="size-3.5 animate-spin" />
+                ) : isEdit ? (
+                  <Pencil className="size-3.5" />
+                ) : (
+                  <Plus className="size-3.5" />
+                )}
+                {isEdit ? "Save changes" : "Create application"}
               </Button>
             </Modal.Footer>
           </Modal.Dialog>
@@ -184,6 +239,7 @@ export function ApplicationsView({
   monitors,
   applicationSloMap: appSloLookup,
   onSaveApplication,
+  onDeleteApplication,
   onRunApplication,
   runningAppId,
   embedded = false,
@@ -192,6 +248,7 @@ export function ApplicationsView({
   monitors: Monitor[]
   applicationSloMap?: Map<string, ApplicationSLO>
   onSaveApplication: (input: Application) => Promise<void>
+  onDeleteApplication: (applicationId: string) => Promise<void>
   onRunApplication: (applicationId: string) => Promise<void>
   runningAppId?: string
   embedded?: boolean
@@ -200,7 +257,12 @@ export function ApplicationsView({
   const [search, setSearch] = useState("")
   const [draft, setDraft] = useState(EMPTY_DRAFT)
   const [saving, setSaving] = useState(false)
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [formMode, setFormMode] = useState<"create" | "edit">("create")
+  const [editingApplication, setEditingApplication] = useState<Application | null>(null)
+  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<Application | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const filteredApplications = useMemo(() => {
     const q = search.toLowerCase()
@@ -228,23 +290,101 @@ export function ApplicationsView({
     })
   }, [filteredApplications, monitors])
 
+  function openCreateForm() {
+    setFormMode("create")
+    setEditingApplication(null)
+    setDraft(EMPTY_DRAFT)
+    setIsFormOpen(true)
+  }
+
+  function openEditForm(application: Application) {
+    setFormMode("edit")
+    setEditingApplication(application)
+    setDraft(draftFromApplication(application))
+    setIsFormOpen(true)
+  }
+
   async function saveApplication() {
     if (!draft.name.trim() || !draft.carId.trim() || saving) return
+    const applicationName = draft.name.trim()
     setSaving(true)
     try {
-      await onSaveApplication({
-        id: "",
-        name: draft.name.trim(),
-        carId: draft.carId.trim(),
-        owner: draft.owner.trim(),
-        environment: draft.environment.trim() || "production",
-        description: draft.description.trim(),
-        tags: [],
-      })
+      const payload: Application =
+        formMode === "edit" && editingApplication
+          ? {
+              ...editingApplication,
+              name: applicationName,
+              carId: draft.carId.trim(),
+              elfAppId: draft.elfAppId.trim(),
+              indexPathTemplate: draft.indexPathTemplate.trim(),
+              owner: draft.owner.trim(),
+              environment: draft.environment.trim() || "production",
+              description: draft.description.trim(),
+            }
+          : {
+              id: "",
+              name: applicationName,
+              carId: draft.carId.trim(),
+              elfAppId: draft.elfAppId.trim(),
+              indexPathTemplate: draft.indexPathTemplate.trim(),
+              owner: draft.owner.trim(),
+              environment: draft.environment.trim() || "production",
+              description: draft.description.trim(),
+              tags: [],
+            }
+      await onSaveApplication(payload)
       setDraft(EMPTY_DRAFT)
-      setIsCreateOpen(false)
+      setEditingApplication(null)
+      setIsFormOpen(false)
+      notifyPulseToast(
+        "success",
+        formMode === "edit" ? "Application updated" : "Application created",
+        `${applicationName} saved successfully.`,
+      )
+    } catch (err) {
+      notifyPulseToast(
+        "danger",
+        formMode === "edit" ? "Failed to update application" : "Failed to create application",
+        err instanceof Error ? err.message : "Please try again.",
+      )
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function deleteApplication() {
+    if (!confirmDelete || deleting) return
+    const applicationName = confirmDelete.name
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await onDeleteApplication(confirmDelete.id)
+      setConfirmDelete(null)
+      notifyPulseToast("success", "Application deleted", `${applicationName} was removed from the registry.`)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete application."
+      setDeleteError(message)
+      notifyPulseToast("danger", "Failed to delete application", message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  async function runApplication(applicationId: string) {
+    const application = applications.find((item) => item.id === applicationId)
+    try {
+      notifyPulseToast(
+        "info",
+        "Running application checks",
+        application?.name ? `Triggering monitors for ${application.name}.` : undefined,
+      )
+      await onRunApplication(applicationId)
+    } catch (err) {
+      notifyPulseToast(
+        "danger",
+        "Failed to run application",
+        err instanceof Error ? err.message : "Please try again.",
+      )
     }
   }
 
@@ -265,7 +405,7 @@ export function ApplicationsView({
   )
 
   const createButton = (
-    <Button className="gap-2 whitespace-nowrap" onPress={() => setIsCreateOpen(true)}>
+    <Button className="gap-2 whitespace-nowrap" onPress={openCreateForm}>
       <Plus className="size-4" />
       Create application
     </Button>
@@ -287,21 +427,17 @@ export function ApplicationsView({
               <Table.Column className="w-[8%] text-center">Uptime 7d</Table.Column>
               <Table.Column className="w-[8%] text-center">Uptime 30d</Table.Column>
               <Table.Column className="w-[8%] text-center">Avg latency</Table.Column>
-              <Table.Column className="w-[18%] text-end">Actions</Table.Column>
+              <Table.Column className="w-[14%] text-end">Actions</Table.Column>
             </Table.Header>
             <Table.Body
               renderEmptyState={() => (
-                <Table.Row>
-                  <Table.Cell className="h-48 p-0" colSpan={9}>
-                    <EmptyState className="flex h-full flex-col items-center justify-center gap-3 py-10 text-center">
-                      <Workflow className="size-6 text-muted" aria-hidden />
-                      <p className="text-sm font-semibold text-foreground">No applications found</p>
-                      <Card.Description className="max-w-sm">
-                        Create your first application group to start tracking endpoint availability.
-                      </Card.Description>
-                    </EmptyState>
-                  </Table.Cell>
-                </Table.Row>
+                <EmptyState className="flex h-full min-h-52 w-full flex-col items-center justify-center gap-3 py-10 text-center">
+                  <Workflow className="size-6 text-muted" aria-hidden />
+                  <p className="text-sm font-semibold text-foreground">No applications found</p>
+                  <Card.Description className="max-w-sm">
+                    Create your first application group to start tracking endpoint availability.
+                  </Card.Description>
+                </EmptyState>
               )}
             >
               {sortedApplications.map((application) => {
@@ -394,22 +530,12 @@ export function ApplicationsView({
                     </Table.Cell>
 
                     <Table.Cell className="pr-6 text-end align-middle">
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1.5">
                         <Button
-                          variant="secondary"
-                          size="sm"
-                          className="gap-1"
-                          onPress={() => router.push(`/applications/${application.id}`)}
-                        >
-                          <Eye className="size-3" />
-                          View
-                        </Button>
-                        <Button
-                          
                           size="sm"
                           className="min-w-[110px] justify-center gap-1"
                           isDisabled={!!runningAppId || health.active === 0 || isRunning}
-                          onPress={() => void onRunApplication(application.id)}
+                          onPress={() => void runApplication(application.id)}
                         >
                           {isRunning ? (
                             <>
@@ -423,6 +549,33 @@ export function ApplicationsView({
                             </>
                           )}
                         </Button>
+                        <Dropdown>
+                          <Button variant="ghost" size="sm" isIconOnly aria-label={`Actions for ${application.name}`}>
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                          <Dropdown.Popover>
+                            <Dropdown.Menu
+                              onAction={(key) => {
+                                if (key === "view") router.push(`/applications/${application.id}`)
+                                if (key === "edit") openEditForm(application)
+                                if (key === "delete") {
+                                  setDeleteError(null)
+                                  setConfirmDelete(application)
+                                }
+                              }}
+                            >
+                              <Dropdown.Item id="view" textValue="View application">
+                                View application
+                              </Dropdown.Item>
+                              <Dropdown.Item id="edit" textValue="Edit application">
+                                Edit application
+                              </Dropdown.Item>
+                              <Dropdown.Item id="delete" textValue="Delete application" className="text-danger">
+                                Delete application
+                              </Dropdown.Item>
+                            </Dropdown.Menu>
+                          </Dropdown.Popover>
+                        </Dropdown>
                       </div>
                     </Table.Cell>
                   </Table.Row>
@@ -474,14 +627,60 @@ export function ApplicationsView({
         </PageShell>
       )}
 
-      <CreateApplicationModal
-        open={isCreateOpen}
-        onOpenChange={setIsCreateOpen}
+      <ApplicationFormModal
+        open={isFormOpen}
+        onOpenChange={(open) => {
+          setIsFormOpen(open)
+          if (!open) {
+            setEditingApplication(null)
+            setDraft(EMPTY_DRAFT)
+          }
+        }}
+        mode={formMode}
         draft={draft}
         onDraftChange={setDraft}
         saving={saving}
         onSave={saveApplication}
       />
+
+      <AlertDialog.Backdrop
+        isOpen={confirmDelete !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && !deleting) {
+            setConfirmDelete(null)
+            setDeleteError(null)
+          }
+        }}
+      >
+        <AlertDialog.Container size="sm">
+          <AlertDialog.Dialog>
+            <AlertDialog.Header>
+              <AlertDialog.Icon status="danger" />
+              <AlertDialog.Heading>Delete application?</AlertDialog.Heading>
+            </AlertDialog.Header>
+            <AlertDialog.Body className="space-y-2 text-left text-sm text-muted">
+              <p>
+                Are you sure you want to permanently delete{" "}
+                <strong className="text-foreground">{confirmDelete?.name}</strong>?
+              </p>
+              <p>
+                Monitors assigned to this application will be unlinked but not deleted. Deployment validations and
+                historical runs remain in the system.
+              </p>
+              {deleteError ? <p className="text-danger text-xs font-medium">{deleteError}</p> : null}
+            </AlertDialog.Body>
+            <AlertDialog.Footer>
+              <Button variant="secondary" slot="close" isDisabled={deleting}>
+                Cancel
+              </Button>
+              <Button variant="danger" isDisabled={deleting} onPress={() => void deleteApplication()}>
+                {deleting ? <RotateCw className="size-3.5 animate-spin" /> : null}
+                Delete application
+              </Button>
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
     </>
   )
 }

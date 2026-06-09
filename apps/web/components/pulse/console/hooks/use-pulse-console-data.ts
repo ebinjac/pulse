@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import type {
   Application,
   AlertEvent,
@@ -16,17 +16,43 @@ import type {
   RetentionSettings,
   SecretReference,
   SLOSummary,
+  ElfQuery,
+  ElfQueryInput,
+  ElfQueryProbeInput,
+  ElfProxySettings,
+  ElfProxySettingsInput,
 } from "@/lib/pulse-types"
 import type { SecretInput } from "@/components/pulse/secrets-view"
-import type { DeploymentValidationCreateInput, PulseConsoleProps } from "../types"
+import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
+import { pulseClient } from "@/lib/pulse-client"
+import type {
+  DeploymentValidationCreateInput,
+  DeploymentValidationUpdateInput,
+  PulseConsoleProps,
+} from "../types"
+import {
+  PULSE_EVENT_TYPES,
+  topicAlerts,
+  topicApplicationRunBatch,
+  type AlertEventData,
+  type AlertResolvedData,
+  type RunBatchEventData,
+} from "@/lib/pulse-events"
+import { getViewDataRequirements } from "./view-data-requirements"
+import { useMonitorFilters } from "./use-monitor-filters"
+import { usePulseEventStream } from "./use-pulse-event-stream"
 
 export function usePulseConsoleData({
+  view = "dashboard",
   applicationId,
   monitorId,
   runId,
   alertId,
   validationId,
+  queryId,
 }: PulseConsoleProps) {
+  const requirements = useMemo(() => getViewDataRequirements(view), [view])
+
   const [applications, setApplications] = useState<Application[]>([])
   const [monitors, setMonitors] = useState<Monitor[]>([])
   const [runs, setRuns] = useState<MonitorRun[]>([])
@@ -37,6 +63,8 @@ export function usePulseConsoleData({
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null)
   const [retentionSettings, setRetentionSettings] = useState<RetentionSettings | null>(null)
   const [sloSummary, setSloSummary] = useState<SLOSummary | null>(null)
+  const [elfQueries, setElfQueries] = useState<ElfQuery[]>([])
+  const [elfProxySettings, setElfProxySettings] = useState<ElfProxySettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [isImportExportOpen, setIsImportExportOpen] = useState(false)
 
@@ -44,16 +72,21 @@ export function usePulseConsoleData({
   const [activeRun, setActiveRun] = useState<MonitorRun | null>(null)
   const [activeValidation, setActiveValidation] = useState<DeploymentValidation | null>(null)
   const [activeValidationRuns, setActiveValidationRuns] = useState<{ preRuns: MonitorRun[]; postRuns: MonitorRun[] }>({ preRuns: [], postRuns: [] })
+
   const activeApplication = useMemo(() => {
     return applications.find((application) => application.id === applicationId) || null
   }, [applications, applicationId])
 
-  // Filters for "/monitors" page
-  const [monitorsSearch, setMonitorsSearch] = useState("")
-  const [monitorsStatusFilter, setMonitorsStatusFilter] = useState<"all" | "active" | "inactive" | "failed" | "healthy">("all")
-  const [monitorsScheduleFilter, setMonitorsScheduleFilter] = useState<"all" | "scheduled" | "manual">("all")
+  const {
+    monitorsSearch,
+    setMonitorsSearch,
+    monitorsStatusFilter,
+    setMonitorsStatusFilter,
+    monitorsScheduleFilter,
+    setMonitorsScheduleFilter,
+    filteredMonitors,
+  } = useMonitorFilters(monitors)
 
-  // Confirmation Alert Dialog States
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean
     type: "disable" | "delete"
@@ -71,303 +104,339 @@ export function usePulseConsoleData({
   const [runningApp, setRunningApp] = useState<Application | null>(null)
   const [appRunStatus, setAppRunStatus] = useState<Record<string, { status: "queued" | "running" | "success" | "failed" | "skipped"; durationMs?: number; error?: string }>>({})
   const [appRunCompleted, setAppRunCompleted] = useState(false)
+  const [appRunBatch, setAppRunBatch] = useState<{ applicationId: string; batchId: string } | null>(null)
 
-  const filteredMonitors = useMemo(() => {
-    return monitors.filter((m) => {
-      const q = monitorsSearch.toLowerCase()
-      const matchesSearch = !monitorsSearch || 
-        m.name.toLowerCase().includes(q) || 
-        (m.description || "").toLowerCase().includes(q)
-
-      const matchesStatus = 
-        monitorsStatusFilter === "all" ||
-        (monitorsStatusFilter === "active" && m.isActive) ||
-        (monitorsStatusFilter === "inactive" && !m.isActive) ||
-        (monitorsStatusFilter === "failed" && (m.status || "").toLowerCase() === "failed") ||
-        (monitorsStatusFilter === "healthy" && (m.status || "").toLowerCase() !== "failed")
-
-      const matchesSchedule = 
-        monitorsScheduleFilter === "all" ||
-        (monitorsScheduleFilter === "scheduled" && m.scheduleMode !== "manual") ||
-        (monitorsScheduleFilter === "manual" && m.scheduleMode === "manual")
-
-      return matchesSearch && matchesStatus && matchesSchedule
-    })
-  }, [monitors, monitorsSearch, monitorsStatusFilter, monitorsScheduleFilter])
-
-  const fetchMonitors = async () => {
-    try {
-      const res = await fetch("/api/monitors")
-      if (res.ok) {
-        const data = await res.json()
-        setMonitors(data.monitors || [])
+  usePulseEventStream(
+    requirements.alerts ? [topicAlerts()] : [],
+    (event) => {
+      if (event.type === PULSE_EVENT_TYPES.alertCreated) {
+        const data = event.data as AlertEventData
+        setAlerts((prev) => {
+          if (prev.some((alert) => alert.id === data.alert.id)) return prev
+          return [data.alert, ...prev]
+        })
+        return
       }
+      if (event.type === PULSE_EVENT_TYPES.alertAcknowledged) {
+        const data = event.data as AlertEventData
+        setAlerts((prev) => prev.map((alert) => (alert.id === data.alert.id ? data.alert : alert)))
+        return
+      }
+      if (event.type === PULSE_EVENT_TYPES.alertResolved) {
+        const data = event.data as AlertResolvedData
+        setAlerts((prev) =>
+          prev.map((alert) =>
+            alert.monitorId === data.monitorId && alert.status === "open"
+              ? { ...alert, status: "resolved" }
+              : alert,
+          ),
+        )
+      }
+    },
+    requirements.alerts,
+  )
+
+  usePulseEventStream(
+    appRunBatch ? [topicApplicationRunBatch(appRunBatch.applicationId, appRunBatch.batchId)] : [],
+    (event) => {
+      if (event.type === PULSE_EVENT_TYPES.runQueued) {
+        const data = event.data as RunBatchEventData
+        setAppRunStatus((prev) => ({
+          ...prev,
+          [data.monitorId]: { status: "running" },
+        }))
+        return
+      }
+      if (event.type === PULSE_EVENT_TYPES.runCompleted) {
+        const data = event.data as RunBatchEventData
+        const succeeded = String(data.status || "").toUpperCase() === "SUCCESS"
+        setAppRunStatus((prev) => ({
+          ...prev,
+          [data.monitorId]: {
+            status: succeeded ? "success" : "failed",
+            durationMs: data.durationMs,
+            error: data.failureReason,
+          },
+        }))
+      }
+    },
+    Boolean(appRunBatch),
+  )
+
+  const fetchMonitors = useCallback(async () => {
+    try {
+      setMonitors(await pulseClient.listMonitors())
     } catch (err) {
       console.error("Failed to fetch monitors:", err)
     }
-  }
+  }, [])
 
-  const fetchApplications = async () => {
+  const fetchApplications = useCallback(async () => {
     try {
-      const res = await fetch("/api/applications")
-      if (res.ok) {
-        const data = await res.json()
-        setApplications(data.applications || [])
-      }
+      setApplications(await pulseClient.listApplications())
     } catch (err) {
       console.error("Failed to fetch applications:", err)
     }
-  }
+  }, [])
 
-  const fetchDeploymentValidations = async (applicationIdVal?: string) => {
+  const fetchDeploymentValidations = useCallback(async (applicationIdVal?: string) => {
     try {
-      const query = applicationIdVal ? `?applicationId=${encodeURIComponent(applicationIdVal)}` : ""
-      const res = await fetch(`/api/deployment-validations${query}`)
-      if (res.ok) {
-        const data = await res.json()
-        setDeploymentValidations(data.validations || [])
-      }
+      setDeploymentValidations(await pulseClient.listDeploymentValidations(applicationIdVal))
     } catch (err) {
       console.error("Failed to fetch deployment validations:", err)
     }
-  }
+  }, [])
 
-  const fetchSecrets = async () => {
+  const fetchSecrets = useCallback(async () => {
     try {
-      const res = await fetch("/api/secrets")
-      if (res.ok) {
-        const data = await res.json()
-        setSecrets(data.secrets || [])
-      }
+      setSecrets(await pulseClient.listSecrets())
     } catch (err) {
       console.error("Failed to fetch secrets:", err)
     }
-  }
+  }, [])
 
-  const fetchCertificateProfiles = async () => {
+  const fetchCertificateProfiles = useCallback(async () => {
     try {
-      const res = await fetch("/api/settings/certificates")
-      if (res.ok) {
-        const data = await res.json()
-        setCertificateProfiles(data.profiles || [])
-      }
+      setCertificateProfiles(await pulseClient.listCertificateProfiles())
     } catch (err) {
       console.error("Failed to fetch certificate profiles:", err)
     }
-  }
+  }, [])
 
-  const fetchAlerts = async () => {
+  const fetchAlerts = useCallback(async () => {
     try {
-      const res = await fetch("/api/alerts")
-      if (res.ok) {
-        const data = await res.json()
-        setAlerts(data.alerts || [])
-      }
+      setAlerts(await pulseClient.listAlerts())
     } catch (err) {
       console.error("Failed to fetch alerts:", err)
     }
-  }
+  }, [])
 
-  const fetchRuns = async () => {
+  const fetchRuns = useCallback(async () => {
     try {
-      const res = await fetch("/api/runs")
-      if (res.ok) {
-        const data = await res.json()
-        setRuns(data.runs || [])
-      }
+      setRuns(await pulseClient.listRuns())
     } catch (err) {
       console.error("Failed to fetch runs:", err)
     }
-  }
+  }, [])
 
-  const fetchNotificationSettings = async () => {
+  useEffect(() => {
+    if (!runningApp || !appRunBatch) return
+    const activeMonitors = monitors.filter(
+      (monitor) => monitor.applicationId === runningApp.id && monitor.isActive,
+    )
+    if (activeMonitors.length === 0) return
+
+    const allDone = activeMonitors.every((monitor) => {
+      const status = appRunStatus[monitor.id]?.status
+      return status === "success" || status === "failed"
+    })
+
+    if (!allDone) return
+
+    setAppRunCompleted(true)
+    setAppRunBatch(null)
+    void fetchAlerts()
+    void fetchRuns()
+    void fetchMonitors()
+  }, [appRunBatch, appRunStatus, runningApp, monitors, fetchAlerts, fetchRuns, fetchMonitors])
+
+  const fetchNotificationSettings = useCallback(async () => {
     try {
-      const res = await fetch("/api/settings/notifications")
-      if (res.ok) {
-        const data = await res.json()
-        setNotificationSettings(data.settings || null)
-      }
+      setNotificationSettings(await pulseClient.getNotificationSettings())
     } catch (err) {
       console.error("Failed to fetch notification settings:", err)
     }
-  }
+  }, [])
 
-  const fetchRetentionSettings = async () => {
+  const fetchRetentionSettings = useCallback(async () => {
     try {
-      const res = await fetch("/api/settings/retention")
-      if (res.ok) {
-        const data = await res.json()
-        setRetentionSettings(data.settings || null)
-      }
+      setRetentionSettings(await pulseClient.getRetentionSettings())
     } catch (err) {
       console.error("Failed to fetch retention settings:", err)
     }
-  }
+  }, [])
 
-  const fetchSLOSummary = async () => {
+  const fetchSLOSummary = useCallback(async () => {
     try {
-      const res = await fetch("/api/metrics/slo")
-      if (res.ok) {
-        const data = await res.json()
-        setSloSummary(data.summary || null)
-      }
+      setSloSummary(await pulseClient.getSLOSummary())
     } catch (err) {
       console.error("Failed to fetch SLO summary:", err)
     }
-  }
+  }, [])
 
-  const fetchSingleMonitor = async (id: string) => {
+  const fetchSingleMonitor = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/monitors/${id}`)
-      if (res.ok) {
-        const data = await res.json()
-        setActiveMonitor((data.draft ?? data.published ?? data.monitor) || null)
-      }
+      setActiveMonitor(await pulseClient.getMonitor(id))
     } catch (err) {
       console.error(`Failed to fetch monitor ${id}:`, err)
     }
-  }
+  }, [])
 
-  const fetchSingleRun = async (id: string) => {
+  const fetchSingleRun = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/runs/${id}`)
-      if (res.ok) {
-        const data = await res.json()
-        setActiveRun(data.run || null)
-      }
+      setActiveRun(await pulseClient.getRun(id))
     } catch (err) {
       console.error(`Failed to fetch run ${id}:`, err)
     }
-  }
+  }, [])
 
-  const fetchSingleDeploymentValidation = async (id: string) => {
+  const fetchElfQueries = useCallback(async (applicationIdVal?: string) => {
     try {
-      const res = await fetch(`/api/deployment-validations/${id}`)
-      if (res.ok) {
-        const data = await res.json()
-        setActiveValidation(data.validation || null)
-        setActiveValidationRuns({ preRuns: data.preRuns || [], postRuns: data.postRuns || [] })
-      }
+      setElfQueries(await pulseClient.listElfQueries(applicationIdVal))
+    } catch (err) {
+      console.error("Failed to fetch ELF queries:", err)
+    }
+  }, [])
+
+  const fetchElfProxySettings = useCallback(async () => {
+    try {
+      setElfProxySettings(await pulseClient.getElfProxySettings())
+    } catch (err) {
+      console.error("Failed to fetch ELF proxy settings:", err)
+    }
+  }, [])
+
+  const fetchSingleDeploymentValidation = useCallback(async (id: string) => {
+    try {
+      const data = await pulseClient.getDeploymentValidation(id)
+      setActiveValidation(data.validation)
+      setActiveValidationRuns({ preRuns: data.preRuns, postRuns: data.postRuns })
     } catch (err) {
       console.error(`Failed to fetch deployment validation ${id}:`, err)
     }
-  }
+  }, [])
 
   useEffect(() => {
     setLoading(true)
-    const promises = [
-      fetchApplications(),
-      fetchMonitors(),
-      fetchSecrets(),
-      fetchCertificateProfiles(),
-      fetchAlerts(),
-      fetchRuns(),
-      fetchNotificationSettings(),
-      fetchRetentionSettings(),
-      fetchSLOSummary(),
-      fetchDeploymentValidations(applicationId),
-    ]
-    if (monitorId) {
-      promises.push(fetchSingleMonitor(monitorId))
-    }
-    if (runId) {
-      promises.push(fetchSingleRun(runId))
-    }
-    if (validationId) {
-      promises.push(fetchSingleDeploymentValidation(validationId))
-    }
-    Promise.all(promises).finally(() => {
-      setLoading(false)
-    })
-  }, [applicationId, monitorId, runId, alertId, validationId])
+    const promises: Promise<unknown>[] = []
+
+    if (requirements.applications) promises.push(fetchApplications())
+    if (requirements.monitors) promises.push(fetchMonitors())
+    if (requirements.secrets) promises.push(fetchSecrets())
+    if (requirements.certificateProfiles) promises.push(fetchCertificateProfiles())
+    if (requirements.alerts) promises.push(fetchAlerts())
+    if (requirements.runs) promises.push(fetchRuns())
+    if (requirements.notificationSettings) promises.push(fetchNotificationSettings())
+    if (requirements.retentionSettings) promises.push(fetchRetentionSettings())
+    if (requirements.sloSummary) promises.push(fetchSLOSummary())
+    if (requirements.deploymentValidations) promises.push(fetchDeploymentValidations(applicationId))
+    if (requirements.elfQueries) promises.push(fetchElfQueries(applicationId))
+    if (requirements.elfProxySettings) promises.push(fetchElfProxySettings())
+
+    if (monitorId) promises.push(fetchSingleMonitor(monitorId))
+    if (runId) promises.push(fetchSingleRun(runId))
+    if (validationId) promises.push(fetchSingleDeploymentValidation(validationId))
+
+    Promise.all(promises).finally(() => setLoading(false))
+  }, [
+    requirements,
+    applicationId,
+    monitorId,
+    runId,
+    alertId,
+    validationId,
+    fetchApplications,
+    fetchMonitors,
+    fetchSecrets,
+    fetchCertificateProfiles,
+    fetchAlerts,
+    fetchRuns,
+    fetchNotificationSettings,
+    fetchRetentionSettings,
+    fetchSLOSummary,
+    fetchDeploymentValidations,
+    fetchElfQueries,
+    fetchElfProxySettings,
+    fetchSingleMonitor,
+    fetchSingleRun,
+    fetchSingleDeploymentValidation,
+  ])
 
   const handleRunNow = async (monitorIdVal: string) => {
     try {
-      const res = await fetch(`/api/monitors/${monitorIdVal}/run`, { method: "POST" })
-      if (res.ok) {
-        await Promise.all([fetchMonitors(), fetchRuns(), fetchAlerts(), fetchSLOSummary()])
-      }
+      await pulseClient.runMonitor(monitorIdVal)
+      const refresh: Promise<unknown>[] = []
+      if (requirements.monitors) refresh.push(fetchMonitors())
+      if (requirements.runs) refresh.push(fetchRuns())
+      if (requirements.alerts) refresh.push(fetchAlerts())
+      if (requirements.sloSummary) refresh.push(fetchSLOSummary())
+      await Promise.all(refresh)
     } catch (err) {
       console.error("Failed to trigger monitor run:", err)
+      throw err
     }
   }
 
   const handleRunApplication = async (applicationIdVal: string) => {
-    const app = applications.find(a => a.id === applicationIdVal)
+    const app = applications.find((a) => a.id === applicationIdVal)
     if (!app) return
-    
+
     setRunningApp(app)
     setAppRunCompleted(false)
-    const appMonitors = monitors.filter(m => m.applicationId === applicationIdVal)
-    
-    const initialStates: Record<string, any> = {}
-    appMonitors.forEach(m => {
-      initialStates[m.id] = {
-        status: m.isActive ? "running" : "skipped",
-      }
+    const appMonitors = monitors.filter((m) => m.applicationId === applicationIdVal)
+
+    const initialStates: Record<string, { status: "queued" | "running" | "success" | "failed" | "skipped"; durationMs?: number; error?: string }> = {}
+    appMonitors.forEach((m) => {
+      initialStates[m.id] = { status: m.isActive ? "running" : "skipped" }
     })
     setAppRunStatus(initialStates)
-    
+
     const clickTime = new Date()
-    
+
     try {
-      const res = await fetch(`/api/applications/${applicationIdVal}/run`, { method: "POST" })
-      if (!res.ok) {
-        throw new Error("Failed to trigger application run")
-      }
-      
-      let ticks = 0
-      const maxTicks = 15
-      const interval = setInterval(async () => {
-        ticks++
-        const [updatedMonitors, updatedRunsRes] = await Promise.all([
-          fetch(`/api/monitors`).then(r => r.json()).catch(() => ({ monitors: [] })),
-          fetch(`/api/runs`).then(r => r.json()).catch(() => ({ runs: [] })),
-        ])
-        
-        const latestMonitors = updatedMonitors.monitors || []
-        const latestRuns = updatedRunsRes.runs || []
-        
-        setMonitors(latestMonitors)
-        setRuns(latestRuns)
-        
-        const newStates = { ...initialStates }
-        let allDone = true
-        
-        appMonitors.forEach(m => {
-          if (!m.isActive) {
-            newStates[m.id] = { status: "skipped" }
-            return
-          }
-          
-          const monitorRuns = latestRuns.filter((r: any) => r.monitorId === m.id)
-          monitorRuns.sort((a: any, b: any) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
-          const latestRun = monitorRuns[0]
-          
-          if (latestRun && new Date(latestRun.startedAt).getTime() >= clickTime.getTime() - 5000) {
-            const isCompleted = ["success", "failed", "timeout", "error"].includes(latestRun.status)
-            newStates[m.id] = {
-              status: latestRun.status === "success" ? "success" : "failed",
-              durationMs: latestRun.durationMs,
-              error: latestRun.failureReason,
+      const summary = await pulseClient.runApplication(applicationIdVal)
+      if (summary.batchId) {
+        setAppRunBatch({ applicationId: applicationIdVal, batchId: summary.batchId })
+      } else {
+        // Fallback when streaming metadata is unavailable.
+        let ticks = 0
+        const maxTicks = 120
+        const interval = setInterval(async () => {
+          ticks++
+          const [latestMonitors, latestRuns] = await Promise.all([
+            pulseClient.listMonitors().catch(() => []),
+            pulseClient.listRuns().catch(() => []),
+          ])
+
+          setMonitors(latestMonitors)
+          setRuns(latestRuns)
+
+          const newStates = { ...initialStates }
+          let allDone = true
+
+          appMonitors.forEach((m) => {
+            if (!m.isActive) {
+              newStates[m.id] = { status: "skipped" }
+              return
             }
-            if (!isCompleted) {
+
+            const monitorRuns = latestRuns.filter((r) => r.monitorId === m.id)
+            monitorRuns.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+            const latestRun = monitorRuns[0]
+
+            if (latestRun && new Date(latestRun.startedAt).getTime() >= clickTime.getTime() - 5000) {
+              const isCompleted = ["success", "failed", "timeout", "error"].includes(latestRun.status)
+              newStates[m.id] = {
+                status: latestRun.status === "success" ? "success" : "failed",
+                durationMs: latestRun.durationMs,
+                error: latestRun.failureReason,
+              }
+              if (!isCompleted) allDone = false
+            } else {
+              newStates[m.id] = { status: "running" }
               allDone = false
             }
-          } else {
-            newStates[m.id] = { status: "running" }
-            allDone = false
+          })
+
+          setAppRunStatus(newStates)
+
+          if (allDone || ticks >= maxTicks) {
+            clearInterval(interval)
+            setAppRunCompleted(true)
+            if (requirements.alerts) await fetchAlerts()
           }
-        })
-        
-        setAppRunStatus(newStates)
-        
-        if (allDone || ticks >= maxTicks) {
-          clearInterval(interval)
-          setAppRunCompleted(true)
-          await fetchAlerts()
-        }
-      }, 1500)
+        }, 1500)
+      }
     } catch (err) {
       console.error("Failed to run application:", err)
       setRunningApp(null)
@@ -375,65 +444,87 @@ export function usePulseConsoleData({
   }
 
   const handleSaveApplication = async (input: Application) => {
-    const res = await fetch(input.id ? `/api/applications/${input.id}` : "/api/applications", {
-      method: input.id ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || "Failed to save application.")
-    }
+    await pulseClient.saveApplication(input)
     await fetchApplications()
   }
 
+  const handleDeleteApplication = async (applicationId: string) => {
+    await pulseClient.deleteApplication(applicationId)
+    await Promise.all([
+      fetchApplications(),
+      requirements.monitors ? fetchMonitors() : Promise.resolve(),
+      requirements.deploymentValidations ? fetchDeploymentValidations() : Promise.resolve(),
+    ])
+  }
+
   const handleCreateDeploymentValidation = async (input: DeploymentValidationCreateInput) => {
-    const res = await fetch("/api/deployment-validations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to create deployment validation.")
-    }
+    const validation = await pulseClient.createDeploymentValidation(input)
     await fetchDeploymentValidations(input.applicationId)
-    const validation = (data.validation || null) as DeploymentValidation | null
-    if (validation) {
-      window.location.href = `/deployments/${validation.id}`
-    }
     return validation
   }
 
+  const handleUpdateDeploymentValidation = async (input: DeploymentValidationUpdateInput) => {
+    const validation = await pulseClient.updateDeploymentValidation(input)
+    await fetchDeploymentValidations()
+    return validation
+  }
+
+  const handleDeleteDeploymentValidation = async (validationId: string) => {
+    await pulseClient.deleteDeploymentValidation(validationId)
+    await fetchDeploymentValidations()
+  }
+
   const handleRunDeploymentValidationPost = async (id: string) => {
-    const res = await fetch(`/api/deployment-validations/${id}/run-post`, { method: "POST" })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to run post-deploy checks.")
-    }
+    await pulseClient.runDeploymentValidationPost(id)
+  }
+
+  const handleRunDeploymentValidationLogCheck = async (id: string) => {
+    await pulseClient.runDeploymentValidationLogCheck(id)
+  }
+
+  const handleSaveElfQuery = async (queryId: string | null, input: ElfQueryInput) => {
+    const query = await pulseClient.saveElfQuery(queryId, input)
+    await fetchElfQueries()
+    return query
+  }
+
+  const handleDeleteElfQuery = async (queryId: string) => {
+    await pulseClient.deleteElfQuery(queryId)
+    await fetchElfQueries()
+  }
+
+  const handleTestElfQuery = async (queryId: string, input?: { elfAppId?: string; applicationId?: string }) => {
+    return pulseClient.testElfQuery(queryId, input)
+  }
+
+  const handleProbeElfQuery = async (id: string, input: ElfQueryProbeInput = {}) => {
+    const result = await pulseClient.probeElfQuery(id, input)
+    await fetchElfQueries()
+    return result
+  }
+
+  const activeElfQuery = useMemo(() => {
+    return elfQueries.find((query) => query.id === queryId) || null
+  }, [elfQueries, queryId])
+
+  const handleSaveElfProxySettings = async (input: ElfProxySettingsInput) => {
+    const settings = await pulseClient.saveElfProxySettings(input)
+    await fetchElfProxySettings()
+    return settings
+  }
+
+  const handleTestElfProxySettings = async (input: {
+    baseUrl?: string
+    indexPathTemplate?: string
+    elfAppId?: string
+    pretty?: boolean
+  }) => {
+    return pulseClient.testElfProxySettings(input)
   }
 
   const handleGenerateDeploymentAIReport = async (validation: DeploymentValidation, preRuns: MonitorRun[], postRuns: MonitorRun[]) => {
-    const copilotRes = await fetch("/api/copilot/deployment-report", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ validation, preRuns, postRuns }),
-    })
-    const copilotData = await copilotRes.json().catch(() => ({}))
-    if (!copilotRes.ok) {
-      throw new Error(copilotData.error || "Failed to generate AI deployment report.")
-    }
-
-    const saveRes = await fetch(`/api/deployment-validations/${validation.id}/ai-report`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(copilotData.result || {}),
-    })
-    const saveData = await saveRes.json().catch(() => ({}))
-    if (!saveRes.ok) {
-      throw new Error(saveData.error || "Failed to save AI deployment report.")
-    }
-    const updated = (saveData.validation || null) as DeploymentValidation | null
+    const report = await pulseClient.generateDeploymentAIReport(validation, preRuns, postRuns)
+    const updated = await pulseClient.saveDeploymentAIReport(validation.id, report)
     if (updated) {
       setActiveValidation(updated)
       await fetchDeploymentValidations(updated.applicationId)
@@ -445,29 +536,50 @@ export function usePulseConsoleData({
     const monitorItem = monitors.find((m) => m.id === monitorIdVal) || activeMonitor
     if (!monitorItem) return
     try {
-      const res = await fetch(`/api/monitors/${monitorIdVal}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...monitorItem, isActive: !currentActive }),
-      })
-      if (res.ok) {
-        await Promise.all([fetchMonitors(), monitorIdVal ? fetchSingleMonitor(monitorIdVal) : Promise.resolve()])
-      }
+      await pulseClient.updateMonitor({ ...monitorItem, isActive: !currentActive })
+      await Promise.all([
+        requirements.monitors ? fetchMonitors() : Promise.resolve(),
+        monitorIdVal ? fetchSingleMonitor(monitorIdVal) : Promise.resolve(),
+      ])
+      notifyPulseToast(
+        "success",
+        currentActive ? "Monitor disabled" : "Monitor enabled",
+        `${monitorItem.name} is now ${currentActive ? "paused" : "active"}.`,
+      )
     } catch (err) {
       console.error("Failed to toggle monitor active status:", err)
+      notifyPulseToast(
+        "danger",
+        "Failed to update monitor",
+        err instanceof Error ? err.message : "Please try again.",
+      )
+      throw err
     }
   }
 
   const executeDeleteMonitor = async (monitorIdVal: string) => {
+    const monitorItem = monitors.find((m) => m.id === monitorIdVal) || activeMonitor
     try {
-      const res = await fetch(`/api/monitors/${monitorIdVal}`, {
-        method: "DELETE",
-      })
-      if (res.ok) {
-        await Promise.all([fetchMonitors(), fetchRuns(), fetchAlerts(), fetchSLOSummary()])
-      }
+      await pulseClient.deleteMonitor(monitorIdVal)
+      const refresh: Promise<unknown>[] = []
+      if (requirements.monitors) refresh.push(fetchMonitors())
+      if (requirements.runs) refresh.push(fetchRuns())
+      if (requirements.alerts) refresh.push(fetchAlerts())
+      if (requirements.sloSummary) refresh.push(fetchSLOSummary())
+      await Promise.all(refresh)
+      notifyPulseToast(
+        "success",
+        "Monitor deleted",
+        monitorItem ? `${monitorItem.name} was removed from the inventory.` : undefined,
+      )
     } catch (err) {
       console.error("Failed to delete monitor:", err)
+      notifyPulseToast(
+        "danger",
+        "Failed to delete monitor",
+        err instanceof Error ? err.message : "Please try again.",
+      )
+      throw err
     }
   }
 
@@ -498,138 +610,58 @@ export function usePulseConsoleData({
   }
 
   const handleSaveSecret = async (secret: SecretReference | null, input: SecretInput) => {
-    const payload = {
-      name: input.name.trim(),
-      alias: input.alias.trim(),
-      description: input.description.trim(),
-      provider: "encrypted-db",
-      value: input.value,
-      isActive: input.isActive,
-    }
-    const res = await fetch(secret ? `/api/secrets/${secret.id}` : "/api/secrets", {
-      method: secret ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || "Failed to save secret.")
-    }
+    await pulseClient.saveSecret(secret, input)
     await fetchSecrets()
   }
 
   const handleTestSecret = async (secret: SecretReference) => {
-    const res = await fetch(`/api/secrets/${secret.id}/test`, { method: "POST" })
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
-      throw new Error(data.error || "Failed to test secret.")
-    }
-    const data = await res.json()
-    return Boolean(data.ok)
+    return pulseClient.testSecret(secret)
   }
 
   const handleDeleteSecret = async (secretIdVal: string) => {
-    try {
-      const res = await fetch(`/api/secrets/${secretIdVal}`, {
-        method: "DELETE",
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || "Failed to delete secret.")
-      }
-      await fetchSecrets()
-    } catch (err) {
-      console.error("Failed to delete secret:", err)
-      throw err
-    }
-  }
-
-  const handleSaveNotificationSettings = async (input: NotificationSettingsInput) => {
-    const res = await fetch("/api/settings/notifications", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to save notification settings.")
-    }
-    setNotificationSettings(data.settings || null)
+    await pulseClient.deleteSecret(secretIdVal)
     await fetchSecrets()
   }
 
+  const handleSaveNotificationSettings = async (input: NotificationSettingsInput) => {
+    const settings = await pulseClient.saveNotificationSettings(input)
+    setNotificationSettings(settings)
+    if (requirements.secrets) await fetchSecrets()
+  }
+
   const handleTestNotificationSettings = async (input: NotificationSettingsInput): Promise<NotificationTestResult> => {
-    const res = await fetch("/api/settings/notifications/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to send test alert.")
-    }
-    return data as NotificationTestResult
+    return pulseClient.testNotificationSettings(input)
   }
 
   const handleSaveRetentionSettings = async (settings: RetentionSettings): Promise<RetentionSettings> => {
-    const res = await fetch("/api/settings/retention", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to save retention settings.")
-    }
-    const updated = (data.settings || settings) as RetentionSettings
+    const updated = await pulseClient.saveRetentionSettings(settings)
     setRetentionSettings(updated)
     return updated
   }
 
   const handlePurgeRetention = async (): Promise<RetentionPurgeResult> => {
-    const res = await fetch("/api/settings/retention/purge", { method: "POST" })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to purge expired runs.")
-    }
-    await fetchRuns()
-    return data as RetentionPurgeResult
+    const result = await pulseClient.purgeRetention()
+    if (requirements.runs) await fetchRuns()
+    return result
   }
 
   const handleSaveCertificateProfile = async (input: CertificateProfileInput) => {
-    const url = input.id ? `/api/settings/certificates/${input.id}` : "/api/settings/certificates"
-    const res = await fetch(url, {
-      method: input.id ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to save certificate profile.")
-    }
-    await Promise.all([fetchCertificateProfiles(), fetchSecrets()])
+    await pulseClient.saveCertificateProfile(input)
+    await Promise.all([
+      requirements.certificateProfiles ? fetchCertificateProfiles() : Promise.resolve(),
+      requirements.secrets ? fetchSecrets() : Promise.resolve(),
+    ])
   }
 
   const handleTestCertificateProfile = async (profile: CertificateProfile): Promise<boolean> => {
-    const res = await fetch(`/api/settings/certificates/${profile.id}/test`, { method: "POST" })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to test certificate profile.")
-    }
-    await fetchCertificateProfiles()
-    if (data.error) {
-      throw new Error(data.error)
-    }
-    return Boolean(data.ok)
+    const ok = await pulseClient.testCertificateProfile(profile)
+    if (requirements.certificateProfiles) await fetchCertificateProfiles()
+    return ok
   }
 
   const handleDeleteCertificateProfile = async (profileId: string) => {
-    const res = await fetch(`/api/settings/certificates/${profileId}`, { method: "DELETE" })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to delete certificate profile.")
-    }
-    await fetchCertificateProfiles()
+    await pulseClient.deleteCertificateProfile(profileId)
+    if (requirements.certificateProfiles) await fetchCertificateProfiles()
   }
 
   return {
@@ -644,6 +676,8 @@ export function usePulseConsoleData({
       notificationSettings,
       retentionSettings,
       sloSummary,
+      elfQueries,
+      elfProxySettings,
       filteredMonitors,
     },
     active: {
@@ -652,10 +686,12 @@ export function usePulseConsoleData({
       activeValidation,
       activeValidationRuns,
       activeApplication,
+      activeElfQuery,
       runningApp,
       setRunningApp,
       appRunStatus,
       appRunCompleted,
+      setAppRunBatch,
     },
     ui: {
       loading,
@@ -689,9 +725,19 @@ export function usePulseConsoleData({
       handleRunNow,
       handleRunApplication,
       handleSaveApplication,
+      handleDeleteApplication,
       handleCreateDeploymentValidation,
+      handleUpdateDeploymentValidation,
+      handleDeleteDeploymentValidation,
       handleRunDeploymentValidationPost,
+      handleRunDeploymentValidationLogCheck,
       handleGenerateDeploymentAIReport,
+      handleSaveElfQuery,
+      handleDeleteElfQuery,
+      handleTestElfQuery,
+      handleProbeElfQuery,
+      handleSaveElfProxySettings,
+      handleTestElfProxySettings,
       executeToggleActive,
       executeDeleteMonitor,
       handleToggleActive,

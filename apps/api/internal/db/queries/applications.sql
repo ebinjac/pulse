@@ -3,6 +3,9 @@ SELECT
   id,
   name,
   car_id,
+  COALESCE(elf_app_id, '')::text AS elf_app_id,
+  COALESCE(index_path_template, '')::text AS index_path_template,
+  log_field_mapping_json,
   COALESCE(description, '')::text AS description,
   COALESCE(owner, '')::text AS owner,
   COALESCE(environment, '')::text AS environment,
@@ -18,6 +21,9 @@ SELECT
   id,
   name,
   car_id,
+  COALESCE(elf_app_id, '')::text AS elf_app_id,
+  COALESCE(index_path_template, '')::text AS index_path_template,
+  log_field_mapping_json,
   COALESCE(description, '')::text AS description,
   COALESCE(owner, '')::text AS owner,
   COALESCE(environment, '')::text AS environment,
@@ -33,6 +39,9 @@ INSERT INTO applications (
   id,
   name,
   car_id,
+  elf_app_id,
+  index_path_template,
+  log_field_mapping_json,
   description,
   owner,
   environment,
@@ -41,10 +50,13 @@ INSERT INTO applications (
   created_at,
   updated_at
 )
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   car_id = EXCLUDED.car_id,
+  elf_app_id = EXCLUDED.elf_app_id,
+  index_path_template = EXCLUDED.index_path_template,
+  log_field_mapping_json = EXCLUDED.log_field_mapping_json,
   description = EXCLUDED.description,
   owner = EXCLUDED.owner,
   environment = EXCLUDED.environment,

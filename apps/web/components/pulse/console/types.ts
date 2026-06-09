@@ -1,4 +1,4 @@
-import type { ConsoleView } from "@/components/pulse/console-shared"
+import type { ConsoleView } from "@/components/pulse/console/layout"
 
 export interface PulseConsoleProps {
   view?: ConsoleView
@@ -7,6 +7,7 @@ export interface PulseConsoleProps {
   runId?: string
   alertId?: string
   validationId?: string
+  queryId?: string
 }
 
 export type DeploymentValidationCreateInput = {
@@ -21,4 +22,13 @@ export type DeploymentValidationCreateInput = {
   deploymentStartedAt: string
   baselineWindowHours: number
   baselineRunCount: number
+  elfQueryIds?: string[]
+  autoRunLogCheck?: boolean
+  serviceIds?: string[]
+  observabilityProfile?: string
+  signalPackIds?: string[]
+}
+
+export type DeploymentValidationUpdateInput = DeploymentValidationCreateInput & {
+  id: string
 }

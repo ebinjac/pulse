@@ -1,5 +1,7 @@
 # Pulse
 
+End-user documentation is available in the app at `/docs`.
+
 Pulse is an MVP synthetic API monitoring platform for simple endpoint checks and multi-step API workflows with variables, secret references, assertions, extractors, run history, and basic alert paths.
 
 ## Apps
@@ -64,5 +66,6 @@ The Compose stack runs the `migrate` service before starting the API and worker.
 
 ## Deployment
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for separate web/API service deployment, required environment variables, and alert delivery configuration.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for environment variables and service topology.
+See [docs/deploy/README.md](docs/deploy/README.md) for platform runbooks (Vercel + Render, OpenShift, worker scaling).
 See [MIGRATIONS.md](MIGRATIONS.md) for the database migration runbook.

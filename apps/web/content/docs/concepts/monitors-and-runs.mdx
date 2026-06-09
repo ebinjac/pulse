@@ -1,0 +1,36 @@
+---
+title: Monitors and runs
+description: Published monitors, drafts, schedules, and run history.
+---
+
+A **monitor** is the unit of synthetic checking in Rythm. Each monitor has:
+
+- **Steps** — Ordered HTTP actions (and related configuration) executed sequentially
+- **Variables** — Values extracted from responses and reused in later steps
+- **Secrets** — References to encrypted credentials, not inline values
+- **Assertions** — Pass/fail rules on status, body, headers, or timing
+- **Schedule** — How often the published monitor runs automatically
+- **Alert policy** — When failures should raise alert events
+
+## Published vs draft
+
+| State | Behavior |
+|-------|----------|
+| **Draft** | Editable work-in-progress; test runs use draft config only |
+| **Published** | Live config used by the scheduler and manual production runs |
+
+Publishing replaces the live configuration. Version history keeps prior published snapshots for diff and rollback.
+
+## Runs
+
+Every execution produces a **monitor run** with:
+
+- Overall status (passed, failed, error, and so on)
+- Per-step request/response summary (secrets masked)
+- Timing and failure reason
+
+Access runs from the monitor’s **Runs** tab, the **Dashboard**, or links on alert events.
+
+## Import and export
+
+Monitors can be imported from Postman Collection v2.1, OpenAPI 3 / Swagger 2, or Rythm JSON/YAML bundles. See [Importing monitors](/docs/guides/importing-monitors).

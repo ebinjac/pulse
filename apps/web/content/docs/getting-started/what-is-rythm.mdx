@@ -1,0 +1,28 @@
+---
+title: What is Rythm?
+description: An overview of synthetic API monitoring and deployment validation in Rythm.
+---
+
+**Rythm** is a synthetic monitoring platform for API and workflow checks. You define monitors as ordered steps (HTTP requests, assertions, variable extraction), schedule them against applications, and review run history when something fails.
+
+Rythm also supports **deployment validation** — structured before-and-after sampling around a release, optional **ELF log checks** against your logging platform, and **alerts** when monitors breach policy.
+
+## What you can do
+
+- **Monitor APIs continuously** — single endpoints or multi-step flows with variables chained across steps
+- **Group by application** — organize monitors under logical products with shared schedules and CAR identifiers
+- **Test before publishing** — save drafts, run test executions, then publish live configuration
+- **Validate releases** — compare pre-deploy and post-deploy monitor runs, with optional log-based gates
+- **Manage secrets safely** — reference encrypted values in monitors without exposing them in run output
+- **Respond to incidents** — view alert history, acknowledge events, and drill into failing runs
+
+## Who this documentation is for
+
+These docs explain how to **use Rythm in the browser**. They assume you already have access to the console. For installation or infrastructure topics, contact your platform team.
+
+## Next steps
+
+<Cards>
+  <Card title="Navigate the console" href="/docs/getting-started/navigating-the-console" description="Tour the sidebar and main work areas." />
+  <Card title="Your first monitor" href="/docs/getting-started/your-first-monitor" description="End-to-end walkthrough from application to test run." />
+</Cards>

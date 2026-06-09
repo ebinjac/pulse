@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ensemble-pulse/pulse/apps/api/internal/alerting"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/events"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/executor"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/httpapi"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/jobqueue"
@@ -25,10 +26,12 @@ func main() {
 	defer cancel()
 
 	activeStore := newStore(ctx)
+	eventBus := events.NewBusFromEnv(ctx)
+	defer eventBus.Close()
 	if envBool("PULSE_RETENTION_PURGE_ENABLED", true) {
 		store.StartRetentionPurger(ctx, activeStore, time.Hour)
 	}
-	alertService := alerting.NewService(activeStore)
+	alertService := alerting.NewService(activeStore, eventBus)
 	executor := executor.NewRealExecutor(activeStore, alertService)
 	runQueue := newRunQueue(ctx)
 	defer runQueue.Close()
@@ -38,11 +41,11 @@ func main() {
 		bgScheduler.Start(ctx)
 	}
 	if envBool("PULSE_WORKER_ENABLED", os.Getenv("REDIS_URL") == "") {
-		bgWorker := worker.NewWorker(activeStore, executor, runQueue)
+		bgWorker := worker.NewWorker(activeStore, executor, runQueue, eventBus)
 		bgWorker.Start(ctx)
 	}
 
-	server := httpapi.NewServerWithQueue(activeStore, executor, runQueue)
+	server := httpapi.NewServerWithDeps(activeStore, executor, runQueue, eventBus)
 
 	httpServer := &http.Server{
 		Addr:              addr,

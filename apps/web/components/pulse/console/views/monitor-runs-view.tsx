@@ -1,84 +1,40 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import {
   Activity,
   AlertTriangle,
-  ArrowLeft,
   Bell,
-  Boxes,
   Braces,
   CheckCircle2,
-  Eye,
   KeyRound,
   LineChart,
   Play,
-  Plus,
   RotateCw,
   Settings,
-  Server,
   Timer,
   Workflow,
-  Search,
-  Users,
-  HelpCircle,
-  Info,
-  Sparkles,
-  Loader2,
-  Upload,
 } from "lucide-react"
 
 import Editor from "@monaco-editor/react"
 import { useTheme } from "next-themes"
 
-import { BuilderWorkbench } from "@/components/pulse/builder-workbench"
-import { MonitorImportExportDialog } from "@/components/pulse/monitor-import-export-dialog"
-import { AlertDetail, AlertsHistory } from "@/components/pulse/alert-views"
 import {
   formatDate,
   isFailedStatus,
   isSuccessStatus,
-  LatencyChart,
   Metric,
   MonitorRunsChart,
   PageShell,
   StatusPill,
-  type ConsoleView,
 } from "@/components/pulse/console-shared"
-import { RunDetail, RunTimeline } from "@/components/pulse/run-views"
-import { Secrets, type SecretInput } from "@/components/pulse/secrets-view"
-import { SettingsView } from "@/components/pulse/settings-view"
-import type {
-  Application,
-  AlertEvent,
-  CertificateProfile,
-  CertificateProfileInput,
-  DeploymentValidation,
-  Monitor,
-  MonitorRun,
-  NotificationSettings,
-  NotificationSettingsInput,
-  NotificationTestResult,
-  RetentionPurgeResult,
-  RetentionSettings,
-  SecretReference,
-  SLOSummary,
-} from "@/lib/pulse-types"
-import { applicationSLOMap, formatUptimePct, monitorSLOMap } from "@/lib/pulse-slo"
-import { ErrorBudgetWidget } from "@/components/pulse/slo-widgets"
+import { RunTimeline } from "./run-views"
+import type { Monitor, MonitorRun } from "@/lib/pulse-types"
 import { Button, Card as HeroCard, Chip, Description, EmptyState, SearchField, Tabs } from "@heroui/react"
 import { cn } from "@workspace/ui/lib/utils"
 
-import { applicationHealth, dateTimeLocalToISOString, toDateTimeLocalInput, validationStatusLabel } from "../utils/console-utils"
-import type { DeploymentValidationCreateInput } from "../types"
-import { AlertFeed } from "../components/alert-feed"
-import { DeploymentValidationPanel } from "../components/deployment-validation-panel"
 import { HistoryPatternAnalysis } from "../components/history-pattern-analysis"
-import { MonitorTable } from "../components/monitor-table"
-import { SchedulerStatusCard } from "../components/scheduler-status-card"
-import { ValidationResultPill } from "../components/validation-result-pill"
-
 
 export interface RunsProps {
   monitor: Monitor

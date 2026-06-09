@@ -13,11 +13,11 @@ import {
 } from "lucide-react"
 
 import { MonitorImportExportDialog } from "@/components/pulse/monitor-import-export-dialog"
-import { AlertDetail, AlertsHistory } from "@/components/pulse/alert-views"
-import { PageShell } from "@/components/pulse/console-shared"
-import { RunDetail } from "@/components/pulse/run-views"
+import { PageShell } from "@/components/pulse/console/layout"
 import { Secrets } from "@/components/pulse/secrets-view"
-import { SettingsView } from "@/components/pulse/settings-view"
+import { AlertDetail, AlertsHistory } from "./views/alert-views"
+import { RunDetail } from "./views/run-views"
+import { SettingsView } from "./views/settings-view"
 import type { Monitor } from "@/lib/pulse-types"
 import { applicationSLOMap } from "@/lib/pulse-slo"
 import {
@@ -36,8 +36,11 @@ import type { PulseConsoleProps } from "./types"
 import { ApplicationDetailView } from "./views/application-detail-view"
 import { ApplicationsView } from "./views/applications-view"
 import { Dashboard } from "./views/dashboard-view"
+import { DeploymentCheckWizard } from "./deployment-check/deployment-check-wizard"
 import { DeploymentValidationDetailView } from "./views/deployment-validation-detail-view"
 import { DeploymentsView } from "./views/deployments-view"
+import { ElfQueriesView } from "./views/elf-queries-view"
+import { ElfQueryWorkbenchView } from "./views/elf-query-workbench-view"
 import { Builder } from "./views/monitor-builder-view"
 import { Runs } from "./views/monitor-runs-view"
 import { MonitorsListView } from "./views/monitors-list-view"
@@ -49,13 +52,16 @@ export function PulseConsole({
   runId,
   alertId,
   validationId,
+  queryId,
 }: PulseConsoleProps) {
   const { data, active, ui, actions } = usePulseConsoleData({
+    view,
     applicationId,
     monitorId,
     runId,
     alertId,
     validationId,
+    queryId,
   })
 
   const {
@@ -69,6 +75,8 @@ export function PulseConsole({
     notificationSettings,
     retentionSettings,
     sloSummary,
+    elfQueries,
+    elfProxySettings,
     filteredMonitors,
   } = data
 
@@ -78,10 +86,12 @@ export function PulseConsole({
     activeValidation,
     activeValidationRuns,
     activeApplication,
+    activeElfQuery,
     runningApp,
     setRunningApp,
     appRunStatus,
     appRunCompleted,
+    setAppRunBatch,
   } = active
 
   const {
@@ -108,9 +118,19 @@ export function PulseConsole({
     handleRunNow,
     handleRunApplication,
     handleSaveApplication,
+    handleDeleteApplication,
     handleCreateDeploymentValidation,
+    handleUpdateDeploymentValidation,
+    handleDeleteDeploymentValidation,
     handleRunDeploymentValidationPost,
+    handleRunDeploymentValidationLogCheck,
     handleGenerateDeploymentAIReport,
+    handleSaveElfQuery,
+    handleDeleteElfQuery,
+    handleTestElfQuery,
+    handleProbeElfQuery,
+    handleSaveElfProxySettings,
+    handleTestElfProxySettings,
     executeToggleActive,
     executeDeleteMonitor,
     handleToggleActive,
@@ -154,6 +174,7 @@ export function PulseConsole({
         applications={applications}
         monitors={monitors}
         onSaveApplication={handleSaveApplication}
+        onDeleteApplication={handleDeleteApplication}
         onRunApplication={handleRunApplication}
         runningAppId={runningApp?.id}
       />
@@ -162,11 +183,74 @@ export function PulseConsole({
     viewContent = (
       <DeploymentsView
         applications={applications}
-        monitors={monitors}
         validations={deploymentValidations}
-        onCreateValidation={handleCreateDeploymentValidation}
+        onDeleteValidation={handleDeleteDeploymentValidation}
       />
     )
+  } else if (view === "deployment-check-create") {
+    viewContent = (
+      <DeploymentCheckWizard
+        mode="create"
+        applications={applications}
+        monitors={monitors}
+        elfQueries={elfQueries}
+        initialApplicationId={applicationId}
+        onCreateValidation={handleCreateDeploymentValidation}
+        onUpdateValidation={handleUpdateDeploymentValidation}
+      />
+    )
+  } else if (view === "deployment-check-edit") {
+    if (!activeValidation) {
+      viewContent = (
+        <PageShell eyebrow="Deployment" title="Deployment check not found">
+          <div className="rounded-md border bg-card p-6 text-sm text-muted-foreground">
+            This deployment check was not found.
+          </div>
+        </PageShell>
+      )
+    } else {
+      viewContent = (
+        <DeploymentCheckWizard
+          mode="edit"
+          applications={applications}
+          monitors={monitors}
+          elfQueries={elfQueries}
+          editingValidation={activeValidation}
+          onCreateValidation={handleCreateDeploymentValidation}
+          onUpdateValidation={handleUpdateDeploymentValidation}
+        />
+      )
+    }
+  } else if (view === "elf-queries") {
+    viewContent = (
+      <ElfQueriesView
+        applications={applications}
+        queries={elfQueries}
+        onSaveQuery={handleSaveElfQuery}
+        onDeleteQuery={handleDeleteElfQuery}
+        onTestQuery={handleTestElfQuery}
+      />
+    )
+  } else if (view === "elf-query-detail") {
+    if (!activeElfQuery) {
+      viewContent = (
+        <PageShell eyebrow="ELF query" title="Query not found">
+          <div className="rounded-md border bg-card p-6 text-sm text-muted-foreground">
+            This ELF query was not found.
+          </div>
+        </PageShell>
+      )
+    } else {
+      viewContent = (
+        <ElfQueryWorkbenchView
+          query={activeElfQuery}
+          applications={applications}
+          elfProxyIndexPattern={elfProxySettings?.indexPathTemplate}
+          onSaveQuery={handleSaveElfQuery}
+          onProbeQuery={handleProbeElfQuery}
+        />
+      )
+    }
   } else if (view === "application-detail") {
     if (!activeApplication) {
       viewContent = (
@@ -186,7 +270,6 @@ export function PulseConsole({
           )}
           applicationSlo={applicationSLOMap(sloSummary).get(activeApplication.id)}
           onRunApplication={handleRunApplication}
-          onCreateValidation={handleCreateDeploymentValidation}
           onRunNow={handleRunNow}
           onToggleActive={handleToggleActive}
           onDeleteMonitor={handleDeleteMonitor}
@@ -211,6 +294,7 @@ export function PulseConsole({
           preRuns={activeValidationRuns.preRuns}
           postRuns={activeValidationRuns.postRuns}
           onRunPost={handleRunDeploymentValidationPost}
+          onRunLogCheck={handleRunDeploymentValidationLogCheck}
           onGenerateAIReport={handleGenerateDeploymentAIReport}
           onRefresh={() => fetchSingleDeploymentValidation(activeValidation.id)}
         />
@@ -351,6 +435,9 @@ export function PulseConsole({
         onSaveCertificateProfile={handleSaveCertificateProfile}
         onTestCertificateProfile={handleTestCertificateProfile}
         onDeleteCertificateProfile={handleDeleteCertificateProfile}
+        elfProxySettings={elfProxySettings}
+        onSaveElfProxySettings={handleSaveElfProxySettings}
+        onTestElfProxySettings={handleTestElfProxySettings}
         applications={applications}
         monitors={monitors}
       />
@@ -363,12 +450,6 @@ export function PulseConsole({
         runs={runs}
         alerts={alerts}
         sloSummary={sloSummary}
-        onRunNow={handleRunNow}
-        onToggleActive={handleToggleActive}
-        onDeleteMonitor={handleDeleteMonitor}
-        onSaveApplication={handleSaveApplication}
-        onRunApplication={handleRunApplication}
-        runningAppId={runningApp?.id}
         onImportExport={() => setIsImportExportOpen(true)}
       />
     )
@@ -446,8 +527,12 @@ export function PulseConsole({
                       variant="danger"
                       isDisabled={deleteConfirmInput !== confirmDialog.monitorName}
                       onPress={async () => {
-                        await executeDeleteMonitor(confirmDialog.monitorId)
-                        close()
+                        try {
+                          await executeDeleteMonitor(confirmDialog.monitorId)
+                          close()
+                        } catch {
+                          // Toast shown by executeDeleteMonitor
+                        }
                       }}
                     >
                       Delete Monitor
@@ -457,11 +542,15 @@ export function PulseConsole({
                       variant="secondary"
                       className="bg-warning text-warning-foreground hover:bg-warning/90"
                       onPress={async () => {
-                        await executeToggleActive(
-                          confirmDialog.monitorId,
-                          confirmDialog.currentActive ?? true,
-                        )
-                        close()
+                        try {
+                          await executeToggleActive(
+                            confirmDialog.monitorId,
+                            confirmDialog.currentActive ?? true,
+                          )
+                          close()
+                        } catch {
+                          // Toast shown by executeToggleActive
+                        }
                       }}
                     >
                       Disable Monitor
@@ -474,7 +563,15 @@ export function PulseConsole({
         </AlertDialog.Container>
       </AlertDialog.Backdrop>
 
-      <Modal.Backdrop isOpen={!!runningApp} onOpenChange={(open) => { if (!open) setRunningApp(null) }}>
+      <Modal.Backdrop
+        isOpen={!!runningApp}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRunningApp(null)
+            setAppRunBatch(null)
+          }
+        }}
+      >
         <Modal.Container>
           <Modal.Dialog className="sm:max-w-xl">
             <Modal.Header>

@@ -1,0 +1,51 @@
+---
+title: Creating a monitor
+description: Use the monitor builder for steps, assertions, extractors, and variables.
+---
+
+Open **Monitors** → **Create** to launch the builder workbench.
+
+## Basic setup
+
+1. **Name** — Use a name that states what is being checked.
+2. **Application** — Select the owning application.
+3. **Schedule** — Choose how often the published monitor runs (for example, every 5 minutes).
+
+## Steps
+
+Each step is typically an HTTP request:
+
+| Field | Notes |
+|-------|-------|
+| Method | GET, POST, PUT, PATCH, DELETE, and so on |
+| URL | Absolute URL or path if a base URL is configured |
+| Headers / body | JSON, form, or raw body as needed |
+| Secrets | Reference secret aliases for auth headers or tokens |
+
+Add multiple steps for login-then-act flows. Later steps can use **variables** from earlier responses.
+
+## Assertions
+
+Assertions define pass/fail for a step:
+
+- HTTP status code
+- Response body contains / JSON path equals
+- Response time below a threshold
+
+Failed assertions fail the step and usually fail the overall run.
+
+## Extractors
+
+**Extractors** pull values from a response into **variables** — for example, a session token from a JSON field. Reference variables in later steps as `{{variableName}}`.
+
+## Alert policy
+
+Configure when failures should raise alerts — such as after N consecutive failures. Tune policy to avoid noise on flaky endpoints.
+
+## Raw JSON mode
+
+Advanced users can edit the full monitor configuration as JSON/YAML in the builder. Form and raw views stay in sync when you save.
+
+<Callout type="info">
+  Save as a **draft** and run a **test** before publishing. See [Testing and publishing monitors](/docs/guides/testing-and-publishing-monitors).
+</Callout>

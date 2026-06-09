@@ -1,11 +1,16 @@
 # Pulse Deployment Guide
 
-This MVP is designed as two application services:
+This MVP is designed as **three application services** (plus managed PostgreSQL and Redis):
 
 - **Web**: Next.js app in `apps/web`
-- **API**: Go service in `apps/api`
+- **API**: Go HTTP server and scheduler in `apps/api` (`pulse-api`)
+- **Worker**: Go job consumer in `apps/api` (`pulse-worker`, same container image)
 
-The API owns monitor execution, scheduling, persistence, and encrypted secret storage. The web service serves the UI and proxies `/api/**` requests to the Go API through `PULSE_API_BASE_URL`.
+The API owns scheduling, persistence, and encrypted secret storage. Workers execute queued monitor runs from Redis. The web service serves the UI and proxies `/api/**` requests to the Go API through `PULSE_API_BASE_URL`.
+
+**Platform runbooks** (free-tier cloud, OpenShift, env templates, worker scaling): [docs/deploy/README.md](docs/deploy/README.md).
+
+Database migrations run **once from your laptop or CI** before deploy — not as a long-running service. See [MIGRATIONS.md](MIGRATIONS.md).
 
 ## Runtime Dependencies
 
@@ -32,7 +37,11 @@ PULSE_API_ADDR=:8080
 DATABASE_URL=postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require
 REDIS_URL=redis://HOST:6379/0
 PULSE_SECRET_ENCRYPTION_KEY=replace-with-base64-32-byte-key
+PULSE_SCHEDULER_ENABLED=true
+PULSE_WORKER_ENABLED=false
 ```
+
+Keep the embedded worker **disabled** on the API when running separate `pulse-worker` services. Set `PULSE_WORKER_ENABLED=false` explicitly when `REDIS_URL` is set.
 
 Optional alert delivery environment variables:
 
@@ -115,6 +124,29 @@ docker run --rm -p 8080:8080 \
 
 If PostgreSQL or Redis are running outside the container, do not use `localhost` from inside the API container. Use the service DNS name, private network hostname, or managed database hostname.
 
+## Worker Service
+
+Run one or more worker processes from the **same image** as the API:
+
+```bash
+docker run --rm \
+  -e DATABASE_URL='postgres://USER:PASSWORD@HOST:5432/DB_NAME?sslmode=require' \
+  -e REDIS_URL='redis://HOST:6379/0' \
+  -e PULSE_SECRET_ENCRYPTION_KEY='replace-with-base64-32-byte-key' \
+  ensemble-pulse-api \
+  /app/pulse-worker
+```
+
+Required: `DATABASE_URL`, `REDIS_URL`. Use the same `PULSE_SECRET_ENCRYPTION_KEY` as the API.
+
+### Worker scaling
+
+Each worker process runs **one monitor job at a time** sequentially. Scale **worker replicas** (not API replicas) for throughput with many monitors. See [docs/deploy/README.md](docs/deploy/README.md#worker-parallelism-and-scaling).
+
+Example OpenShift: `oc scale deployment/pulse-worker --replicas=4`. Example manifests: [deploy/openshift/](deploy/openshift/).
+
+Optional: [`render.yaml`](render.yaml) declares API + worker for Render.
+
 ## Web Service
 
 Required environment variables:
@@ -145,6 +177,19 @@ By default, Next.js serves on port `3000`. Set the port outside `.env` when star
 PORT=3000 npm run start --workspace web
 ```
 
+### Docker (OpenShift / container hosts)
+
+From the repository root:
+
+```bash
+docker build -f apps/web/Dockerfile -t pulse-web .
+docker run --rm -p 3000:3000 \
+  -e PULSE_API_BASE_URL='https://your-api-service.example.com' \
+  pulse-web
+```
+
+Requires `output: "standalone"` in `apps/web/next.config.ts` (enabled for production images).
+
 ## Separate Service Topology
 
 Recommended production topology:
@@ -171,15 +216,18 @@ Expose the web service publicly. Keep the API private if your host supports priv
 
 ## Platform Checklist
 
-1. Create PostgreSQL and Redis services.
-2. Run database migrations against PostgreSQL.
-3. Run the API service with `DATABASE_URL`, `REDIS_URL`, `PULSE_SECRET_ENCRYPTION_KEY`, `PULSE_SCHEDULER_ENABLED=true`, and `PULSE_WORKER_ENABLED=false`.
-4. Run one or more worker services from the same image with command `/app/pulse-worker` and the same `DATABASE_URL`, `REDIS_URL`, `PULSE_SECRET_ENCRYPTION_KEY`, and alert delivery variables.
+1. Create PostgreSQL and Redis services (managed).
+2. Run `pulse-migrate up` from laptop or CI — see [docs/deploy/env-templates.md](docs/deploy/env-templates.md).
+3. Deploy API with `PULSE_SCHEDULER_ENABLED=true` and `PULSE_WORKER_ENABLED=false`.
+4. Deploy one or more workers (`/app/pulse-worker`) — scale replicas for monitor load.
 5. Confirm `GET /healthz` returns healthy.
-6. Run the web service with `PULSE_API_BASE_URL` pointing to the API base URL.
+6. Deploy web with `PULSE_API_BASE_URL` pointing at the API.
 7. Open the web URL and create a secret from `/secrets`.
 8. Verify the secret test succeeds and monitor creation/manual runs work.
-9. Force a monitor failure until its threshold is reached and verify `/api/alerts` shows a persisted alert with delivery statuses.
+9. Confirm scheduled runs execute (worker logs).
+10. Force a monitor failure until its threshold is reached and verify `/api/alerts` shows a persisted alert with delivery statuses.
+
+Full step-by-step: [docs/deploy/free-tier-vercel-render.md](docs/deploy/free-tier-vercel-render.md) (cloud test) or [docs/deploy/openshift-rhel.md](docs/deploy/openshift-rhel.md) (company cluster).
 
 ## Local Two-Service Development
 

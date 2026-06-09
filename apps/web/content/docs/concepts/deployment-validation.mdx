@@ -1,0 +1,27 @@
+---
+title: Deployment validation
+description: Pre- and post-deploy sampling, baselines, and validation reports.
+---
+
+**Deployment validation** is Rythm’s release gate workflow. You define which monitors to sample around a deployment and Rythm compares results to help decide whether the release is healthy.
+
+## Phases
+
+1. **Pre-deploy sampling** — Run linked monitors before you deploy to establish a pre-release snapshot.
+2. **Deploy** — Your team performs the actual release (outside Rythm).
+3. **Post-deploy sampling** — Run the same monitors again after deploy.
+4. **Optional ELF log check** — If you select saved ELF queries, Rythm evaluates them against OpenSearch after deploy (see [ELF log checks](/docs/concepts/elf-log-checks)). Skip this for monitor-only validation.
+
+## Baseline comparison
+
+Rythm can compare post-deploy runs against a **baseline window** of historical runs. Degraded latency, new failures, or assertion drift surface in the validation **report**.
+
+## Gate modes
+
+Validation results can be **blocking** (fail the gate) or **advisory** (surface warnings without failing), depending on how your team configures monitors and ELF queries.
+
+<Callout type="info">
+  Deployment validation does not deploy your application — it orchestrates monitor runs and log checks around your existing release process.
+</Callout>
+
+See [Running deployment validation](/docs/guides/running-deployment-validation) for the console workflow.

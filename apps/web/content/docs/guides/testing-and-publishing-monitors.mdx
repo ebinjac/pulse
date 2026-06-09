@@ -1,0 +1,39 @@
+---
+title: Testing and publishing monitors
+description: Draft test runs, publish to production, and use version history.
+---
+
+## Save a draft
+
+Edits in the builder start as or become a **draft**. **Save draft** persists your work without affecting the live monitor.
+
+## Run a draft test
+
+1. From the builder, choose **Test** or **Run draft**.
+2. Review the run detail: each step’s status, timing, and assertion outcome.
+3. Fix failures and re-test until the draft passes.
+
+Draft runs are isolated from scheduled production runs.
+
+## Publish
+
+When satisfied with the draft:
+
+1. **Publish** from the builder or monitor actions menu.
+2. The draft becomes the **published** configuration.
+3. The scheduler uses the new config on the next scheduled execution.
+
+<Callout type="warn">
+  Publishing replaces live configuration immediately. Run at least one successful draft test first.
+</Callout>
+
+## Version history
+
+Published changes create **versions** — immutable snapshots of prior configs.
+
+- **Diff** two versions to see what changed
+- **Rollback** to a prior version if a publish introduced a regression
+
+## Discard draft
+
+If you abandon experimental edits, **discard draft** reverts the builder to the last published configuration.

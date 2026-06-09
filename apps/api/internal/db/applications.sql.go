@@ -29,6 +29,9 @@ SELECT
   id,
   name,
   car_id,
+  COALESCE(elf_app_id, '')::text AS elf_app_id,
+  COALESCE(index_path_template, '')::text AS index_path_template,
+  log_field_mapping_json,
   COALESCE(description, '')::text AS description,
   COALESCE(owner, '')::text AS owner,
   COALESCE(environment, '')::text AS environment,
@@ -41,16 +44,19 @@ WHERE id = $1
 `
 
 type GetApplicationRow struct {
-	ID               string           `json:"id"`
-	Name             string           `json:"name"`
-	CarID            string           `json:"car_id"`
-	Description      string           `json:"description"`
-	Owner            string           `json:"owner"`
-	Environment      string           `json:"environment"`
-	TagsJson         []byte           `json:"tags_json"`
-	AlertRoutingJson []byte           `json:"alert_routing_json"`
-	CreatedAt        pgtype.Timestamp `json:"created_at"`
-	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
+	ID                  string           `json:"id"`
+	Name                string           `json:"name"`
+	CarID               string           `json:"car_id"`
+	ElfAppID            string           `json:"elf_app_id"`
+	IndexPathTemplate   string           `json:"index_path_template"`
+	LogFieldMappingJson []byte           `json:"log_field_mapping_json"`
+	Description         string           `json:"description"`
+	Owner               string           `json:"owner"`
+	Environment         string           `json:"environment"`
+	TagsJson            []byte           `json:"tags_json"`
+	AlertRoutingJson    []byte           `json:"alert_routing_json"`
+	CreatedAt           pgtype.Timestamp `json:"created_at"`
+	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) GetApplication(ctx context.Context, id string) (GetApplicationRow, error) {
@@ -60,6 +66,9 @@ func (q *Queries) GetApplication(ctx context.Context, id string) (GetApplication
 		&i.ID,
 		&i.Name,
 		&i.CarID,
+		&i.ElfAppID,
+		&i.IndexPathTemplate,
+		&i.LogFieldMappingJson,
 		&i.Description,
 		&i.Owner,
 		&i.Environment,
@@ -76,6 +85,9 @@ SELECT
   id,
   name,
   car_id,
+  COALESCE(elf_app_id, '')::text AS elf_app_id,
+  COALESCE(index_path_template, '')::text AS index_path_template,
+  log_field_mapping_json,
   COALESCE(description, '')::text AS description,
   COALESCE(owner, '')::text AS owner,
   COALESCE(environment, '')::text AS environment,
@@ -88,16 +100,19 @@ ORDER BY name ASC
 `
 
 type ListApplicationsRow struct {
-	ID               string           `json:"id"`
-	Name             string           `json:"name"`
-	CarID            string           `json:"car_id"`
-	Description      string           `json:"description"`
-	Owner            string           `json:"owner"`
-	Environment      string           `json:"environment"`
-	TagsJson         []byte           `json:"tags_json"`
-	AlertRoutingJson []byte           `json:"alert_routing_json"`
-	CreatedAt        pgtype.Timestamp `json:"created_at"`
-	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
+	ID                  string           `json:"id"`
+	Name                string           `json:"name"`
+	CarID               string           `json:"car_id"`
+	ElfAppID            string           `json:"elf_app_id"`
+	IndexPathTemplate   string           `json:"index_path_template"`
+	LogFieldMappingJson []byte           `json:"log_field_mapping_json"`
+	Description         string           `json:"description"`
+	Owner               string           `json:"owner"`
+	Environment         string           `json:"environment"`
+	TagsJson            []byte           `json:"tags_json"`
+	AlertRoutingJson    []byte           `json:"alert_routing_json"`
+	CreatedAt           pgtype.Timestamp `json:"created_at"`
+	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) ListApplications(ctx context.Context) ([]ListApplicationsRow, error) {
@@ -113,6 +128,9 @@ func (q *Queries) ListApplications(ctx context.Context) ([]ListApplicationsRow, 
 			&i.ID,
 			&i.Name,
 			&i.CarID,
+			&i.ElfAppID,
+			&i.IndexPathTemplate,
+			&i.LogFieldMappingJson,
 			&i.Description,
 			&i.Owner,
 			&i.Environment,
@@ -136,6 +154,9 @@ INSERT INTO applications (
   id,
   name,
   car_id,
+  elf_app_id,
+  index_path_template,
+  log_field_mapping_json,
   description,
   owner,
   environment,
@@ -144,10 +165,13 @@ INSERT INTO applications (
   created_at,
   updated_at
 )
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   car_id = EXCLUDED.car_id,
+  elf_app_id = EXCLUDED.elf_app_id,
+  index_path_template = EXCLUDED.index_path_template,
+  log_field_mapping_json = EXCLUDED.log_field_mapping_json,
   description = EXCLUDED.description,
   owner = EXCLUDED.owner,
   environment = EXCLUDED.environment,
@@ -157,16 +181,19 @@ ON CONFLICT (id) DO UPDATE SET
 `
 
 type UpsertApplicationParams struct {
-	ID               string           `json:"id"`
-	Name             string           `json:"name"`
-	CarID            string           `json:"car_id"`
-	Description      pgtype.Text      `json:"description"`
-	Owner            pgtype.Text      `json:"owner"`
-	Environment      pgtype.Text      `json:"environment"`
-	TagsJson         []byte           `json:"tags_json"`
-	AlertRoutingJson []byte           `json:"alert_routing_json"`
-	CreatedAt        pgtype.Timestamp `json:"created_at"`
-	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
+	ID                  string           `json:"id"`
+	Name                string           `json:"name"`
+	CarID               string           `json:"car_id"`
+	ElfAppID            pgtype.Text      `json:"elf_app_id"`
+	IndexPathTemplate   pgtype.Text      `json:"index_path_template"`
+	LogFieldMappingJson []byte           `json:"log_field_mapping_json"`
+	Description         pgtype.Text      `json:"description"`
+	Owner               pgtype.Text      `json:"owner"`
+	Environment         pgtype.Text      `json:"environment"`
+	TagsJson            []byte           `json:"tags_json"`
+	AlertRoutingJson    []byte           `json:"alert_routing_json"`
+	CreatedAt           pgtype.Timestamp `json:"created_at"`
+	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) UpsertApplication(ctx context.Context, arg UpsertApplicationParams) error {
@@ -174,6 +201,9 @@ func (q *Queries) UpsertApplication(ctx context.Context, arg UpsertApplicationPa
 		arg.ID,
 		arg.Name,
 		arg.CarID,
+		arg.ElfAppID,
+		arg.IndexPathTemplate,
+		arg.LogFieldMappingJson,
 		arg.Description,
 		arg.Owner,
 		arg.Environment,

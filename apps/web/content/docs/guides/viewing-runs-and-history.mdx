@@ -1,0 +1,30 @@
+---
+title: Viewing runs and history
+description: Inspect monitor runs, step timelines, and failure details.
+---
+
+## Open run history
+
+From a monitor:
+
+1. Go to **Monitors** and select a monitor.
+2. Open the **Runs** tab.
+
+From the dashboard, failed monitors link directly to recent runs.
+
+## Run detail
+
+A run detail page shows:
+
+- **Overall status** — passed, failed, or error
+- **Failure reason** — summary when the run did not pass
+- **Step timeline** — per-step duration and order
+- **Step detail** — request method/URL, response status, body preview (secrets masked), assertion results
+
+## Compare with alerts
+
+When an **alert** fires, open the linked run to see exactly which step or assertion failed. Acknowledge the alert after investigation.
+
+## Deployment validation runs
+
+Deployment validations also link pre- and post-phase runs. Open the validation report to jump to individual monitor runs in each phase.

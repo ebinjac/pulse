@@ -1,0 +1,27 @@
+---
+title: Applications
+description: How applications group monitors and shared configuration in Rythm.
+---
+
+An **application** in Rythm is the top-level bucket for related monitors — typically aligned to a product, service line, or CAR.
+
+## Why applications matter
+
+- **Organization** — The monitor inventory filters and reports by application.
+- **Shared context** — CAR ID and optional ELF application ID apply to deployment validation and log checks for that product area.
+- **Operational view** — Dashboard and application detail pages aggregate monitor health for one scope.
+
+## Typical fields
+
+| Field | Purpose |
+|-------|---------|
+| Name | Display name in the console |
+| CAR ID | Corporate application registry identifier |
+| ELF app ID | Index segment for ELF log queries during deployment validation |
+| Schedule | Default cadence for member monitors (monitors can override) |
+
+## Relationship to monitors
+
+Each monitor belongs to one application. When you create a monitor, select the application it represents. Moving or re-associating monitors may require editing the monitor configuration.
+
+See [Managing applications](/docs/guides/managing-applications) for step-by-step instructions.

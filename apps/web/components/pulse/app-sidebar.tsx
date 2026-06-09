@@ -10,7 +10,9 @@ import {
   Rocket,
   Workflow,
   Bell,
+  BookOpen,
   KeyRound,
+  ScrollText,
   Settings,
   ShieldCheck,
   Sun,
@@ -28,7 +30,9 @@ const navItems = [
   { href: "/monitors", label: "Monitors", icon: Workflow },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/secrets", label: "Secrets", icon: KeyRound },
+  { href: "/elf-queries", label: "ELF Queries", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/docs", label: "Documentation", icon: BookOpen },
 ] as const
 
 function isLinkActive(pathname: string, href: string) {

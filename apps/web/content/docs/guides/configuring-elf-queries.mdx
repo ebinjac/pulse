@@ -1,0 +1,47 @@
+---
+title: Configuring ELF queries
+description: Create, test, and attach ELF queries for deployment log checks.
+---
+
+ELF queries live in the **ELF Queries** library and are reused across deployment validations.
+
+## Create a query
+
+1. Open **ELF Queries** → **Create**.
+2. Enter a **name** and description.
+3. Set **gate mode**:
+   - **Blocking** — failure fails the deployment validation
+   - **Advisory** — failure appears as a warning only
+4. Define the **search body** — OpenSearch JSON query executed against your application’s ELF index.
+5. Configure **pass criteria** — for example, `max_hits: 0` for “no error logs” or `min_hits: 1` for “expected audit event present”.
+6. Optionally override **elfAppId**; otherwise the linked application’s ELF app ID is used.
+
+## Log inquiry workbench
+
+Open a query from **ELF Queries** to use the log inquiry workbench:
+
+1. **Run probe** — executes your search body with a custom time window (`gte` / `lte`) and returns sample hits, aggregations, and a field catalog inferred from `_source`.
+2. **Field catalog** — discovered paths show type badges and sample values. Pick a time field, add custom paths, or send a field to the check builder.
+3. **Expression checks** — build rules from discovered fields (`contains`, `gte`, `eq`, `exists`, and more). Combine rules with **match all** or **match any**, choose pass semantics (no matching hits, has matching hits, or hit-count thresholds), preview compiled OpenSearch DSL, and test before save.
+4. **Advanced templates** — legacy check kinds (`new_terms`, `delta_pct`, `message_match`, etc.) remain available in a collapsible section for existing queries.
+
+Click any cell in the probe hits table to add a rule pre-filled with that field and value.
+
+## Test a query
+
+Use **Test** on the query detail page or **Run probe** in the workbench to run the search against the configured ELF proxy and preview hit counts before attaching the query to a validation.
+
+## Attach to a deployment validation
+
+When creating or editing a deployment validation:
+
+1. Multi-select ELF queries from the library.
+2. Enable **auto-run log check** to trigger queries automatically after post-deploy monitor sampling.
+
+Expression checks show as **Expression (N rules)** in the query list. Deployment reports include compiled rules and the field schema used at run time under **How this check ran**.
+
+## ELF proxy settings
+
+Default proxy URL is configured under **Settings → ELF Proxy**. Your platform team usually sets this once; you can test connectivity from the same settings tab.
+
+See [ELF log checks](/docs/concepts/elf-log-checks).

@@ -14,18 +14,24 @@ import (
 	"time"
 
 	"github.com/ensemble-pulse/pulse/apps/api/internal/domain"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/events"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/store"
 )
 
 type Service struct {
 	store      store.Store
 	httpClient *http.Client
+	events     events.Publisher
 }
 
-func NewService(store store.Store) *Service {
+func NewService(store store.Store, pub events.Publisher) *Service {
+	if pub == nil {
+		pub = events.NoopPublisher{}
+	}
 	return &Service{
 		store:      store,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
+		events:     pub,
 	}
 }
 
@@ -43,7 +49,9 @@ func (s *Service) ProcessRun(monitor domain.Monitor, run domain.MonitorRun) {
 	}
 
 	if run.Status == domain.StatusSuccess {
-		s.store.ResolveOpenAlerts(monitor.ID, run.EndedAt)
+		if resolved := s.store.ResolveOpenAlerts(monitor.ID, run.EndedAt); resolved > 0 {
+			events.PublishAlertResolved(s.events, monitor.ID, run.EndedAt)
+		}
 		return
 	}
 
@@ -64,6 +72,7 @@ func (s *Service) ProcessRun(monitor domain.Monitor, run domain.MonitorRun) {
 	}
 
 	alert, exists := s.store.GetOpenAlert(monitor.ID)
+	created := !exists
 	if !exists {
 		alert = domain.AlertEvent{
 			ID:               "alert-" + run.ID,
@@ -121,6 +130,9 @@ func (s *Service) ProcessRun(monitor domain.Monitor, run domain.MonitorRun) {
 		alert.LastDeliveredAt = &now
 	}
 	s.store.SaveAlert(alert)
+	if created && alert.Status == domain.AlertStatusOpen {
+		events.PublishAlertCreated(s.events, alert)
+	}
 }
 
 func (s *Service) persistSuppressed(monitor domain.Monitor, run domain.MonitorRun, policy ResolvedAlertPolicy, channels []string, now time.Time, maintenanceReason, label string) {

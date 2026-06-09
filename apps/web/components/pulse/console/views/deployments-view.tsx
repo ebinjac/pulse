@@ -1,13 +1,16 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   AlertTriangle,
   Boxes,
   CheckCircle2,
   ChevronRight,
+  MoreHorizontal,
   Plus,
+  RotateCw,
   Workflow,
 } from "lucide-react"
 
@@ -17,93 +20,83 @@ import {
   PageShell,
 } from "@/components/pulse/console-shared"
 import { ValidationResultPill } from "@/components/pulse/console/components/validation-result-pill"
-import type { Application, DeploymentValidation, Monitor } from "@/lib/pulse-types"
+import type { Application, DeploymentValidation } from "@/lib/pulse-types"
 import {
+  AlertDialog,
   Button,
   Card,
-  Checkbox,
-  CheckboxGroup,
+  Chip,
+  Dropdown,
   EmptyState,
   Input,
   Label,
   ListBox,
-  Modal,
   Select,
-  Spinner,
   Table,
   TextField,
 } from "@heroui/react"
+import { cn } from "@workspace/ui/lib/utils"
 
-import { dateTimeLocalToISOString, toDateTimeLocalInput, validationStatusLabel } from "../utils/console-utils"
-import type { DeploymentValidationCreateInput } from "../types"
+import { validationStatusLabel } from "../utils/console-utils"
+import {
+  deploymentAttentionItems,
+  deploymentProgressSummary,
+} from "../deployment-detail/deployment-workflow-view-models"
 
 export function DeploymentsView({
   applications,
-  monitors,
   validations,
-  onCreateValidation,
+  onDeleteValidation,
 }: {
   applications: Application[]
-  monitors: Monitor[]
   validations: DeploymentValidation[]
-  onCreateValidation: (input: DeploymentValidationCreateInput) => Promise<DeploymentValidation | null>
+  onDeleteValidation: (validationId: string) => Promise<void>
 }) {
-  const defaultApplication = applications[0]
-  const [open, setOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [applicationId, setApplicationId] = useState(defaultApplication?.id || "")
-  const selectedApplication = applications.find((app) => app.id === applicationId) || defaultApplication
-  const activeMonitors = monitors.filter((monitor) => monitor.applicationId === selectedApplication?.id && monitor.isActive)
-  const [selectedMonitorIds, setSelectedMonitorIds] = useState<string[]>([])
-  const [draft, setDraft] = useState({
-    name: "",
-    version: "",
-    buildId: "",
-    environment: defaultApplication?.environment || "production",
-    deploymentStartedAt: toDateTimeLocalInput(),
-    baselineWindowHours: 24,
-    baselineRunCount: 30,
-    sampleCount: 30,
-    intervalSeconds: 30,
-  })
+  const router = useRouter()
+  const [confirmDelete, setConfirmDelete] = useState<DeploymentValidation | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [query, setQuery] = useState("")
+  const [appFilter, setAppFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [verdictFilter, setVerdictFilter] = useState("all")
+  const [environmentFilter, setEnvironmentFilter] = useState("all")
 
-  useEffect(() => {
-    if (!applicationId && defaultApplication?.id) {
-      setApplicationId(defaultApplication.id)
-    }
-  }, [applicationId, defaultApplication?.id])
+  const environments = useMemo(
+    () => Array.from(new Set(validations.map((validation) => validation.environment).filter((value): value is string => Boolean(value)))).sort(),
+    [validations],
+  )
+  const attentionItems = useMemo(() => deploymentAttentionItems(validations), [validations])
+  const filteredValidations = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return validations.filter((validation) => {
+      if (appFilter !== "all" && validation.applicationId !== appFilter) return false
+      if (statusFilter !== "all" && validation.status !== statusFilter) return false
+      if (verdictFilter !== "all" && (validation.report?.status || "incomplete") !== verdictFilter) return false
+      if (environmentFilter !== "all" && validation.environment !== environmentFilter) return false
+      if (!needle) return true
+      return [
+        validation.name,
+        validation.applicationName,
+        validation.carId,
+        validation.environment,
+        validation.version,
+        validation.buildId,
+      ].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle))
+    })
+  }, [appFilter, environmentFilter, query, statusFilter, validations, verdictFilter])
 
-  useEffect(() => {
-    if (open) {
-      setSelectedMonitorIds(activeMonitors.map((monitor) => monitor.id))
-      setDraft((current) => ({
-        ...current,
-        deploymentStartedAt: toDateTimeLocalInput(),
-        environment: selectedApplication?.environment || current.environment || "production",
-      }))
-    }
-  }, [open, selectedApplication?.id, activeMonitors.length])
-
-  async function createValidation() {
-    if (!selectedApplication || saving || selectedMonitorIds.length === 0) return
-    setSaving(true)
+  async function deleteValidation() {
+    if (!confirmDelete || deleting) return
+    setDeleting(true)
+    setDeleteError(null)
     try {
-      await onCreateValidation({
-        applicationId: selectedApplication.id,
-        name: draft.name || `${selectedApplication.name} deployment validation`,
-        version: draft.version,
-        buildId: draft.buildId,
-        environment: draft.environment,
-        monitorIds: selectedMonitorIds,
-        sampleCount: draft.sampleCount,
-        intervalSeconds: draft.intervalSeconds,
-        deploymentStartedAt: dateTimeLocalToISOString(draft.deploymentStartedAt),
-        baselineWindowHours: draft.baselineWindowHours,
-        baselineRunCount: draft.baselineRunCount,
-      })
-      setOpen(false)
+      await onDeleteValidation(confirmDelete.id)
+      setConfirmDelete(null)
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete deployment check.")
     } finally {
-      setSaving(false)
+      setDeleting(false)
     }
   }
 
@@ -113,10 +106,12 @@ export function DeploymentsView({
       title="Deployments"
       description="Compare historical baseline behavior against sampled post-deployment checks."
       action={
-        <Button onPress={() => setOpen(true)} className="h-9 gap-2">
-          <Plus className="size-4" />
-          New deployment check
-        </Button>
+        <Link href="/deployments/create">
+          <Button className="h-9 gap-2">
+            <Plus className="size-4" />
+            New deployment check
+          </Button>
+        </Link>
       }
     >
       <div className="space-y-6">
@@ -127,12 +122,71 @@ export function DeploymentsView({
           <Metric label="Applications" value={String(applications.length)} icon={Boxes} detail="CAR groups" />
         </div>
 
+        {attentionItems.length > 0 ? (
+          <Card className="border-warning/30 bg-warning/[0.04]">
+            <Card.Header className="border-b border-warning/20 pb-3">
+              <Card.Title className="text-sm font-semibold">Needs attention</Card.Title>
+              <Card.Description>Running checks and reports with warning or failure verdicts.</Card.Description>
+            </Card.Header>
+            <Card.Content className="grid gap-2 pt-4 md:grid-cols-2 xl:grid-cols-4">
+              {attentionItems.map((item) => (
+                <Link
+                  key={item.id}
+                  href={`/deployments/${item.id}`}
+                  className={cn(
+                    "rounded-lg border bg-background p-3 transition-colors hover:border-primary/40 hover:bg-muted/20",
+                    item.tone === "danger" ? "border-danger/30" : item.tone === "warning" ? "border-warning/30" : "border-primary/30",
+                  )}
+                >
+                  <div className="truncate text-xs font-semibold text-foreground">{item.title}</div>
+                  <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{item.detail}</p>
+                </Link>
+              ))}
+            </Card.Content>
+          </Card>
+        ) : null}
+
         <Card className="gap-0 p-0">
-          <Card.Header className="flex flex-col gap-1.5 border-b border-border/40 p-5">
-            <Card.Title className="text-base font-semibold">Deployment history</Card.Title>
-            <Card.Description>
-              Baseline versus post-deploy validation reports across application groups.
-            </Card.Description>
+          <Card.Header className="flex flex-col gap-4 border-b border-border/40 p-5">
+            <div>
+              <Card.Title className="text-base font-semibold">Deployment history</Card.Title>
+              <Card.Description>
+                Baseline versus post-deploy validation reports across application groups.
+              </Card.Description>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_160px_150px_150px]">
+              <TextField aria-label="Search deployments" variant="secondary">
+                <Label className="sr-only">Search deployments</Label>
+                <Input
+                  variant="secondary"
+                  placeholder="Search name, app, CAR, version..."
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </TextField>
+              <FilterSelect label="Application" value={appFilter} onChange={setAppFilter} items={[
+                { id: "all", label: "All applications" },
+                ...applications.map((application) => ({ id: application.id, label: application.name })),
+              ]} />
+              <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} items={[
+                { id: "all", label: "All statuses" },
+                { id: "draft", label: "Draft" },
+                { id: "post_running", label: "Sampling" },
+                { id: "log_running", label: "Log checks" },
+                { id: "report_ready", label: "Report ready" },
+              ]} />
+              <FilterSelect label="Verdict" value={verdictFilter} onChange={setVerdictFilter} items={[
+                { id: "all", label: "All verdicts" },
+                { id: "pass", label: "Pass" },
+                { id: "warning", label: "Warning" },
+                { id: "fail", label: "Fail" },
+                { id: "incomplete", label: "Incomplete" },
+              ]} />
+              <FilterSelect label="Environment" value={environmentFilter} onChange={setEnvironmentFilter} items={[
+                { id: "all", label: "All envs" },
+                ...environments.map((environment) => ({ id: environment, label: environment || "Unknown" })),
+              ]} />
+            </div>
           </Card.Header>
           <Card.Content className="p-0">
             {validations.length === 0 ? (
@@ -143,25 +197,43 @@ export function DeploymentsView({
                   <span className="text-xs text-muted-foreground max-w-sm">
                     Create one to compare historical baseline metrics with post-deploy samples.
                   </span>
+                  <Link href="/deployments/create" className="mt-2">
+                    <Button size="sm" className="gap-1.5">
+                      <Plus className="size-3.5" />
+                      New deployment check
+                    </Button>
+                  </Link>
+                </EmptyState>
+              </div>
+            ) : filteredValidations.length === 0 ? (
+              <div className="px-5 py-12">
+                <EmptyState className="flex flex-col items-center justify-center gap-2 border-0 bg-transparent text-center">
+                  <Workflow className="size-6 text-muted-foreground" />
+                  <span className="text-sm font-semibold text-foreground">No deployment checks match filters</span>
+                  <span className="text-xs text-muted-foreground max-w-sm">
+                    Clear a filter or search term to see more deployment checks.
+                  </span>
                 </EmptyState>
               </div>
             ) : (
               <Table aria-label="Deployment history">
                 <Table.ScrollContainer>
-                  <Table.Content className="min-w-[860px]">
+                  <Table.Content className="min-w-[980px]">
                     <Table.Header>
                       <Table.Column isRowHeader className="px-5">Deployment</Table.Column>
                       <Table.Column className="px-3">Application</Table.Column>
+                      <Table.Column className="px-3">Progress</Table.Column>
                       <Table.Column className="px-3">Samples</Table.Column>
                       <Table.Column className="px-3">Status</Table.Column>
                       <Table.Column className="px-3">Report</Table.Column>
                       <Table.Column className="px-5 text-end">Action</Table.Column>
                     </Table.Header>
                     <Table.Body>
-                      {validations.map((validation) => {
+                      {filteredValidations.map((validation) => {
                         const envVersion = [validation.environment, validation.version, validation.buildId]
                           .filter(Boolean)
                           .join(" · ")
+                        const progress = deploymentProgressSummary(validation)
                         return (
                           <Table.Row key={validation.id} id={validation.id} className="hover:bg-muted/30">
                             <Table.Cell className="max-w-[320px] px-5 align-top py-4">
@@ -179,6 +251,20 @@ export function DeploymentsView({
                               <span className="text-xs font-semibold text-foreground">{validation.applicationName}</span>
                               <p className="text-[11px] text-muted-foreground">CAR {validation.carId}</p>
                             </Table.Cell>
+                            <Table.Cell className="px-3 align-top py-4">
+                              <div className="min-w-40 space-y-1.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <Chip size="sm" variant="soft" className="capitalize">
+                                    <Chip.Label>{progress.label}</Chip.Label>
+                                  </Chip>
+                                  <span className="text-[11px] font-semibold text-muted-foreground">{progress.progressPct}%</span>
+                                </div>
+                                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                                  <div className="h-full rounded-full bg-primary" style={{ width: `${progress.progressPct}%` }} />
+                                </div>
+                                <p className="truncate text-[11px] text-muted-foreground">{progress.detail}</p>
+                              </div>
+                            </Table.Cell>
                             <Table.Cell className="px-3 align-top py-4 text-xs">
                               <span className="font-semibold text-foreground">
                                 {validation.baselineRunCount || 30} baseline + {validation.sampleCount || 30} post
@@ -194,12 +280,46 @@ export function DeploymentsView({
                               <ValidationResultPill status={validation.report?.status || "incomplete"} />
                             </Table.Cell>
                             <Table.Cell className="px-5 align-top py-4 text-end">
-                              <Link
-                                href={`/deployments/${validation.id}`}
-                                className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
-                              >
-                                Open <ChevronRight className="size-3" />
-                              </Link>
+                              <div className="flex items-center justify-end gap-1.5">
+                                <Link
+                                  href={`/deployments/${validation.id}`}
+                                  className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+                                >
+                                  Open <ChevronRight className="size-3" />
+                                </Link>
+                                <Dropdown>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    isIconOnly
+                                    aria-label={`Actions for ${validation.name}`}
+                                  >
+                                    <MoreHorizontal className="size-4" />
+                                  </Button>
+                                  <Dropdown.Popover>
+                                    <Dropdown.Menu
+                                      onAction={(key) => {
+                                        if (key === "view") router.push(`/deployments/${validation.id}`)
+                                        if (key === "edit") router.push(`/deployments/${validation.id}/edit`)
+                                        if (key === "delete") {
+                                          setDeleteError(null)
+                                          setConfirmDelete(validation)
+                                        }
+                                      }}
+                                    >
+                                      <Dropdown.Item id="view" textValue="View deployment check">
+                                        View deployment check
+                                      </Dropdown.Item>
+                                      <Dropdown.Item id="edit" textValue="Edit deployment check">
+                                        Edit deployment check
+                                      </Dropdown.Item>
+                                      <Dropdown.Item id="delete" textValue="Delete deployment check" className="text-danger">
+                                        Delete deployment check
+                                      </Dropdown.Item>
+                                    </Dropdown.Menu>
+                                  </Dropdown.Popover>
+                                </Dropdown>
+                              </div>
                             </Table.Cell>
                           </Table.Row>
                         )
@@ -213,214 +333,75 @@ export function DeploymentsView({
         </Card>
       </div>
 
-      <Modal.Backdrop isOpen={open} onOpenChange={setOpen}>
-        <Modal.Container>
-          <Modal.Dialog className="sm:max-w-2xl">
-            <Modal.CloseTrigger />
-            <Modal.Header>
-              <Modal.Heading>New deployment check</Modal.Heading>
-              <p className="mt-1.5 text-sm leading-5 text-muted">
-                Select an application, choose the deployment time, and configure baseline plus post-deploy sampling.
+      <AlertDialog.Backdrop
+        isOpen={confirmDelete !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && !deleting) {
+            setConfirmDelete(null)
+            setDeleteError(null)
+          }
+        }}
+      >
+        <AlertDialog.Container size="sm">
+          <AlertDialog.Dialog>
+            <AlertDialog.Header>
+              <AlertDialog.Icon status="danger" />
+              <AlertDialog.Heading>Delete deployment check?</AlertDialog.Heading>
+            </AlertDialog.Header>
+            <AlertDialog.Body className="space-y-2 text-left text-sm text-muted">
+              <p>
+                Are you sure you want to permanently delete{" "}
+                <strong className="text-foreground">{confirmDelete?.name}</strong>?
               </p>
-            </Modal.Header>
-            <Modal.Body className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <Select
-                  aria-label="Application"
-                  className="w-full"
-                  variant="secondary"
-                  selectedKey={applicationId}
-                  onSelectionChange={(key) => {
-                    if (key != null) setApplicationId(String(key))
-                  }}
-                >
-                  <Label>Application</Label>
-                  <Select.Trigger>
-                    <Select.Value />
-                    <Select.Indicator />
-                  </Select.Trigger>
-                  <Select.Popover>
-                    <ListBox>
-                      {applications.map((application) => (
-                        <ListBox.Item
-                          key={application.id}
-                          id={application.id}
-                          textValue={`${application.name} · CAR ${application.carId}`}
-                        >
-                          {application.name} <span className="text-muted-foreground">· CAR {application.carId}</span>
-                          <ListBox.ItemIndicator />
-                        </ListBox.Item>
-                      ))}
-                    </ListBox>
-                  </Select.Popover>
-                </Select>
-
-                <TextField className="w-full" name="environment" variant="secondary">
-                  <Label>Environment</Label>
-                  <Input
-                    variant="secondary"
-                    value={draft.environment}
-                    onChange={(event) => setDraft({ ...draft, environment: event.target.value })}
-                    className="h-9 text-xs"
-                  />
-                </TextField>
-
-                <TextField className="w-full md:col-span-2" name="name" variant="secondary">
-                  <Label>Name</Label>
-                  <Input
-                    variant="secondary"
-                    value={draft.name}
-                    placeholder={selectedApplication ? `${selectedApplication.name} deployment validation` : "Deployment validation"}
-                    onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                    className="h-9 text-xs"
-                  />
-                </TextField>
-
-                <TextField className="w-full" name="version" variant="secondary">
-                  <Label>Version</Label>
-                  <Input
-                    variant="secondary"
-                    value={draft.version}
-                    placeholder="v1.8.0"
-                    onChange={(event) => setDraft({ ...draft, version: event.target.value })}
-                    className="h-9 text-xs"
-                  />
-                </TextField>
-
-                <TextField className="w-full" name="buildId" variant="secondary">
-                  <Label>Build ID</Label>
-                  <Input
-                    variant="secondary"
-                    value={draft.buildId}
-                    placeholder="release-2026.06.05"
-                    onChange={(event) => setDraft({ ...draft, buildId: event.target.value })}
-                    className="h-9 text-xs"
-                  />
-                </TextField>
-
-                <TextField className="w-full" name="deploymentStartedAt" variant="secondary">
-                  <Label>Deployment time</Label>
-                  <Input
-                    variant="secondary"
-                    type="datetime-local"
-                    value={draft.deploymentStartedAt}
-                    onChange={(event) => setDraft({ ...draft, deploymentStartedAt: event.target.value })}
-                    className="h-9 text-xs"
-                  />
-                </TextField>
-
-                <div className="hidden md:block" />
-
-                <TextField className="w-full" name="baselineWindowHours" variant="secondary">
-                  <Label>Baseline window (hours)</Label>
-                  <Input
-                    variant="secondary"
-                    type="number"
-                    min={1}
-                    max={720}
-                    value={String(draft.baselineWindowHours)}
-                    onChange={(event) => setDraft({ ...draft, baselineWindowHours: Number(event.target.value) })}
-                    className="h-9 text-xs"
-                  />
-                </TextField>
-
-                <TextField className="w-full" name="baselineRunCount" variant="secondary">
-                  <Label>Baseline runs / monitor</Label>
-                  <Input
-                    variant="secondary"
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={String(draft.baselineRunCount)}
-                    onChange={(event) => setDraft({ ...draft, baselineRunCount: Number(event.target.value) })}
-                    className="h-9 text-xs"
-                  />
-                </TextField>
-
-                <TextField className="w-full" name="sampleCount" variant="secondary">
-                  <Label>Post samples / monitor</Label>
-                  <Input
-                    variant="secondary"
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={String(draft.sampleCount)}
-                    onChange={(event) => setDraft({ ...draft, sampleCount: Number(event.target.value) })}
-                    className="h-9 text-xs"
-                  />
-                </TextField>
-
-                <TextField className="w-full" name="intervalSeconds" variant="secondary">
-                  <Label>Post sample interval (s)</Label>
-                  <Input
-                    variant="secondary"
-                    type="number"
-                    min={0}
-                    max={3600}
-                    value={String(draft.intervalSeconds)}
-                    onChange={(event) => setDraft({ ...draft, intervalSeconds: Number(event.target.value) })}
-                    className="h-9 text-xs"
-                  />
-                </TextField>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Active monitors</Label>
-                  <span className="text-[11px] font-semibold text-muted-foreground">
-                    {selectedMonitorIds.length} of {activeMonitors.length} selected
-                  </span>
-                </div>
-                <div className="max-h-64 overflow-auto rounded-lg border border-border/40 bg-muted/5">
-                  {activeMonitors.length === 0 ? (
-                    <div className="p-4 text-xs text-muted-foreground">
-                      No active monitors are assigned to this application.
-                    </div>
-                  ) : (
-                    <CheckboxGroup
-                      aria-label="Active monitors"
-                      className="gap-0 p-1"
-                      value={selectedMonitorIds}
-                      onChange={setSelectedMonitorIds}
-                    >
-                      {activeMonitors.map((monitor) => (
-                        <Checkbox
-                          key={monitor.id}
-                          value={monitor.id}
-                          className="w-full max-w-full items-start gap-3 rounded-md px-3 py-2 hover:bg-muted/30 data-[selected=true]:bg-muted/20"
-                        >
-                          <Checkbox.Control className="mt-0.5">
-                            <Checkbox.Indicator />
-                          </Checkbox.Control>
-                          <Checkbox.Content className="min-w-0 flex-1">
-                            <span className="block text-xs font-semibold text-foreground">{monitor.name}</span>
-                            <span className="block truncate text-[11px] text-muted-foreground">
-                              {monitor.description || monitor.scheduleLabel || "Synthetic monitor"}
-                            </span>
-                          </Checkbox.Content>
-                        </Checkbox>
-                      ))}
-                    </CheckboxGroup>
-                  )}
-                </div>
-              </div>
-            </Modal.Body>
-            <Modal.Footer>
-              <Button variant="secondary" slot="close" isDisabled={saving}>
+              <p>
+                Linked baseline and post-deploy run samples will be removed. Monitor run history is preserved.
+              </p>
+              {deleteError ? <p className="text-danger text-xs font-medium">{deleteError}</p> : null}
+            </AlertDialog.Body>
+            <AlertDialog.Footer>
+              <Button variant="secondary" slot="close" isDisabled={deleting}>
                 Cancel
               </Button>
-              <Button
-                onPress={createValidation}
-                isDisabled={saving || !selectedApplication || selectedMonitorIds.length === 0}
-                className="gap-1.5"
-              >
-                {saving ? <Spinner color="current" size="sm" /> : <Plus className="size-3.5" />}
-                Create check
+              <Button variant="danger" isDisabled={deleting} onPress={() => void deleteValidation()}>
+                {deleting ? <RotateCw className="size-3.5 animate-spin" /> : null}
+                Delete deployment check
               </Button>
-            </Modal.Footer>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
+            </AlertDialog.Footer>
+          </AlertDialog.Dialog>
+        </AlertDialog.Container>
+      </AlertDialog.Backdrop>
     </PageShell>
+  )
+}
+
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  items,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  items: Array<{ id: string; label: string }>
+}) {
+  return (
+    <Select selectedKey={value} onSelectionChange={(key) => onChange(String(key))} variant="secondary">
+      <Label className="sr-only">{label}</Label>
+      <Select.Trigger>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox>
+          {items.map((item) => (
+            <ListBox.Item key={item.id} id={item.id} textValue={item.label}>
+              {item.label}
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
   )
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	pulsedb "github.com/ensemble-pulse/pulse/apps/api/internal/db"
@@ -102,6 +103,15 @@ func (s *PostgresStore) UpdateDeploymentValidation(validation domain.DeploymentV
 	return validation
 }
 
+func (s *PostgresStore) DeleteDeploymentValidation(id string) bool {
+	count, err := s.queries.DeleteDeploymentValidation(context.Background(), id)
+	if err != nil {
+		log.Printf("delete deployment validation: %v", err)
+		return false
+	}
+	return count > 0
+}
+
 func (s *PostgresStore) LinkDeploymentValidationRun(validationID string, phase domain.DeploymentValidationPhase, monitorID string, runID string) {
 	if err := s.queries.LinkDeploymentValidationRun(context.Background(), pulsedb.LinkDeploymentValidationRunParams{
 		ValidationID: validationID,
@@ -155,6 +165,14 @@ func (s *PostgresStore) upsertDeploymentValidation(validation domain.DeploymentV
 		PreCompletedAt:      pgTimestampPtr(validation.PreCompletedAt),
 		PostStartedAt:       pgTimestampPtr(validation.PostStartedAt),
 		PostCompletedAt:     pgTimestampPtr(validation.PostCompletedAt),
+		ElfQueryIdsJson:      mustJSON(validation.ElfQueryIDs),
+		AutoRunLogCheck:      validation.AutoRunLogCheck,
+		ServiceIdsJson:       mustJSON(validation.ServiceIDs),
+		ObservabilityProfile: defaultObservabilityProfile(validation.ObservabilityProfile),
+		SignalPackIdsJson:    mustJSON(validation.SignalPackIDs),
+		ElfResultsJson:       mustJSON(validation.ElfResults),
+		LogStartedAt:        pgTimestampPtr(validation.LogStartedAt),
+		LogCompletedAt:      pgTimestampPtr(validation.LogCompletedAt),
 		CreatedAt:           pgTimestamp(validation.CreatedAt),
 		UpdatedAt:           pgTimestamp(validation.UpdatedAt),
 	})
@@ -174,6 +192,11 @@ func deploymentValidationFromListRow(row pulsedb.ListDeploymentValidationsRow) d
 		row.MonitorIdsJson,
 		row.ReportJson,
 		row.AiReportJson,
+		row.ElfQueryIdsJson,
+		row.ServiceIdsJson,
+		row.ObservabilityProfile,
+		row.SignalPackIdsJson,
+		row.ElfResultsJson,
 		int(row.SampleCount),
 		int(row.IntervalSeconds),
 		row.DeploymentStartedAt,
@@ -183,6 +206,9 @@ func deploymentValidationFromListRow(row pulsedb.ListDeploymentValidationsRow) d
 		row.PreCompletedAt,
 		row.PostStartedAt,
 		row.PostCompletedAt,
+		row.AutoRunLogCheck,
+		row.LogStartedAt,
+		row.LogCompletedAt,
 		row.CreatedAt,
 		row.UpdatedAt,
 	)
@@ -202,6 +228,11 @@ func deploymentValidationFromGetRow(row pulsedb.GetDeploymentValidationRow) doma
 		row.MonitorIdsJson,
 		row.ReportJson,
 		row.AiReportJson,
+		row.ElfQueryIdsJson,
+		row.ServiceIdsJson,
+		row.ObservabilityProfile,
+		row.SignalPackIdsJson,
+		row.ElfResultsJson,
 		int(row.SampleCount),
 		int(row.IntervalSeconds),
 		row.DeploymentStartedAt,
@@ -211,12 +242,22 @@ func deploymentValidationFromGetRow(row pulsedb.GetDeploymentValidationRow) doma
 		row.PreCompletedAt,
 		row.PostStartedAt,
 		row.PostCompletedAt,
+		row.AutoRunLogCheck,
+		row.LogStartedAt,
+		row.LogCompletedAt,
 		row.CreatedAt,
 		row.UpdatedAt,
 	)
 }
 
-func deploymentValidationFromFields(id, applicationID, applicationName, carID, name, version, buildID, environment, status string, monitorIDsJSON, reportJSON, aiReportJSON []byte, sampleCount, intervalSeconds int, deploymentStartedAt pgtype.Timestamp, baselineWindowHours, baselineRunCount int, preStartedAt, preCompletedAt, postStartedAt, postCompletedAt, createdAt, updatedAt pgtype.Timestamp) domain.DeploymentValidation {
+func defaultObservabilityProfile(profile string) string {
+	if strings.TrimSpace(profile) == "" {
+		return "custom"
+	}
+	return profile
+}
+
+func deploymentValidationFromFields(id, applicationID, applicationName, carID, name, version, buildID, environment, status string, monitorIDsJSON, reportJSON, aiReportJSON, elfQueryIDsJSON, serviceIDsJSON []byte, observabilityProfile string, signalPackIDsJSON, elfResultsJSON []byte, sampleCount, intervalSeconds int, deploymentStartedAt pgtype.Timestamp, baselineWindowHours, baselineRunCount int, preStartedAt, preCompletedAt, postStartedAt, postCompletedAt pgtype.Timestamp, autoRunLogCheck bool, logStartedAt, logCompletedAt, createdAt, updatedAt pgtype.Timestamp) domain.DeploymentValidation {
 	validation := domain.DeploymentValidation{
 		ID:                  id,
 		ApplicationID:       applicationID,
@@ -238,10 +279,18 @@ func deploymentValidationFromFields(id, applicationID, applicationName, carID, n
 		PreCompletedAt:      pgTimePtr(preCompletedAt),
 		PostStartedAt:       pgTimePtr(postStartedAt),
 		PostCompletedAt:     pgTimePtr(postCompletedAt),
+		AutoRunLogCheck:     autoRunLogCheck,
+		LogStartedAt:        pgTimePtr(logStartedAt),
+		LogCompletedAt:      pgTimePtr(logCompletedAt),
 	}
 	_ = json.Unmarshal(monitorIDsJSON, &validation.MonitorIDs)
 	_ = json.Unmarshal(reportJSON, &validation.Report)
 	_ = json.Unmarshal(aiReportJSON, &validation.AIReport)
+	_ = json.Unmarshal(elfQueryIDsJSON, &validation.ElfQueryIDs)
+	_ = json.Unmarshal(serviceIDsJSON, &validation.ServiceIDs)
+	validation.ObservabilityProfile = defaultObservabilityProfile(observabilityProfile)
+	_ = json.Unmarshal(signalPackIDsJSON, &validation.SignalPackIDs)
+	_ = json.Unmarshal(elfResultsJSON, &validation.ElfResults)
 	if validation.MonitorIDs == nil {
 		validation.MonitorIDs = []string{}
 	}
@@ -260,6 +309,18 @@ func deploymentValidationFromFields(id, applicationID, applicationName, carID, n
 	}
 	if validation.BaselineRunCount <= 0 {
 		validation.BaselineRunCount = 30
+	}
+	if validation.ElfQueryIDs == nil {
+		validation.ElfQueryIDs = []string{}
+	}
+	if validation.ServiceIDs == nil {
+		validation.ServiceIDs = []string{}
+	}
+	if validation.SignalPackIDs == nil {
+		validation.SignalPackIDs = []string{}
+	}
+	if validation.ElfResults == nil {
+		validation.ElfResults = []domain.ElfQueryRunResult{}
 	}
 	return validation
 }

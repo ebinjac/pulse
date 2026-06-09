@@ -11,6 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteDeploymentValidation = `-- name: DeleteDeploymentValidation :execrows
+DELETE FROM deployment_validations
+WHERE id = $1
+`
+
+func (q *Queries) DeleteDeploymentValidation(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDeploymentValidation, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getDeploymentValidation = `-- name: GetDeploymentValidation :one
 SELECT
   id,
@@ -34,6 +47,14 @@ SELECT
   pre_completed_at,
   post_started_at,
   post_completed_at,
+  COALESCE(elf_query_ids_json, '[]'::jsonb) AS elf_query_ids_json,
+  COALESCE(auto_run_log_check, FALSE) AS auto_run_log_check,
+  COALESCE(service_ids_json, '[]'::jsonb) AS service_ids_json,
+  COALESCE(observability_profile, 'standard')::text AS observability_profile,
+  COALESCE(signal_pack_ids_json, '[]'::jsonb) AS signal_pack_ids_json,
+  COALESCE(elf_results_json, '[]'::jsonb) AS elf_results_json,
+  log_started_at,
+  log_completed_at,
   created_at,
   updated_at
 FROM deployment_validations
@@ -41,29 +62,37 @@ WHERE id = $1
 `
 
 type GetDeploymentValidationRow struct {
-	ID                  string           `json:"id"`
-	ApplicationID       string           `json:"application_id"`
-	ApplicationName     string           `json:"application_name"`
-	CarID               string           `json:"car_id"`
-	Name                string           `json:"name"`
-	Version             string           `json:"version"`
-	BuildID             string           `json:"build_id"`
-	Environment         string           `json:"environment"`
-	Status              string           `json:"status"`
-	MonitorIdsJson      []byte           `json:"monitor_ids_json"`
-	ReportJson          []byte           `json:"report_json"`
-	AiReportJson        []byte           `json:"ai_report_json"`
-	SampleCount         int32            `json:"sample_count"`
-	IntervalSeconds     int32            `json:"interval_seconds"`
-	DeploymentStartedAt pgtype.Timestamp `json:"deployment_started_at"`
-	BaselineWindowHours int32            `json:"baseline_window_hours"`
-	BaselineRunCount    int32            `json:"baseline_run_count"`
-	PreStartedAt        pgtype.Timestamp `json:"pre_started_at"`
-	PreCompletedAt      pgtype.Timestamp `json:"pre_completed_at"`
-	PostStartedAt       pgtype.Timestamp `json:"post_started_at"`
-	PostCompletedAt     pgtype.Timestamp `json:"post_completed_at"`
-	CreatedAt           pgtype.Timestamp `json:"created_at"`
-	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
+	ID                   string           `json:"id"`
+	ApplicationID        string           `json:"application_id"`
+	ApplicationName      string           `json:"application_name"`
+	CarID                string           `json:"car_id"`
+	Name                 string           `json:"name"`
+	Version              string           `json:"version"`
+	BuildID              string           `json:"build_id"`
+	Environment          string           `json:"environment"`
+	Status               string           `json:"status"`
+	MonitorIdsJson       []byte           `json:"monitor_ids_json"`
+	ReportJson           []byte           `json:"report_json"`
+	AiReportJson         []byte           `json:"ai_report_json"`
+	SampleCount          int32            `json:"sample_count"`
+	IntervalSeconds      int32            `json:"interval_seconds"`
+	DeploymentStartedAt  pgtype.Timestamp `json:"deployment_started_at"`
+	BaselineWindowHours  int32            `json:"baseline_window_hours"`
+	BaselineRunCount     int32            `json:"baseline_run_count"`
+	PreStartedAt         pgtype.Timestamp `json:"pre_started_at"`
+	PreCompletedAt       pgtype.Timestamp `json:"pre_completed_at"`
+	PostStartedAt        pgtype.Timestamp `json:"post_started_at"`
+	PostCompletedAt      pgtype.Timestamp `json:"post_completed_at"`
+	ElfQueryIdsJson      []byte           `json:"elf_query_ids_json"`
+	AutoRunLogCheck      bool             `json:"auto_run_log_check"`
+	ServiceIdsJson       []byte           `json:"service_ids_json"`
+	ObservabilityProfile string           `json:"observability_profile"`
+	SignalPackIdsJson    []byte           `json:"signal_pack_ids_json"`
+	ElfResultsJson       []byte           `json:"elf_results_json"`
+	LogStartedAt         pgtype.Timestamp `json:"log_started_at"`
+	LogCompletedAt       pgtype.Timestamp `json:"log_completed_at"`
+	CreatedAt            pgtype.Timestamp `json:"created_at"`
+	UpdatedAt            pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) GetDeploymentValidation(ctx context.Context, id string) (GetDeploymentValidationRow, error) {
@@ -91,6 +120,14 @@ func (q *Queries) GetDeploymentValidation(ctx context.Context, id string) (GetDe
 		&i.PreCompletedAt,
 		&i.PostStartedAt,
 		&i.PostCompletedAt,
+		&i.ElfQueryIdsJson,
+		&i.AutoRunLogCheck,
+		&i.ServiceIdsJson,
+		&i.ObservabilityProfile,
+		&i.SignalPackIdsJson,
+		&i.ElfResultsJson,
+		&i.LogStartedAt,
+		&i.LogCompletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -216,6 +253,14 @@ SELECT
   pre_completed_at,
   post_started_at,
   post_completed_at,
+  COALESCE(elf_query_ids_json, '[]'::jsonb) AS elf_query_ids_json,
+  COALESCE(auto_run_log_check, FALSE) AS auto_run_log_check,
+  COALESCE(service_ids_json, '[]'::jsonb) AS service_ids_json,
+  COALESCE(observability_profile, 'standard')::text AS observability_profile,
+  COALESCE(signal_pack_ids_json, '[]'::jsonb) AS signal_pack_ids_json,
+  COALESCE(elf_results_json, '[]'::jsonb) AS elf_results_json,
+  log_started_at,
+  log_completed_at,
   created_at,
   updated_at
 FROM deployment_validations
@@ -224,29 +269,37 @@ ORDER BY created_at DESC
 `
 
 type ListDeploymentValidationsRow struct {
-	ID                  string           `json:"id"`
-	ApplicationID       string           `json:"application_id"`
-	ApplicationName     string           `json:"application_name"`
-	CarID               string           `json:"car_id"`
-	Name                string           `json:"name"`
-	Version             string           `json:"version"`
-	BuildID             string           `json:"build_id"`
-	Environment         string           `json:"environment"`
-	Status              string           `json:"status"`
-	MonitorIdsJson      []byte           `json:"monitor_ids_json"`
-	ReportJson          []byte           `json:"report_json"`
-	AiReportJson        []byte           `json:"ai_report_json"`
-	SampleCount         int32            `json:"sample_count"`
-	IntervalSeconds     int32            `json:"interval_seconds"`
-	DeploymentStartedAt pgtype.Timestamp `json:"deployment_started_at"`
-	BaselineWindowHours int32            `json:"baseline_window_hours"`
-	BaselineRunCount    int32            `json:"baseline_run_count"`
-	PreStartedAt        pgtype.Timestamp `json:"pre_started_at"`
-	PreCompletedAt      pgtype.Timestamp `json:"pre_completed_at"`
-	PostStartedAt       pgtype.Timestamp `json:"post_started_at"`
-	PostCompletedAt     pgtype.Timestamp `json:"post_completed_at"`
-	CreatedAt           pgtype.Timestamp `json:"created_at"`
-	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
+	ID                   string           `json:"id"`
+	ApplicationID        string           `json:"application_id"`
+	ApplicationName      string           `json:"application_name"`
+	CarID                string           `json:"car_id"`
+	Name                 string           `json:"name"`
+	Version              string           `json:"version"`
+	BuildID              string           `json:"build_id"`
+	Environment          string           `json:"environment"`
+	Status               string           `json:"status"`
+	MonitorIdsJson       []byte           `json:"monitor_ids_json"`
+	ReportJson           []byte           `json:"report_json"`
+	AiReportJson         []byte           `json:"ai_report_json"`
+	SampleCount          int32            `json:"sample_count"`
+	IntervalSeconds      int32            `json:"interval_seconds"`
+	DeploymentStartedAt  pgtype.Timestamp `json:"deployment_started_at"`
+	BaselineWindowHours  int32            `json:"baseline_window_hours"`
+	BaselineRunCount     int32            `json:"baseline_run_count"`
+	PreStartedAt         pgtype.Timestamp `json:"pre_started_at"`
+	PreCompletedAt       pgtype.Timestamp `json:"pre_completed_at"`
+	PostStartedAt        pgtype.Timestamp `json:"post_started_at"`
+	PostCompletedAt      pgtype.Timestamp `json:"post_completed_at"`
+	ElfQueryIdsJson      []byte           `json:"elf_query_ids_json"`
+	AutoRunLogCheck      bool             `json:"auto_run_log_check"`
+	ServiceIdsJson       []byte           `json:"service_ids_json"`
+	ObservabilityProfile string           `json:"observability_profile"`
+	SignalPackIdsJson    []byte           `json:"signal_pack_ids_json"`
+	ElfResultsJson       []byte           `json:"elf_results_json"`
+	LogStartedAt         pgtype.Timestamp `json:"log_started_at"`
+	LogCompletedAt       pgtype.Timestamp `json:"log_completed_at"`
+	CreatedAt            pgtype.Timestamp `json:"created_at"`
+	UpdatedAt            pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) ListDeploymentValidations(ctx context.Context, applicationID pgtype.Text) ([]ListDeploymentValidationsRow, error) {
@@ -280,6 +333,14 @@ func (q *Queries) ListDeploymentValidations(ctx context.Context, applicationID p
 			&i.PreCompletedAt,
 			&i.PostStartedAt,
 			&i.PostCompletedAt,
+			&i.ElfQueryIdsJson,
+			&i.AutoRunLogCheck,
+			&i.ServiceIdsJson,
+			&i.ObservabilityProfile,
+			&i.SignalPackIdsJson,
+			&i.ElfResultsJson,
+			&i.LogStartedAt,
+			&i.LogCompletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -316,10 +377,18 @@ INSERT INTO deployment_validations (
   pre_completed_at,
   post_started_at,
   post_completed_at,
+  elf_query_ids_json,
+  auto_run_log_check,
+  service_ids_json,
+  observability_profile,
+  signal_pack_ids_json,
+  elf_results_json,
+  log_started_at,
+  log_completed_at,
   created_at,
   updated_at
 )
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
 ON CONFLICT (id) DO UPDATE SET
   application_id = EXCLUDED.application_id,
   application_name = EXCLUDED.application_name,
@@ -341,33 +410,49 @@ ON CONFLICT (id) DO UPDATE SET
   pre_completed_at = EXCLUDED.pre_completed_at,
   post_started_at = EXCLUDED.post_started_at,
   post_completed_at = EXCLUDED.post_completed_at,
+  elf_query_ids_json = EXCLUDED.elf_query_ids_json,
+  auto_run_log_check = EXCLUDED.auto_run_log_check,
+  service_ids_json = EXCLUDED.service_ids_json,
+  observability_profile = EXCLUDED.observability_profile,
+  signal_pack_ids_json = EXCLUDED.signal_pack_ids_json,
+  elf_results_json = EXCLUDED.elf_results_json,
+  log_started_at = EXCLUDED.log_started_at,
+  log_completed_at = EXCLUDED.log_completed_at,
   updated_at = EXCLUDED.updated_at
 `
 
 type UpsertDeploymentValidationParams struct {
-	ID                  string           `json:"id"`
-	ApplicationID       pgtype.Text      `json:"application_id"`
-	ApplicationName     string           `json:"application_name"`
-	CarID               string           `json:"car_id"`
-	Name                string           `json:"name"`
-	Version             pgtype.Text      `json:"version"`
-	BuildID             pgtype.Text      `json:"build_id"`
-	Environment         pgtype.Text      `json:"environment"`
-	Status              string           `json:"status"`
-	MonitorIdsJson      []byte           `json:"monitor_ids_json"`
-	ReportJson          []byte           `json:"report_json"`
-	AiReportJson        []byte           `json:"ai_report_json"`
-	SampleCount         int32            `json:"sample_count"`
-	IntervalSeconds     int32            `json:"interval_seconds"`
-	DeploymentStartedAt pgtype.Timestamp `json:"deployment_started_at"`
-	BaselineWindowHours int32            `json:"baseline_window_hours"`
-	BaselineRunCount    int32            `json:"baseline_run_count"`
-	PreStartedAt        pgtype.Timestamp `json:"pre_started_at"`
-	PreCompletedAt      pgtype.Timestamp `json:"pre_completed_at"`
-	PostStartedAt       pgtype.Timestamp `json:"post_started_at"`
-	PostCompletedAt     pgtype.Timestamp `json:"post_completed_at"`
-	CreatedAt           pgtype.Timestamp `json:"created_at"`
-	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
+	ID                   string           `json:"id"`
+	ApplicationID        pgtype.Text      `json:"application_id"`
+	ApplicationName      string           `json:"application_name"`
+	CarID                string           `json:"car_id"`
+	Name                 string           `json:"name"`
+	Version              pgtype.Text      `json:"version"`
+	BuildID              pgtype.Text      `json:"build_id"`
+	Environment          pgtype.Text      `json:"environment"`
+	Status               string           `json:"status"`
+	MonitorIdsJson       []byte           `json:"monitor_ids_json"`
+	ReportJson           []byte           `json:"report_json"`
+	AiReportJson         []byte           `json:"ai_report_json"`
+	SampleCount          int32            `json:"sample_count"`
+	IntervalSeconds      int32            `json:"interval_seconds"`
+	DeploymentStartedAt  pgtype.Timestamp `json:"deployment_started_at"`
+	BaselineWindowHours  int32            `json:"baseline_window_hours"`
+	BaselineRunCount     int32            `json:"baseline_run_count"`
+	PreStartedAt         pgtype.Timestamp `json:"pre_started_at"`
+	PreCompletedAt       pgtype.Timestamp `json:"pre_completed_at"`
+	PostStartedAt        pgtype.Timestamp `json:"post_started_at"`
+	PostCompletedAt      pgtype.Timestamp `json:"post_completed_at"`
+	ElfQueryIdsJson      []byte           `json:"elf_query_ids_json"`
+	AutoRunLogCheck      bool             `json:"auto_run_log_check"`
+	ServiceIdsJson       []byte           `json:"service_ids_json"`
+	ObservabilityProfile string           `json:"observability_profile"`
+	SignalPackIdsJson    []byte           `json:"signal_pack_ids_json"`
+	ElfResultsJson       []byte           `json:"elf_results_json"`
+	LogStartedAt         pgtype.Timestamp `json:"log_started_at"`
+	LogCompletedAt       pgtype.Timestamp `json:"log_completed_at"`
+	CreatedAt            pgtype.Timestamp `json:"created_at"`
+	UpdatedAt            pgtype.Timestamp `json:"updated_at"`
 }
 
 func (q *Queries) UpsertDeploymentValidation(ctx context.Context, arg UpsertDeploymentValidationParams) error {
@@ -393,6 +478,14 @@ func (q *Queries) UpsertDeploymentValidation(ctx context.Context, arg UpsertDepl
 		arg.PreCompletedAt,
 		arg.PostStartedAt,
 		arg.PostCompletedAt,
+		arg.ElfQueryIdsJson,
+		arg.AutoRunLogCheck,
+		arg.ServiceIdsJson,
+		arg.ObservabilityProfile,
+		arg.SignalPackIdsJson,
+		arg.ElfResultsJson,
+		arg.LogStartedAt,
+		arg.LogCompletedAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)

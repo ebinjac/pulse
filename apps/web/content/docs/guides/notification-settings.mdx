@@ -1,0 +1,28 @@
+---
+title: Notification settings
+description: Configure Slack and email alert delivery from the console.
+---
+
+Alert notifications are configured in **Settings → Notifications**.
+
+## Slack
+
+1. Obtain an **incoming webhook URL** from your Slack workspace (not the channel link alone).
+2. Paste the webhook URL in Rythm notification settings.
+3. Use **Test** to send a sample message and confirm delivery.
+
+<Callout type="info">
+  A Slack channel link opens the channel in the app, but Rythm needs a webhook URL to post messages.
+</Callout>
+
+## Email
+
+Configure recipient addresses for email alert delivery. Test notifications verify SMTP or provider integration configured for your Rythm environment.
+
+## What triggers notifications
+
+Notifications fire when monitors breach **alert policy** and create alert events. Tuning monitor alert policy reduces noise — see [Creating a monitor](/docs/guides/creating-a-monitor).
+
+## Alert message content
+
+Rythm can generate alert messages from run context. Review messages in the **Alerts** detail view; copilot-assisted drafting may be available for your environment.

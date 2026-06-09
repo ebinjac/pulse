@@ -19,6 +19,7 @@ import {
   TextField,
 } from "@heroui/react"
 import { cn } from "@workspace/ui/lib/utils"
+import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
 import { PageShell } from "./console-shared"
 
 export interface SecretInput {
@@ -209,11 +210,15 @@ export function Secrets({
 
   const save = async () => {
     if (!form.name.trim() || !form.alias.trim()) {
-      setError("Name and alias are required.")
+      const message = "Name and alias are required."
+      setError(message)
+      notifyPulseToast("warning", "Missing required fields", message)
       return
     }
     if (!editing && !form.value.trim()) {
-      setError("Secret value is required for new secrets.")
+      const message = "Secret value is required for new secrets."
+      setError(message)
+      notifyPulseToast("warning", "Missing secret value", message)
       return
     }
 
@@ -223,9 +228,13 @@ export function Secrets({
     try {
       await onSave(editing, form)
       setOpen(false)
-      setMessage(editing ? "Secret updated." : "Secret created.")
+      const successMessage = editing ? "Secret updated." : "Secret created."
+      setMessage(successMessage)
+      notifyPulseToast("success", editing ? "Secret updated" : "Secret created", `${form.alias.trim()} saved successfully.`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save secret.")
+      const message = err instanceof Error ? err.message : "Failed to save secret."
+      setError(message)
+      notifyPulseToast("danger", "Failed to save secret", message)
     } finally {
       setSaving(false)
     }
@@ -237,9 +246,13 @@ export function Secrets({
     setError("")
     try {
       const ok = await onTest(secret)
-      setMessage(ok ? `${secret.alias} decrypted successfully.` : `${secret.alias} could not be decrypted.`)
+      const successMessage = ok ? `${secret.alias} decrypted successfully.` : `${secret.alias} could not be decrypted.`
+      setMessage(successMessage)
+      notifyPulseToast(ok ? "success" : "warning", ok ? "Secret test passed" : "Secret test failed", successMessage)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to test secret.")
+      const message = err instanceof Error ? err.message : "Failed to test secret."
+      setError(message)
+      notifyPulseToast("danger", "Failed to test secret", message)
     } finally {
       setTestingId(null)
     }
@@ -455,9 +468,13 @@ export function Secrets({
                   if (confirmDelete && onDelete) {
                     try {
                       await onDelete(confirmDelete.id)
-                      setMessage(`Secret "${confirmDelete.name}" deleted.`)
+                      const successMessage = `Secret "${confirmDelete.name}" deleted.`
+                      setMessage(successMessage)
+                      notifyPulseToast("success", "Secret deleted", successMessage)
                     } catch (err) {
-                      setError(err instanceof Error ? err.message : "Failed to delete secret.")
+                      const message = err instanceof Error ? err.message : "Failed to delete secret."
+                      setError(message)
+                      notifyPulseToast("danger", "Failed to delete secret", message)
                     }
                   }
                   setConfirmDelete(null)

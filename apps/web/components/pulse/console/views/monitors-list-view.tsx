@@ -3,80 +3,24 @@
 import { useRouter } from "next/navigation"
 import { Plus, Upload } from "lucide-react"
 import type { Monitor } from "@/lib/pulse-types"
-import { PageShell } from "@/components/pulse/console-shared"
-import { Button, Card, Description, Label, ListBox, SearchField, Select } from "@heroui/react"
+import type { MonitorScheduleFilter, MonitorStatusFilter } from "@/lib/filter-monitors"
+import { PageShell } from "@/components/pulse/console/layout"
+import { Button, Card, Description } from "@heroui/react"
+import { MonitorFiltersToolbar } from "../components/monitor-filters-toolbar"
 import { MonitorTable } from "../components/monitor-table"
 
 export interface MonitorsListViewProps {
   monitors: Monitor[]
   monitorsSearch: string
   onMonitorsSearchChange: (value: string) => void
-  monitorsStatusFilter: "all" | "active" | "inactive" | "failed" | "healthy"
-  onMonitorsStatusFilterChange: (value: MonitorsListViewProps["monitorsStatusFilter"]) => void
-  monitorsScheduleFilter: "all" | "scheduled" | "manual"
-  onMonitorsScheduleFilterChange: (value: MonitorsListViewProps["monitorsScheduleFilter"]) => void
+  monitorsStatusFilter: MonitorStatusFilter
+  onMonitorsStatusFilterChange: (value: MonitorStatusFilter) => void
+  monitorsScheduleFilter: MonitorScheduleFilter
+  onMonitorsScheduleFilterChange: (value: MonitorScheduleFilter) => void
   onImportExport: () => void
   onRunNow: (monitorId: string) => Promise<void> | void
   onToggleActive: (monitorId: string, currentActive: boolean) => void
   onDeleteMonitor: (monitorId: string) => void
-}
-
-const STATUS_FILTER_OPTIONS = [
-  { id: "all", label: "All statuses" },
-  { id: "active", label: "Active" },
-  { id: "inactive", label: "Inactive" },
-  { id: "healthy", label: "Healthy" },
-  { id: "failed", label: "Failed" },
-] as const
-
-const SCHEDULE_FILTER_OPTIONS = [
-  { id: "all", label: "All schedules" },
-  { id: "scheduled", label: "Scheduled" },
-  { id: "manual", label: "Manual only" },
-] as const
-
-function MonitorFilterSelect<T extends string>({
-  label,
-  ariaLabel,
-  selectedKey,
-  onSelectionChange,
-  options,
-  className,
-}: {
-  label: string
-  ariaLabel: string
-  selectedKey: T
-  onSelectionChange: (key: T) => void
-  options: ReadonlyArray<{ id: T; label: string }>
-  className?: string
-}) {
-  return (
-    <Select
-      aria-label={ariaLabel}
-      className={className ?? "w-full min-w-[10rem] sm:w-[11rem]"}
-      variant="secondary"
-      selectedKey={selectedKey}
-      onSelectionChange={(key) => {
-        if (key != null) onSelectionChange(String(key) as T)
-      }}
-    >
-      <Label className="text-[10px] font-semibold uppercase tracking-wider text-muted">{label}</Label>
-      <Select.Trigger>
-        <Select.Value />
-        <Select.Indicator />
-      </Select.Trigger>
-      <Select.Popover>
-        <ListBox>
-          {options.map((option) => (
-            <ListBox.Item key={option.id} id={option.id} textValue={option.label}>
-              {option.label}
-              <ListBox.ItemIndicator />
-            </ListBox.Item>
-          ))}
-        </ListBox>
-      </Select.Popover>
-    </Select>
-  )
 }
 
 export function MonitorsListView({
@@ -112,42 +56,19 @@ export function MonitorsListView({
       }
     >
       <div className="flex flex-col gap-5">
-        <Card >
+        <Card>
           <Card.Content className="gap-4">
             <Description className="text-sm">
               Search and filter the monitor inventory. Open a monitor for run history, or run checks on demand.
             </Description>
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-              <SearchField
-                aria-label="Search monitors"
-                className="flex-1"
-                value={monitorsSearch}
-                onChange={onMonitorsSearchChange}
-                variant="secondary"
-              >
-                <SearchField.Group className="h-9">
-                  <SearchField.SearchIcon />
-                  <SearchField.Input placeholder="Search monitors by name or description..." />
-                  <SearchField.ClearButton />
-                </SearchField.Group>
-              </SearchField>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-                <MonitorFilterSelect
-                  label="Status"
-                  ariaLabel="Filter by status"
-                  selectedKey={monitorsStatusFilter}
-                  onSelectionChange={onMonitorsStatusFilterChange}
-                  options={STATUS_FILTER_OPTIONS}
-                />
-                <MonitorFilterSelect
-                  label="Schedule"
-                  ariaLabel="Filter by schedule"
-                  selectedKey={monitorsScheduleFilter}
-                  onSelectionChange={onMonitorsScheduleFilterChange}
-                  options={SCHEDULE_FILTER_OPTIONS}
-                />
-              </div>
-            </div>
+            <MonitorFiltersToolbar
+              search={monitorsSearch}
+              onSearchChange={onMonitorsSearchChange}
+              statusFilter={monitorsStatusFilter}
+              onStatusFilterChange={onMonitorsStatusFilterChange}
+              scheduleFilter={monitorsScheduleFilter}
+              onScheduleFilterChange={onMonitorsScheduleFilterChange}
+            />
             <Description className="text-xs">
               Showing {monitors.length} monitor{monitors.length === 1 ? "" : "s"}
             </Description>

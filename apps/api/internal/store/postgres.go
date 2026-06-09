@@ -113,16 +113,19 @@ func (s *PostgresStore) UpsertApplication(application domain.Application) domain
 	application.UpdatedAt = now
 
 	if err := s.queries.UpsertApplication(context.Background(), pulsedb.UpsertApplicationParams{
-		ID:               application.ID,
-		Name:             application.Name,
-		CarID:            application.CarID,
-		Description:      pgText(application.Description),
-		Owner:            pgText(application.Owner),
-		Environment:      pgText(application.Environment),
-		TagsJson:         mustJSON(application.Tags),
-		AlertRoutingJson: mustJSON(application.AlertRouting),
-		CreatedAt:        pgTimestamp(application.CreatedAt),
-		UpdatedAt:        pgTimestamp(application.UpdatedAt),
+		ID:                  application.ID,
+		Name:                application.Name,
+		CarID:               application.CarID,
+		ElfAppID:            pgNullableText(application.ElfAppID),
+		IndexPathTemplate:   pgNullableText(application.IndexPathTemplate),
+		LogFieldMappingJson: mustJSON(application.LogFieldMapping),
+		Description:         pgText(application.Description),
+		Owner:               pgText(application.Owner),
+		Environment:         pgText(application.Environment),
+		TagsJson:            mustJSON(application.Tags),
+		AlertRoutingJson:    mustJSON(application.AlertRouting),
+		CreatedAt:           pgTimestamp(application.CreatedAt),
+		UpdatedAt:           pgTimestamp(application.UpdatedAt),
 	}); err != nil {
 		log.Printf("upsert application: %v", err)
 	}
@@ -785,12 +788,15 @@ func applicationFromListRow(row pulsedb.ListApplicationsRow) domain.Application 
 		ID:          row.ID,
 		Name:        row.Name,
 		CarID:       row.CarID,
-		Description: row.Description,
-		Owner:       row.Owner,
-		Environment: row.Environment,
-		CreatedAt:   pgTime(row.CreatedAt),
-		UpdatedAt:   pgTime(row.UpdatedAt),
+		ElfAppID:          row.ElfAppID,
+		IndexPathTemplate: row.IndexPathTemplate,
+		Description:       row.Description,
+		Owner:             row.Owner,
+		Environment:       row.Environment,
+		CreatedAt:         pgTime(row.CreatedAt),
+		UpdatedAt:         pgTime(row.UpdatedAt),
 	}
+	_ = json.Unmarshal(row.LogFieldMappingJson, &application.LogFieldMapping)
 	_ = json.Unmarshal(row.TagsJson, &application.Tags)
 	_ = json.Unmarshal(row.AlertRoutingJson, &application.AlertRouting)
 	if application.Tags == nil {
@@ -804,12 +810,15 @@ func applicationFromGetRow(row pulsedb.GetApplicationRow) domain.Application {
 		ID:          row.ID,
 		Name:        row.Name,
 		CarID:       row.CarID,
+		ElfAppID:          row.ElfAppID,
+		IndexPathTemplate: row.IndexPathTemplate,
 		Description: row.Description,
 		Owner:       row.Owner,
 		Environment: row.Environment,
 		CreatedAt:   pgTime(row.CreatedAt),
 		UpdatedAt:   pgTime(row.UpdatedAt),
 	}
+	_ = json.Unmarshal(row.LogFieldMappingJson, &application.LogFieldMapping)
 	_ = json.Unmarshal(row.TagsJson, &application.Tags)
 	_ = json.Unmarshal(row.AlertRoutingJson, &application.AlertRouting)
 	if application.Tags == nil {
@@ -1134,4 +1143,10 @@ func pgTimePtr(value pgtype.Timestamp) *time.Time {
 
 func secretAssociatedData(id string) string {
 	return "secret:" + id
+}
+
+func (s *PostgresStore) Close() {
+	if s.pool != nil {
+		s.pool.Close()
+	}
 }

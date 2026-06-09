@@ -1,0 +1,50 @@
+---
+title: Glossary
+description: Key terms used across the Rythm console.
+---
+
+## Core entities
+
+**Application** — A logical grouping of monitors (for example, a product or CAR). Applications have a CAR ID, optional schedule defaults, and member monitors.
+
+**Monitor** — A synthetic check definition: ordered steps, schedule, variables, secret references, assertions, and alert policy.
+
+**Monitor run** — One execution of a monitor. Includes per-step results, timing, overall status, and a failure reason when applicable.
+
+**Alert event** — A persisted record when a monitor breaches alert policy. Alerts move through states such as open, acknowledged, resolved, and suppressed.
+
+## Monitor lifecycle
+
+**Published monitor** — The live configuration used by scheduled and production runs.
+
+**Draft** — An unpublished edit saved separately from production. **Publish** promotes the draft and bumps the monitor version.
+
+**Monitor version** — An immutable snapshot of a published configuration, used for comparison and rollback.
+
+**Draft run / test run** — Executes draft configuration without changing what runs in production.
+
+## Deployment validation
+
+**Deployment validation** — A release gate that samples linked monitors before and after a deployment.
+
+**Pre phase / post phase** — Monitor runs tied to the validation before versus after deploy.
+
+**Baseline window** — Historical runs used to compare post-deploy behavior against normal operation.
+
+**ELF log check** — Optional phase after post-deploy sampling. Runs reusable OpenSearch queries against the ELF logging proxy for your application.
+
+**ELF query** — A library definition with a search body, gate mode (`blocking` or `advisory`), and pass criteria.
+
+**elfAppId** — Per-application ELF index segment (for example, `200003773`). Set on the application or overridden per query.
+
+## Execution
+
+**Scheduled run** — A monitor run triggered automatically on its schedule.
+
+**Manual run** — A run you trigger from the console on demand.
+
+## Secrets and certificates
+
+**Secret reference** — A named encrypted value (alias) that monitors reference by name. Values are masked in run output.
+
+**Certificate profile** — Host- and port-bound mTLS material (PEM or PFX) stored as secret aliases for monitors that require client certificates.

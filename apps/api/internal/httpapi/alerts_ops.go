@@ -8,7 +8,13 @@ import (
 	"time"
 
 	"github.com/ensemble-pulse/pulse/apps/api/internal/domain"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/events"
 )
+
+
+func (s *Server) listAlerts(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"alerts": s.store.ListAlerts()})
+}
 
 func (s *Server) alertRoutes(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/alerts/")
@@ -72,6 +78,7 @@ func (s *Server) acknowledgeAlert(w http.ResponseWriter, r *http.Request, alertI
 		writeError(w, http.StatusNotFound, "alert not found")
 		return
 	}
+	events.PublishAlertAcknowledged(s.events, alert)
 	writeJSON(w, http.StatusOK, map[string]any{"alert": alert})
 }
 

@@ -16,8 +16,9 @@ var ErrNotFound = errors.New("not found")
 
 type MemoryStore struct {
 	mu              sync.RWMutex
-	applications    map[string]domain.Application
-	validations     map[string]domain.DeploymentValidation
+	applications         map[string]domain.Application
+	applicationServices  map[string]domain.ApplicationService
+	validations          map[string]domain.DeploymentValidation
 	validationLinks []domain.DeploymentValidationRunLink
 	monitors        map[string]domain.Monitor
 	drafts          map[string]memoryDraftRecord
@@ -28,6 +29,8 @@ type MemoryStore struct {
 	alerts          map[string]domain.AlertEvent
 	maintenance     map[string]domain.MaintenanceWindow
 	retention       domain.RetentionSettings
+	elfProxy        domain.ElfProxySettings
+	elfQueries      map[string]domain.ElfQuery
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -139,8 +142,10 @@ func NewMemoryStore() *MemoryStore {
 	seedDraft := cloneMonitorConfig(monitor)
 
 	return &MemoryStore{
-		applications:    map[string]domain.Application{application.ID: application},
-		validations:     map[string]domain.DeploymentValidation{},
+		applications:        map[string]domain.Application{application.ID: application},
+		applicationServices: map[string]domain.ApplicationService{},
+		validations:         map[string]domain.DeploymentValidation{},
+		elfQueries:          map[string]domain.ElfQuery{},
 		validationLinks: []domain.DeploymentValidationRunLink{},
 		monitors:        map[string]domain.Monitor{monitor.ID: monitor},
 		drafts: map[string]memoryDraftRecord{
@@ -336,6 +341,24 @@ func (s *MemoryStore) UpdateDeploymentValidation(validation domain.DeploymentVal
 	return validation
 }
 
+func (s *MemoryStore) DeleteDeploymentValidation(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.validations[id]; !ok {
+		return false
+	}
+	delete(s.validations, id)
+	filtered := s.validationLinks[:0]
+	for _, link := range s.validationLinks {
+		if link.ValidationID != id {
+			filtered = append(filtered, link)
+		}
+	}
+	s.validationLinks = filtered
+	return true
+}
+
 func (s *MemoryStore) LinkDeploymentValidationRun(validationID string, phase domain.DeploymentValidationPhase, monitorID string, runID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -437,47 +460,6 @@ func (s *MemoryStore) UpsertMonitor(monitor domain.Monitor) domain.Monitor {
 	if len(s.versions[monitor.ID]) == 0 {
 		s.recordVersionLocked(monitor, "Initial published version", "", "initial")
 	}
-	return monitor
-}
-
-func NormalizeMonitor(monitor domain.Monitor) domain.Monitor {
-	if monitor.ScheduleCron == "" {
-		monitor.ScheduleCron = monitor.Cron
-	}
-	if monitor.Cron == "" {
-		monitor.Cron = monitor.ScheduleCron
-	}
-	if monitor.ScheduleLabel == "" && monitor.Cron != "" {
-		monitor.ScheduleLabel = "Custom cron"
-	}
-	if monitor.ScheduleMode == "" && monitor.Cron != "" {
-		monitor.ScheduleMode = "custom-cron"
-	}
-	if monitor.Timezone == "" {
-		monitor.Timezone = "UTC"
-	}
-	if monitor.TimeoutMS == 0 {
-		monitor.TimeoutMS = 30000
-	}
-	if monitor.FailureThreshold == 0 {
-		monitor.FailureThreshold = 3
-	}
-	if monitor.ResponseBodyLimitKB == 0 {
-		monitor.ResponseBodyLimitKB = 32
-	}
-	if monitor.Status == "" {
-		monitor.Status = domain.StatusSkipped
-	}
-	if monitor.Variables == nil {
-		monitor.Variables = map[string]string{}
-	}
-	if monitor.Steps == nil {
-		monitor.Steps = []domain.MonitorStep{}
-	}
-	if monitor.AlertPolicy.Threshold == 0 {
-		monitor.AlertPolicy.Threshold = monitor.FailureThreshold
-	}
-
 	return monitor
 }
 

@@ -1,2 +1,5 @@
 export { PulseConsole } from "./pulse-console"
 export type { PulseConsoleProps } from "./types"
+export type { ConsoleView } from "./layout"
+export { PageShell, Metric, StatusPill, formatDate } from "./layout"
+export { LatencyChart, MonitorRunsChart } from "./charts"

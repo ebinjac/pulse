@@ -3,7 +3,8 @@
   "compilerOptions": {
     "paths": {
       "@/*": ["./*"],
-      "@workspace/ui/*": ["../../packages/ui/src/*"]
+      "@workspace/ui/*": ["../../packages/ui/src/*"],
+      "collections/*": ["./.source/*"]
     },
     "plugins": [
       {
@@ -14,11 +15,13 @@
   "include": [
     "next-env.d.ts",
     "next.config.ts",
+    "source.config.ts",
     "**/*.ts",
     "**/*.tsx",
     "**/*.mts",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".source/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

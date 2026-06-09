@@ -1,0 +1,63 @@
+---
+title: Your first monitor
+description: Create an application, build a monitor, run a test, and view the result.
+---
+
+This walkthrough takes you from an empty scope to a successful test run.
+
+## 1. Create an application
+
+1. Open **Applications** in the sidebar.
+2. Select **Create application**.
+3. Enter a name and CAR identifier for your product area.
+4. Save the application.
+
+Applications group monitors and carry shared metadata such as schedule defaults and ELF application ID when you use log checks.
+
+## 2. Create a monitor
+
+1. Open **Monitors** → **Create**.
+2. Give the monitor a clear name (for example, `Health check – payments API`).
+3. Associate it with the application you just created.
+4. Add a **step**:
+   - Method: `GET`
+   - URL: your health or smoke-test endpoint
+5. Add an **assertion** on the step — for example, status code equals `200`.
+
+See [Creating a monitor](/docs/guides/creating-a-monitor) for assertions, extractors, and multi-step flows.
+
+## 3. Run a test (draft)
+
+Before publishing, validate the configuration:
+
+1. In the builder, choose **Test** or **Run draft**.
+2. Wait for the run to complete.
+3. Open the run detail to inspect each step: status, latency, response body (masked where secrets apply), and assertion results.
+
+Draft runs do not affect the published schedule.
+
+## 4. Publish
+
+When the test passes:
+
+1. **Save** the draft if you have not already.
+2. Choose **Publish** to promote the draft to the live monitor configuration.
+
+<Callout type="warn">
+  Publishing replaces the live monitor configuration used by scheduled runs. Confirm the draft test succeeded first.
+</Callout>
+
+## 5. Review run history
+
+1. From the monitor, open **Runs**.
+2. Select a run to see the timeline, per-step timing, and failure reason if applicable.
+
+You can also reach runs from **Dashboard** when a monitor fails.
+
+## What’s next?
+
+<Cards>
+  <Card title="Managing applications" href="/docs/guides/managing-applications" description="Schedules, ELF app ID, and monitor membership." />
+  <Card title="Importing monitors" href="/docs/guides/importing-monitors" description="Bring in Postman collections or OpenAPI specs." />
+  <Card title="Notification settings" href="/docs/guides/notification-settings" description="Route alerts to Slack or email." />
+</Cards>

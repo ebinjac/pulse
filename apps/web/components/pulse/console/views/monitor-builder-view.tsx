@@ -1,6 +1,6 @@
 "use client"
 
-import { BuilderWorkbench } from "@/components/pulse/builder-workbench"
+import { BuilderWorkbench } from "@/components/pulse/builder"
 import { PageShell } from "@/components/pulse/console-shared"
 import type {
   Application,

@@ -1,8 +1,9 @@
 import "@workspace/ui/globals.css"
+import "@/app/docs/docs-overrides.css"
+import { PulseToastProvider } from "@/components/pulse/pulse-toast-provider"
 import { ThemeProvider } from "@/components/theme-provider"
-import { AppShellInset, AppShellProvider } from "@/components/pulse/app-shell"
-import { AppSidebar } from "@/components/pulse/app-sidebar"
 import { bentonSans, fontMono } from "@/lib/fonts"
+import { RootProvider } from "fumadocs-ui/provider/next"
 import { cn } from "@workspace/ui/lib/utils"
 
 export default function RootLayout({
@@ -18,10 +19,9 @@ export default function RootLayout({
     >
       <body>
         <ThemeProvider>
-          <AppShellProvider>
-            <AppSidebar />
-            <AppShellInset className="min-w-0">{children}</AppShellInset>
-          </AppShellProvider>
+          <RootProvider theme={{ enabled: false }} search={{ enabled: false }}>
+            <PulseToastProvider>{children}</PulseToastProvider>
+          </RootProvider>
         </ThemeProvider>
       </body>
     </html>

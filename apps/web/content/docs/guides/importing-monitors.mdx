@@ -1,0 +1,31 @@
+---
+title: Importing monitors
+description: Import Postman collections, OpenAPI specs, or Rythm bundles.
+---
+
+Rythm can bootstrap monitors from tools your team already uses.
+
+## Supported formats
+
+| Format | Typical use |
+|--------|-------------|
+| **Postman Collection v2.1** | Existing API test collections |
+| **OpenAPI 3 / Swagger 2** | Generated from API specifications |
+| **Rythm JSON/YAML** | Full monitor bundles exported from another Rythm environment |
+
+## Import from the monitor inventory
+
+1. Go to **Monitors**.
+2. Open **Import** (or import/export dialog).
+3. Choose the format and upload your file.
+4. Review generated steps and assertions — imports are a starting point; tune schedules, secrets, and alert policy before publishing.
+
+## Export
+
+Export monitors to share with another team or environment. Exported bundles preserve structure but not secret values — re-bind secret references in the target environment.
+
+## After import
+
+1. Replace placeholder URLs or hosts for your target environment.
+2. Bind **secret references** for authentication.
+3. Run a **draft test**, then **publish**.

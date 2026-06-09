@@ -13,6 +13,10 @@ sql:
       - "migrations/000009_deployment_validations.up.sql"
       - "migrations/000010_deployment_validation_sampling.up.sql"
       - "migrations/000011_deployment_validation_baseline.up.sql"
+      - "migrations/000012_elf_integration.up.sql"
+      - "migrations/000013_elf_observability.up.sql"
+      - "migrations/000014_log_index_pattern.up.sql"
+      - "migrations/000015_clear_legacy_elf_index_default.up.sql"
     queries: "internal/db/queries"
     gen:
       go:

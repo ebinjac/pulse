@@ -8,6 +8,7 @@ import type { Monitor, MonitorSLO } from "@/lib/pulse-types"
 import { formatDate, StatusPill } from "@/components/pulse/console-shared"
 import { formatUptimePct } from "@/lib/pulse-slo"
 import { cn } from "@workspace/ui/lib/utils"
+import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
 import {
   Button,
   Card,
@@ -32,11 +33,27 @@ export function MonitorTable({ monitors, monitorSloMap, onRunNow, onToggleActive
 
   const handleRunClick = async (monitorId: string) => {
     if (runningIds.includes(monitorId)) return
+    const monitor = monitors.find((item) => item.id === monitorId)
     setRunningIds((prev) => [...prev, monitorId])
     try {
+      notifyPulseToast(
+        "info",
+        "Running monitor",
+        monitor?.name ? `Triggering a check for ${monitor.name}.` : undefined,
+      )
       await onRunNow(monitorId)
+      notifyPulseToast(
+        "success",
+        "Monitor run started",
+        monitor?.name ? `${monitor.name} is executing now.` : undefined,
+      )
     } catch (err) {
       console.error("Failed to run monitor:", err)
+      notifyPulseToast(
+        "danger",
+        "Failed to run monitor",
+        err instanceof Error ? err.message : "Please try again.",
+      )
     } finally {
       setRunningIds((prev) => prev.filter((id) => id !== monitorId))
     }

@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/ensemble-pulse/pulse/apps/api/internal/domain"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/events"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/executor"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/jobqueue"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/logcheck"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/store"
 )
 
@@ -16,15 +18,20 @@ type Worker struct {
 	store       store.Store
 	executor    executor.Executor
 	queue       jobqueue.Queue
+	events      events.Publisher
 	pollTimeout time.Duration
 	lockTTL     time.Duration
 }
 
-func NewWorker(store store.Store, executor executor.Executor, queue jobqueue.Queue) *Worker {
+func NewWorker(store store.Store, executor executor.Executor, queue jobqueue.Queue, pub events.Publisher) *Worker {
+	if pub == nil {
+		pub = events.NoopPublisher{}
+	}
 	return &Worker{
 		store:       store,
 		executor:    executor,
 		queue:       queue,
+		events:      pub,
 		pollTimeout: 5 * time.Second,
 		lockTTL:     5 * time.Minute,
 	}
@@ -96,7 +103,11 @@ func (w *Worker) process(ctx context.Context, job jobqueue.MonitorRunJob) {
 	if job.ValidationID != "" && job.ValidationPhase != "" {
 		phase := domain.DeploymentValidationPhase(job.ValidationPhase)
 		w.store.LinkDeploymentValidationRun(job.ValidationID, phase, monitor.ID, run.ID)
+		events.PublishValidationRunLinked(w.events, job.ValidationID, phase, monitor.ID, run.ID, run.Status)
 		w.refreshValidationReport(job.ValidationID, phase)
+	}
+	if job.BatchID != "" && job.ApplicationID != "" {
+		events.PublishRunCompleted(w.events, job.ApplicationID, job.BatchID, monitor.ID, run.ID, run.Status, run.DurationMS, run.FailureReason)
 	}
 	log.Printf("[Worker] Finished queued check for %s. Duration: %dms, Status: %s", monitor.Name, run.DurationMS, run.Status)
 }
@@ -116,13 +127,26 @@ func (w *Worker) refreshValidationReport(validationID string, phase domain.Deplo
 	if phase == domain.DeploymentValidationPhasePre && len(preRuns) >= expectedRuns {
 		validation.Status = domain.DeploymentValidationPreComplete
 		validation.PreCompletedAt = &now
+		events.PublishValidationStatusChanged(w.events, validation.ID, validation.Status)
 	}
 	if phase == domain.DeploymentValidationPhasePost && len(postRuns) >= expectedRuns {
-		validation.Status = domain.DeploymentValidationReportReady
 		validation.PostCompletedAt = &now
+		if validation.AutoRunLogCheck && len(validation.ElfQueryIDs) > 0 {
+			validation.Status = domain.DeploymentValidationLogRunning
+			validation.LogStartedAt = &now
+			w.store.UpdateDeploymentValidation(validation)
+			events.PublishValidationStatusChanged(w.events, validation.ID, validation.Status)
+			go (&logcheck.Service{Store: w.store, Events: w.events}).Execute(validation.ID, preRuns, postRuns)
+			return
+		}
+		validation.Status = domain.DeploymentValidationReportReady
 		validation.Report = store.BuildDeploymentValidationReport(validation, preRuns, postRuns)
 	}
 	w.store.UpdateDeploymentValidation(validation)
+	events.PublishValidationStatusChanged(w.events, validation.ID, validation.Status)
+	if validation.Status == domain.DeploymentValidationReportReady {
+		events.PublishValidationReportUpdated(w.events, validation.ID, validation.Status)
+	}
 }
 
 func (w *Worker) lockTTLForMonitor(timeoutMS int) time.Duration {

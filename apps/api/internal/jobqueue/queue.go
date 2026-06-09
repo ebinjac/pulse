@@ -17,6 +17,8 @@ type MonitorRunJob struct {
 	ValidationID    string    `json:"validationId,omitempty"`
 	ValidationPhase string    `json:"validationPhase,omitempty"`
 	SampleIndex     int       `json:"sampleIndex,omitempty"`
+	ApplicationID   string    `json:"applicationId,omitempty"`
+	BatchID         string    `json:"batchId,omitempty"`
 }
 
 type Lock interface {

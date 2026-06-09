@@ -1,0 +1,26 @@
+---
+title: Managing applications
+description: Create and configure applications that group your monitors.
+---
+
+## Create an application
+
+1. Go to **Applications** → **Create**.
+2. Enter a **name** and **CAR ID**.
+3. Optionally set **ELF app ID** if this application will use ELF log checks during deployment validation.
+4. Configure a default **schedule** if monitors should inherit a common cadence.
+5. Save.
+
+## Edit an application
+
+1. Open the application from the list.
+2. Update fields as needed and save.
+3. Existing monitors retain their association; update individual monitors if schedules should diverge.
+
+## View monitors for an application
+
+From the application detail page, see member monitors, health signals, and shortcuts to create a new monitor in that scope.
+
+## ELF app ID
+
+The **ELF app ID** identifies your application’s log index segment in ELF queries (for example, `200003773`). Set it on the application so deployment validations and ELF queries resolve the correct index pattern without per-query duplication.

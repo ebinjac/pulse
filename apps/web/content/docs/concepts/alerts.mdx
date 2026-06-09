@@ -1,0 +1,27 @@
+---
+title: Alerts
+description: How alert events are created and managed in Rythm.
+---
+
+Rythm creates **alert events** when a monitor’s run results breach the configured alert policy — for example, consecutive failures or a single critical failure.
+
+## Alert lifecycle
+
+| State | Meaning |
+|-------|---------|
+| **Open** | Active incident requiring attention |
+| **Acknowledged** | Someone is investigating |
+| **Resolved** | Condition cleared or manually closed |
+| **Suppressed** | Temporarily muted (for example, during maintenance) |
+
+## Where to work alerts
+
+- **Alerts** in the sidebar — full list with filters
+- **Dashboard** — highlights recent open alerts
+- **Monitor / run detail** — context for the failing check
+
+Notifications (Slack, email) are configured in **Settings**. See [Working with alerts](/docs/guides/working-with-alerts) and [Notification settings](/docs/guides/notification-settings).
+
+## Alert content
+
+Each alert links to the monitor and often the specific run that triggered it. Use run detail to inspect assertions, response snippets, and step timing before acknowledging or resolving.

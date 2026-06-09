@@ -43,16 +43,35 @@ type AlertMaintenanceWindow struct {
 }
 
 type Application struct {
-	ID               string           `json:"id"`
-	Name             string           `json:"name"`
-	CarID            string           `json:"car_id"`
-	Description      pgtype.Text      `json:"description"`
-	Owner            pgtype.Text      `json:"owner"`
-	Environment      pgtype.Text      `json:"environment"`
-	TagsJson         []byte           `json:"tags_json"`
-	CreatedAt        pgtype.Timestamp `json:"created_at"`
-	UpdatedAt        pgtype.Timestamp `json:"updated_at"`
-	AlertRoutingJson []byte           `json:"alert_routing_json"`
+	ID                  string           `json:"id"`
+	Name                string           `json:"name"`
+	CarID               string           `json:"car_id"`
+	Description         pgtype.Text      `json:"description"`
+	Owner               pgtype.Text      `json:"owner"`
+	Environment         pgtype.Text      `json:"environment"`
+	TagsJson            []byte           `json:"tags_json"`
+	CreatedAt           pgtype.Timestamp `json:"created_at"`
+	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
+	AlertRoutingJson    []byte           `json:"alert_routing_json"`
+	ElfAppID            pgtype.Text      `json:"elf_app_id"`
+	LogFieldMappingJson []byte           `json:"log_field_mapping_json"`
+	IndexPathTemplate   pgtype.Text      `json:"index_path_template"`
+}
+
+type ApplicationService struct {
+	ID                  string           `json:"id"`
+	ApplicationID       string           `json:"application_id"`
+	Name                string           `json:"name"`
+	LogServiceName      string           `json:"log_service_name"`
+	Squad               pgtype.Text      `json:"squad"`
+	Owner               pgtype.Text      `json:"owner"`
+	Environment         pgtype.Text      `json:"environment"`
+	ElfAppID            pgtype.Text      `json:"elf_app_id"`
+	LogFieldMappingJson []byte           `json:"log_field_mapping_json"`
+	IsActive            bool             `json:"is_active"`
+	CreatedAt           pgtype.Timestamp `json:"created_at"`
+	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
+	IndexPathTemplate   pgtype.Text      `json:"index_path_template"`
 }
 
 type CertificateProfile struct {
@@ -74,29 +93,37 @@ type CertificateProfile struct {
 }
 
 type DeploymentValidation struct {
-	ID                  string           `json:"id"`
-	ApplicationID       pgtype.Text      `json:"application_id"`
-	ApplicationName     string           `json:"application_name"`
-	CarID               string           `json:"car_id"`
-	Name                string           `json:"name"`
-	Version             pgtype.Text      `json:"version"`
-	BuildID             pgtype.Text      `json:"build_id"`
-	Environment         pgtype.Text      `json:"environment"`
-	Status              string           `json:"status"`
-	MonitorIdsJson      []byte           `json:"monitor_ids_json"`
-	ReportJson          []byte           `json:"report_json"`
-	PreStartedAt        pgtype.Timestamp `json:"pre_started_at"`
-	PreCompletedAt      pgtype.Timestamp `json:"pre_completed_at"`
-	PostStartedAt       pgtype.Timestamp `json:"post_started_at"`
-	PostCompletedAt     pgtype.Timestamp `json:"post_completed_at"`
-	CreatedAt           pgtype.Timestamp `json:"created_at"`
-	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
-	SampleCount         int32            `json:"sample_count"`
-	IntervalSeconds     int32            `json:"interval_seconds"`
-	AiReportJson        []byte           `json:"ai_report_json"`
-	DeploymentStartedAt pgtype.Timestamp `json:"deployment_started_at"`
-	BaselineWindowHours int32            `json:"baseline_window_hours"`
-	BaselineRunCount    int32            `json:"baseline_run_count"`
+	ID                   string           `json:"id"`
+	ApplicationID        pgtype.Text      `json:"application_id"`
+	ApplicationName      string           `json:"application_name"`
+	CarID                string           `json:"car_id"`
+	Name                 string           `json:"name"`
+	Version              pgtype.Text      `json:"version"`
+	BuildID              pgtype.Text      `json:"build_id"`
+	Environment          pgtype.Text      `json:"environment"`
+	Status               string           `json:"status"`
+	MonitorIdsJson       []byte           `json:"monitor_ids_json"`
+	ReportJson           []byte           `json:"report_json"`
+	PreStartedAt         pgtype.Timestamp `json:"pre_started_at"`
+	PreCompletedAt       pgtype.Timestamp `json:"pre_completed_at"`
+	PostStartedAt        pgtype.Timestamp `json:"post_started_at"`
+	PostCompletedAt      pgtype.Timestamp `json:"post_completed_at"`
+	CreatedAt            pgtype.Timestamp `json:"created_at"`
+	UpdatedAt            pgtype.Timestamp `json:"updated_at"`
+	SampleCount          int32            `json:"sample_count"`
+	IntervalSeconds      int32            `json:"interval_seconds"`
+	AiReportJson         []byte           `json:"ai_report_json"`
+	DeploymentStartedAt  pgtype.Timestamp `json:"deployment_started_at"`
+	BaselineWindowHours  int32            `json:"baseline_window_hours"`
+	BaselineRunCount     int32            `json:"baseline_run_count"`
+	ElfQueryIdsJson      []byte           `json:"elf_query_ids_json"`
+	AutoRunLogCheck      bool             `json:"auto_run_log_check"`
+	ElfResultsJson       []byte           `json:"elf_results_json"`
+	LogStartedAt         pgtype.Timestamp `json:"log_started_at"`
+	LogCompletedAt       pgtype.Timestamp `json:"log_completed_at"`
+	ServiceIdsJson       []byte           `json:"service_ids_json"`
+	ObservabilityProfile string           `json:"observability_profile"`
+	SignalPackIdsJson    []byte           `json:"signal_pack_ids_json"`
 }
 
 type DeploymentValidationRun struct {
@@ -105,6 +132,25 @@ type DeploymentValidationRun struct {
 	MonitorID    string           `json:"monitor_id"`
 	RunID        string           `json:"run_id"`
 	CreatedAt    pgtype.Timestamp `json:"created_at"`
+}
+
+type ElfQuery struct {
+	ID                   string           `json:"id"`
+	Name                 string           `json:"name"`
+	Description          pgtype.Text      `json:"description"`
+	ElfAppID             pgtype.Text      `json:"elf_app_id"`
+	IndexPathTemplate    pgtype.Text      `json:"index_path_template"`
+	SearchBodyJson       []byte           `json:"search_body_json"`
+	GateMode             string           `json:"gate_mode"`
+	PassCriteriaJson     []byte           `json:"pass_criteria_json"`
+	ApplicationID        pgtype.Text      `json:"application_id"`
+	TagsJson             []byte           `json:"tags_json"`
+	IsActive             bool             `json:"is_active"`
+	CreatedAt            pgtype.Timestamp `json:"created_at"`
+	UpdatedAt            pgtype.Timestamp `json:"updated_at"`
+	SignalType           string           `json:"signal_type"`
+	ComparisonConfigJson []byte           `json:"comparison_config_json"`
+	ServiceID            pgtype.Text      `json:"service_id"`
 }
 
 type Monitor struct {
@@ -133,6 +179,7 @@ type Monitor struct {
 	UpdatedAt           pgtype.Timestamp `json:"updated_at"`
 	PublishedVersion    int32            `json:"published_version"`
 	HasUnpublishedDraft bool             `json:"has_unpublished_draft"`
+	ServiceID           pgtype.Text      `json:"service_id"`
 }
 
 type MonitorDraft struct {

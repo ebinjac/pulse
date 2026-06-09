@@ -4,18 +4,26 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "predev": "npm run prebuild",
     "dev": "next dev",
+    "prebuild": "mkdir -p public && (cp ../../node_modules/fumadocs-ui/dist/style.css public/fumadocs-ui.css || cp node_modules/fumadocs-ui/dist/style.css public/fumadocs-ui.css)",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@heroui/react": "^3.1.0",
     "@heroui/styles": "^3.1.0",
     "@monaco-editor/react": "^4.7.0",
+    "@types/mdx": "^2.0.13",
     "@workspace/ui": "*",
+    "fumadocs-core": "^16.9.3",
+    "fumadocs-mdx": "^15.0.11",
+    "fumadocs-ui": "^16.9.3",
     "lucide-react": "^1.17.0",
     "next": "16.2.6",
     "next-themes": "^0.4.6",
@@ -29,9 +37,11 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.1.8",
     "@workspace/eslint-config": "*",
     "@workspace/typescript-config": "*",
     "eslint": "^9",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.8"
   }
 }

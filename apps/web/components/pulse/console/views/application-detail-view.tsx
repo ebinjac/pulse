@@ -68,13 +68,13 @@ import { Button, Card as HeroCard, Chip, Description, Input, Label, ListBox, Sel
 import { cn } from "@workspace/ui/lib/utils"
 
 import { applicationHealth, dateTimeLocalToISOString, toDateTimeLocalInput, validationStatusLabel } from "../utils/console-utils"
-import type { DeploymentValidationCreateInput } from "../types"
 import { AlertFeed } from "../components/alert-feed"
 import { DeploymentValidationPanel } from "../components/deployment-validation-panel"
 import { HistoryPatternAnalysis } from "../components/history-pattern-analysis"
 import { MonitorTable } from "../components/monitor-table"
 import { SchedulerStatusCard } from "../components/scheduler-status-card"
 import { ValidationResultPill } from "../components/validation-result-pill"
+import { ApplicationServicesPanel } from "../components/application-services-panel"
 
 
 export function ApplicationDetailView({
@@ -83,7 +83,6 @@ export function ApplicationDetailView({
   validations,
   applicationSlo,
   onRunApplication,
-  onCreateValidation,
   onRunNow,
   onToggleActive,
   onDeleteMonitor,
@@ -95,7 +94,6 @@ export function ApplicationDetailView({
   validations: DeploymentValidation[]
   applicationSlo?: import("@/lib/pulse-types").ApplicationSLO
   onRunApplication: (applicationId: string) => Promise<void>
-  onCreateValidation: (input: DeploymentValidationCreateInput) => Promise<DeploymentValidation | null>
   onRunNow: (monitorId: string) => Promise<any> | any
   onToggleActive: (monitorId: string, currentActive: boolean) => void
   onDeleteMonitor?: (monitorId: string) => void
@@ -176,8 +174,9 @@ export function ApplicationDetailView({
           application={application}
           monitors={monitors}
           validations={validations}
-          onCreateValidation={onCreateValidation}
         />
+
+        <ApplicationServicesPanel application={application} />
 
         <HeroCard>
           <HeroCard.Header className="border-b">

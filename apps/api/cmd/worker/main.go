@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/ensemble-pulse/pulse/apps/api/internal/alerting"
+	"github.com/ensemble-pulse/pulse/apps/api/internal/events"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/executor"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/jobqueue"
 	"github.com/ensemble-pulse/pulse/apps/api/internal/secretcrypto"
@@ -20,12 +21,14 @@ func main() {
 	defer cancel()
 
 	activeStore := newStore(ctx)
-	alertService := alerting.NewService(activeStore)
+	eventBus := events.NewBusFromEnv(ctx)
+	defer eventBus.Close()
+	alertService := alerting.NewService(activeStore, eventBus)
 	executor := executor.NewRealExecutor(activeStore, alertService)
 	runQueue := newRunQueue(ctx)
 	defer runQueue.Close()
 
-	bgWorker := worker.NewWorker(activeStore, executor, runQueue)
+	bgWorker := worker.NewWorker(activeStore, executor, runQueue, eventBus)
 	bgWorker.Start(ctx)
 
 	sigChan := make(chan os.Signal, 1)

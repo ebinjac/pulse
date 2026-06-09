@@ -10,7 +10,7 @@ import (
 
 func TestProcessRunCreatesOpenAlertAfterThreshold(t *testing.T) {
 	memoryStore := store.NewMemoryStore()
-	service := NewService(memoryStore)
+	service := NewService(memoryStore, nil)
 	monitor := testMonitor()
 	memoryStore.UpsertMonitor(monitor)
 	run := failedRun(monitor.ID, "run-1", time.Now().UTC())
@@ -41,7 +41,7 @@ func TestProcessRunCreatesOpenAlertAfterThreshold(t *testing.T) {
 
 func TestProcessRunSuppressesDeliveryDuringCooldown(t *testing.T) {
 	memoryStore := store.NewMemoryStore()
-	service := NewService(memoryStore)
+	service := NewService(memoryStore, nil)
 	monitor := testMonitor()
 	monitor.AlertPolicy.CooldownMinutes = 30
 	memoryStore.UpsertMonitor(monitor)
@@ -77,7 +77,7 @@ func TestProcessRunSuppressesDeliveryDuringCooldown(t *testing.T) {
 
 func TestProcessRunResolvesOpenAlertOnSuccess(t *testing.T) {
 	memoryStore := store.NewMemoryStore()
-	service := NewService(memoryStore)
+	service := NewService(memoryStore, nil)
 	monitor := testMonitor()
 	memoryStore.UpsertMonitor(monitor)
 	memoryStore.SaveAlert(domain.AlertEvent{

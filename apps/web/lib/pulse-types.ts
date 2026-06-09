@@ -288,10 +288,56 @@ export interface MonitorConfigChange {
   newValue: unknown
 }
 
+export interface LogFieldMapping {
+  timestamp?: string
+  level?: string
+  service?: string
+  endpoint?: string
+  statusCode?: string
+  responseTimeMs?: string
+  exceptionType?: string
+  downstreamService?: string
+  traceId?: string
+  environment?: string
+  message?: string
+  tags?: string
+}
+
+export interface ApplicationService {
+  id: string
+  applicationId: string
+  name: string
+  logServiceName: string
+  squad?: string
+  owner?: string
+  environment?: string
+  elfAppId?: string
+  indexPathTemplate?: string
+  logFieldMapping?: LogFieldMapping
+  isActive: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type ApplicationServiceInput = {
+  name: string
+  logServiceName: string
+  squad?: string
+  owner?: string
+  environment?: string
+  elfAppId?: string
+  indexPathTemplate?: string
+  logFieldMapping?: LogFieldMapping
+  isActive?: boolean
+}
+
 export interface Application {
   id: string
   name: string
   carId: string
+  elfAppId?: string
+  indexPathTemplate?: string
+  logFieldMapping?: LogFieldMapping
   description?: string
   owner?: string
   environment?: string
@@ -303,6 +349,7 @@ export interface Application {
 
 export interface ApplicationRunSummary {
   applicationId: string
+  batchId?: string
   queued: number
   skipped: number
   monitorIds: string[]
@@ -313,6 +360,7 @@ export type DeploymentValidationStatus =
   | "pre_running"
   | "pre_complete"
   | "post_running"
+  | "log_running"
   | "report_ready"
   | "incomplete"
 
@@ -328,6 +376,14 @@ export interface DeploymentValidationSummary {
   postP95LatencyMs: number
   p95LatencyDeltaMs: number
   p95LatencyDeltaPct: number
+  preP99LatencyMs?: number
+  postP99LatencyMs?: number
+  preMaxLatencyMs?: number
+  postMaxLatencyMs?: number
+  preMeanLatencyMs?: number
+  postMeanLatencyMs?: number
+  preFailureCount?: number
+  postFailureCount?: number
   newFailures: number
   resolvedFailures: number
 }
@@ -349,13 +405,363 @@ export interface MonitorValidationComparison {
   slowestTimingDeltaMs?: number
 }
 
+export interface ElfFacetBucket {
+  key: string
+  count: number
+}
+
+export interface ElfSignalFacets {
+  topServices?: ElfFacetBucket[]
+  topExceptions?: ElfFacetBucket[]
+  topEndpoints?: ElfFacetBucket[]
+  topDownstreams?: ElfFacetBucket[]
+  newTerms?: ElfFacetBucket[]
+}
+
+export interface ElfStructuredSampleHit {
+  service?: string
+  endpoint?: string
+  exceptionType?: string
+  traceId?: string
+  level?: string
+  statusCode?: string
+  message?: string
+}
+
+export interface ElfQueryComparison {
+  queryId: string
+  queryName: string
+  gateMode: "blocking" | "advisory" | string
+  serviceId?: string
+  serviceName?: string
+  signalType?: string
+  result: "pass" | "warning" | "fail" | string
+  hitCount: number
+  baselineValue?: number
+  postValue?: number
+  deltaPct?: number
+  reason?: string
+  sampleHits?: string[]
+  structuredSamples?: ElfStructuredSampleHit[]
+  facets?: ElfSignalFacets
+  runMeta?: ElfQueryRunMeta
+}
+
+export interface ElfObservabilityFindings {
+  byService?: Record<string, ElfQueryComparison[]>
+}
+
+export interface ElfReportSummary {
+  blockingFails: number
+  advisoryWarnings: number
+}
+
 export interface DeploymentValidationReport {
   status: "pass" | "warning" | "fail" | "incomplete" | string
   summary: DeploymentValidationSummary
   regressions: string[]
   monitorComparisons: MonitorValidationComparison[]
+  elfComparisons?: ElfQueryComparison[]
+  elfObservability?: ElfObservabilityFindings
+  elfSummary?: ElfReportSummary
   generatedAt?: string
   incompleteReason?: string
+}
+
+export interface ElfProxySettings {
+  baseUrl: string
+  indexPathTemplate: string
+  pretty: boolean
+  timeoutSeconds: number
+  bearerTokenConfigured?: boolean
+}
+
+export interface ElfProxySettingsInput {
+  baseUrl?: string
+  indexPathTemplate?: string
+  pretty?: boolean
+  timeoutSeconds?: number
+  bearerToken?: string
+}
+
+export interface ElfPassCriteria {
+  type: "max_hits" | "min_hits" | "aggregation" | "delta_pct" | "delta_abs" | "new_terms" | "percentile_regression" | string
+  threshold: number
+  operator?: string
+  path?: string
+  name?: string
+}
+
+export interface ElfComparisonConfig {
+  baselineMetric?: string
+  postMetric?: string
+  deltaPctMax?: number
+  deltaAbsMax?: number
+  multiplierMax?: number
+  minNewTermHits?: number
+}
+
+export interface ElfProbeConfig {
+  timeField?: string
+  defaultGte?: string
+  defaultLte?: string
+  relativePreset?: string
+}
+
+export interface ElfFieldDescriptor {
+  path: string
+  label?: string
+  valueType?: "string" | "number" | "boolean" | "date" | "unknown" | string
+  sampleValues?: string[]
+  suggestedRole?: string
+  isTimeField?: boolean
+  source?: "discovered" | "custom" | "inherited" | string
+}
+
+export interface ElfFieldSchema {
+  timeField?: string
+  fields?: ElfFieldDescriptor[]
+  discoveredAt?: string
+}
+
+export interface ElfCheckRule {
+  id?: string
+  field: string
+  operator: string
+  value?: string | number | boolean
+}
+
+export interface ElfCheckConfig {
+  mode?: "expression" | "template" | "raw" | string
+  logic?: "all" | "any" | string
+  rules?: ElfCheckRule[]
+  passWhen?: "no_matching_hits" | "has_matching_hits" | "hit_count_lte" | "hit_count_gte" | "hit_count_gt" | "hit_count_eq" | "hit_count_lt" | string
+  passThreshold?: number
+  facetField?: string
+  pattern?: string
+  baselineOffsetMins?: number
+  deltaPctMax?: number
+  percentile?: number
+  threshold?: number
+  maxHits?: number
+}
+
+export interface ElfDetectedRole {
+  role: string
+  path: string
+  label?: string
+  valueType?: string
+  confidence?: string
+  samples?: string[]
+}
+
+export interface ElfSuggestedCheck {
+  id: string
+  label: string
+  description: string
+  gateMode: "blocking" | "advisory" | string
+  checkKind: string
+  checkConfig: ElfCheckConfig
+  passCriteria: ElfPassCriteria
+  matchCount: number
+  severity?: string
+  deploymentFocus?: string
+  explanation?: string
+  source?: "deterministic" | "ai" | string
+}
+
+export interface ElfProbeSummary {
+  hitCount?: number
+  gte?: string
+  lte?: string
+  resolvedIndex?: string
+  durationMs?: number
+  truncated?: boolean
+  errorMessage?: string
+}
+
+export interface ElfTimeWindow {
+  gte?: string
+  lte?: string
+  field?: string
+}
+
+export interface ElfQueryRunMeta {
+  checkKind?: string
+  postWindow?: ElfTimeWindow
+  baselineWindow?: ElfTimeWindow
+  curl?: string
+  fieldMappingUsed?: LogFieldMapping
+  fieldSchemaUsed?: ElfFieldSchema
+  checkConfig?: ElfCheckConfig
+  passCriteria?: ElfPassCriteria
+  resolvedIndexPattern?: string
+}
+
+export interface ElfInferredField {
+  path: string
+  label?: string
+  valueType?: string
+  sampleValues?: string[]
+  suggestedRole?: string
+  isTimeField?: boolean
+  source?: string
+}
+
+export interface ElfQueryProbeResult {
+  searchUrl?: string
+  curl?: string
+  durationMs?: number
+  statusCode?: number
+  rawResponse?: Record<string, unknown> | unknown
+  truncated?: boolean
+  hitCount?: number
+  aggregations?: Record<string, unknown>
+  sampleHits?: Record<string, unknown>[]
+  resolvedIndexPattern?: string
+  resolvedFieldMapping?: LogFieldMapping
+  fieldSchema?: ElfFieldSchema
+  inferredFields?: ElfInferredField[]
+  detectedRoles?: ElfDetectedRole[]
+  suggestedChecks?: ElfSuggestedCheck[]
+  injectedTimeRange?: ElfTimeWindow
+  errorMessage?: string
+}
+
+export interface ElfQuery {
+  id: string
+  name: string
+  description?: string
+  elfAppId?: string
+  indexPathTemplate?: string
+  searchBody: Record<string, unknown> | string
+  gateMode: "blocking" | "advisory"
+  passCriteria: ElfPassCriteria
+  comparisonConfig?: ElfComparisonConfig
+  signalType?: string
+  applicationId?: string
+  serviceId?: string
+  probeConfig?: ElfProbeConfig
+  fieldMapping?: LogFieldMapping
+  fieldSchema?: ElfFieldSchema
+  checkKind?: "raw" | "expression" | "new_terms" | "delta_pct" | "threshold" | "hit_count" | "message_match" | string
+  checkConfig?: ElfCheckConfig
+  generatedSearchBody?: Record<string, unknown> | string
+  lastProbeAt?: string
+  lastProbeSummary?: ElfProbeSummary
+  tags?: string[]
+  isActive: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface ElfQueryRunResult {
+  queryId: string
+  queryName?: string
+  gateMode?: string
+  elfAppId?: string
+  serviceId?: string
+  serviceName?: string
+  signalType?: string
+  resolvedUrl?: string
+  result: string
+  hitCount: number
+  baselineValue?: number
+  postValue?: number
+  deltaPct?: number
+  reason?: string
+  sampleHits?: string[]
+  structuredSamples?: ElfStructuredSampleHit[]
+  facets?: ElfSignalFacets
+  durationMs: number
+  errorMessage?: string
+  runMeta?: ElfQueryRunMeta
+  ranAt?: string
+}
+
+export type ElfQueryInput = {
+  name: string
+  description?: string
+  elfAppId?: string
+  indexPathTemplate?: string
+  searchBody?: Record<string, unknown>
+  gateMode: "blocking" | "advisory"
+  passCriteria: ElfPassCriteria
+  comparisonConfig?: ElfComparisonConfig
+  applicationId?: string
+  serviceId?: string
+  probeConfig?: ElfProbeConfig
+  fieldMapping?: LogFieldMapping
+  fieldSchema?: ElfFieldSchema
+  checkKind?: string
+  checkConfig?: ElfCheckConfig
+  generatedSearchBody?: Record<string, unknown>
+  tags?: string[]
+  isActive?: boolean
+}
+
+export type ElfQueryProbeInput = {
+  applicationId?: string
+  serviceId?: string
+  elfAppId?: string
+  timeRange?: ElfTimeWindow
+  searchBodyOverride?: Record<string, unknown>
+  maxResponseBytes?: number
+  saveProbeSummary?: boolean
+}
+
+export type ElfQueryValidateCheckInput = {
+  applicationId?: string
+  serviceId?: string
+  elfAppId?: string
+  timeRange?: ElfTimeWindow
+  checkKind?: string
+  checkConfig?: ElfCheckConfig
+  passCriteria?: ElfPassCriteria
+  fieldSchema?: ElfFieldSchema
+  fieldMapping?: LogFieldMapping
+  searchBodyOverride?: Record<string, unknown>
+  maxResponseBytes?: number
+}
+
+export interface ElfQueryValidateCheckResult {
+  ok: boolean
+  compiledSearchBody?: Record<string, unknown>
+  probe?: ElfQueryProbeResult
+  criteriaResult?: string
+  gateResult?: string
+  reason?: string
+  passCriteria?: ElfPassCriteria
+}
+
+export interface ElfCopilotSummary {
+  summary?: string
+  topPatterns?: string[]
+  riskyServices?: string[]
+  recommendedFields?: string[]
+  warnings?: string[]
+}
+
+export interface ElfCopilotQueryRepair {
+  likelyCause?: string
+  correctedSearchBody?: Record<string, unknown>
+  explanation?: string
+  warnings?: string[]
+}
+
+export interface ElfCopilotFieldMapping {
+  role: string
+  path: string
+  confidence?: "high" | "medium" | "low" | string
+  reason?: string
+}
+
+export interface ElfCopilotResultExplanation {
+  summary?: string
+  recommendation?: string
+  gateModeRecommendation?: string
+  thresholdRecommendation?: string
+  nextActions?: string[]
 }
 
 export interface DeploymentValidationAIReport {
@@ -391,6 +797,14 @@ export interface DeploymentValidation {
   preCompletedAt?: string
   postStartedAt?: string
   postCompletedAt?: string
+  elfQueryIds?: string[]
+  autoRunLogCheck?: boolean
+  serviceIds?: string[]
+  observabilityProfile?: "standard" | "strict" | "custom" | string
+  signalPackIds?: string[]
+  elfResults?: ElfQueryRunResult[]
+  logStartedAt?: string
+  logCompletedAt?: string
 }
 
 export interface StepRun {

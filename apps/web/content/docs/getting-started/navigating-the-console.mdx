@@ -1,0 +1,42 @@
+---
+title: Navigating the console
+description: A tour of the Rythm sidebar and main work areas.
+---
+
+The Rythm console is organized around the left sidebar. Each area maps to a common operational task.
+
+## Sidebar overview
+
+| Link | Purpose |
+|------|---------|
+| **Dashboard** | Snapshot of monitor health, recent failures, and application status |
+| **Applications** | Create and manage logical groupings of monitors |
+| **Deployments** | Create and track deployment validation workflows |
+| **Monitors** | Inventory of checks; open the builder to create or edit |
+| **Alerts** | Open and historical alert events |
+| **Secrets** | Encrypted values referenced by monitor steps |
+| **ELF Queries** | Reusable OpenSearch query definitions for log checks |
+| **Settings** | Notifications, certificate profiles, ELF proxy, and retention |
+| **Documentation** | This help center (you are here) |
+
+## Dashboard
+
+Start here for a high-level view. The dashboard surfaces failing monitors, recent runs, and application-level signals so you can spot regressions without opening each monitor individually.
+
+## Monitors and the builder
+
+**Monitors** lists every check in your scope. Use **Create** to open the monitor builder — a workbench for steps, schedules, variables, assertions, and alert policy.
+
+Published monitors run on their schedule. Unpublished **drafts** let you iterate safely; see [Testing and publishing monitors](/docs/guides/testing-and-publishing-monitors).
+
+## Deployments
+
+The **Deployments** area is for release gates. You link monitors to a validation, run pre-deploy sampling, deploy your service, then run post-deploy sampling (and optional ELF log checks). Results appear in a validation report.
+
+## Settings
+
+Configure how Rythm notifies your team (Slack, email), upload mTLS certificate profiles, and set ELF proxy defaults used by log checks. These are console-managed settings — you do not need shell access to use them.
+
+<Callout type="info">
+  Press **D** anywhere in the console (when not typing in a field) to toggle light and dark mode.
+</Callout>

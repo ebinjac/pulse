@@ -25,6 +25,7 @@ import {
   TextField,
 } from "@heroui/react"
 import { cn } from "@workspace/ui/lib/utils"
+import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
 import type { Application, Monitor, MonitorStep } from "@/lib/pulse-types"
 import type {
   ExportFormat,
@@ -181,7 +182,9 @@ export function MonitorImportExportDialog({
       setPreviewMonitors(payload.monitors ?? [])
       setWarnings(payload.warnings ?? [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      const message = err instanceof Error ? err.message : "Import failed"
+      setError(message)
+      notifyPulseToast("danger", "Postman import failed", message)
     } finally {
       setLoading(false)
     }
@@ -215,7 +218,9 @@ export function MonitorImportExportDialog({
       setPreviewMonitors(payload.monitors ?? [])
       setWarnings(payload.warnings ?? [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      const message = err instanceof Error ? err.message : "Import failed"
+      setError(message)
+      notifyPulseToast("danger", "OpenAPI import failed", message)
     } finally {
       setLoading(false)
     }
@@ -239,7 +244,9 @@ export function MonitorImportExportDialog({
       if (!response.ok) throw new Error(payload.error ?? "Import failed")
       setPreviewMonitors(payload.monitors ?? [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      const message = err instanceof Error ? err.message : "Import failed"
+      setError(message)
+      notifyPulseToast("danger", "Bundle import failed", message)
     } finally {
       setLoading(false)
     }
@@ -267,12 +274,18 @@ export function MonitorImportExportDialog({
       }
       onSaved?.()
       onOpenChange(false)
+      notifyPulseToast(
+        "success",
+        saved === 1 ? "Monitor imported" : "Monitors imported",
+        `${saved} monitor${saved === 1 ? "" : "s"} added to the inventory.`,
+      )
     } catch (err) {
-      setError(
+      const message =
         err instanceof Error ?
           `${err.message}${saved ? ` (${saved} monitor(s) saved before failure)` : ""}`
         : "Save failed"
-      )
+      setError(message)
+      notifyPulseToast("danger", "Import save failed", message)
     } finally {
       setLoading(false)
     }
@@ -292,6 +305,7 @@ export function MonitorImportExportDialog({
         })
       }
       onOpenChange(false)
+      notifyPulseToast("success", "Import applied", "Monitor configuration loaded into the builder.")
       return
     }
 
@@ -300,7 +314,9 @@ export function MonitorImportExportDialog({
 
   async function downloadExport() {
     if (!exportTargets.length) {
-      setError("No monitors available to export.")
+      const message = "No monitors available to export."
+      setError(message)
+      notifyPulseToast("warning", "Nothing to export", message)
       return
     }
     setLoading(true)
@@ -329,8 +345,15 @@ export function MonitorImportExportDialog({
       anchor.download = filename
       anchor.click()
       URL.revokeObjectURL(url)
+      notifyPulseToast(
+        "success",
+        "Export downloaded",
+        `${exportTargets.length} monitor${exportTargets.length === 1 ? "" : "s"} exported as ${filename}.`,
+      )
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Export failed")
+      const message = err instanceof Error ? err.message : "Export failed"
+      setError(message)
+      notifyPulseToast("danger", "Export failed", message)
     } finally {
       setLoading(false)
     }

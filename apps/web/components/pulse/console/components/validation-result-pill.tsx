@@ -3,11 +3,20 @@
 import { AlertTriangle, CheckCircle2, Timer } from "lucide-react"
 import { cn } from "@workspace/ui/lib/utils"
 
+function resultLabel(status: string) {
+  const normalized = (status || "incomplete").toLowerCase()
+  if (normalized === "pass") return "Passed"
+  if (normalized === "fail") return "Failed"
+  if (normalized === "warning") return "Warning"
+  if (normalized === "incomplete") return "Incomplete"
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
 export function ValidationResultPill({ status }: { status: string }) {
   const normalized = (status || "incomplete").toLowerCase()
   return (
     <span className={cn(
-      "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-bold capitalize",
+      "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-bold",
       normalized === "pass"
         ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-300"
         : normalized === "fail"
@@ -17,7 +26,7 @@ export function ValidationResultPill({ status }: { status: string }) {
             : "border-border bg-muted/40 text-muted-foreground"
     )}>
       {normalized === "pass" ? <CheckCircle2 className="size-3" /> : normalized === "fail" ? <AlertTriangle className="size-3" /> : <Timer className="size-3" />}
-      {normalized}
+      {resultLabel(status)}
     </span>
   )
 }

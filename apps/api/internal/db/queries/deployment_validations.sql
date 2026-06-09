@@ -21,6 +21,14 @@ SELECT
   pre_completed_at,
   post_started_at,
   post_completed_at,
+  COALESCE(elf_query_ids_json, '[]'::jsonb) AS elf_query_ids_json,
+  COALESCE(auto_run_log_check, FALSE) AS auto_run_log_check,
+  COALESCE(service_ids_json, '[]'::jsonb) AS service_ids_json,
+  COALESCE(observability_profile, 'standard')::text AS observability_profile,
+  COALESCE(signal_pack_ids_json, '[]'::jsonb) AS signal_pack_ids_json,
+  COALESCE(elf_results_json, '[]'::jsonb) AS elf_results_json,
+  log_started_at,
+  log_completed_at,
   created_at,
   updated_at
 FROM deployment_validations
@@ -50,6 +58,14 @@ SELECT
   pre_completed_at,
   post_started_at,
   post_completed_at,
+  COALESCE(elf_query_ids_json, '[]'::jsonb) AS elf_query_ids_json,
+  COALESCE(auto_run_log_check, FALSE) AS auto_run_log_check,
+  COALESCE(service_ids_json, '[]'::jsonb) AS service_ids_json,
+  COALESCE(observability_profile, 'standard')::text AS observability_profile,
+  COALESCE(signal_pack_ids_json, '[]'::jsonb) AS signal_pack_ids_json,
+  COALESCE(elf_results_json, '[]'::jsonb) AS elf_results_json,
+  log_started_at,
+  log_completed_at,
   created_at,
   updated_at
 FROM deployment_validations
@@ -78,10 +94,18 @@ INSERT INTO deployment_validations (
   pre_completed_at,
   post_started_at,
   post_completed_at,
+  elf_query_ids_json,
+  auto_run_log_check,
+  service_ids_json,
+  observability_profile,
+  signal_pack_ids_json,
+  elf_results_json,
+  log_started_at,
+  log_completed_at,
   created_at,
   updated_at
 )
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
 ON CONFLICT (id) DO UPDATE SET
   application_id = EXCLUDED.application_id,
   application_name = EXCLUDED.application_name,
@@ -103,7 +127,19 @@ ON CONFLICT (id) DO UPDATE SET
   pre_completed_at = EXCLUDED.pre_completed_at,
   post_started_at = EXCLUDED.post_started_at,
   post_completed_at = EXCLUDED.post_completed_at,
+  elf_query_ids_json = EXCLUDED.elf_query_ids_json,
+  auto_run_log_check = EXCLUDED.auto_run_log_check,
+  service_ids_json = EXCLUDED.service_ids_json,
+  observability_profile = EXCLUDED.observability_profile,
+  signal_pack_ids_json = EXCLUDED.signal_pack_ids_json,
+  elf_results_json = EXCLUDED.elf_results_json,
+  log_started_at = EXCLUDED.log_started_at,
+  log_completed_at = EXCLUDED.log_completed_at,
   updated_at = EXCLUDED.updated_at;
+
+-- name: DeleteDeploymentValidation :execrows
+DELETE FROM deployment_validations
+WHERE id = $1;
 
 -- name: LinkDeploymentValidationRun :exec
 INSERT INTO deployment_validation_runs (

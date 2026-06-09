@@ -1,0 +1,12 @@
+{
+  "title": "Concepts",
+  "pages": [
+    "glossary",
+    "applications",
+    "monitors-and-runs",
+    "alerts",
+    "deployment-validation",
+    "elf-log-checks",
+    "secrets-and-certificates"
+  ]
+}

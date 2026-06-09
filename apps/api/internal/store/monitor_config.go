@@ -90,3 +90,45 @@ func unmarshalMonitorConfig(monitorID string, payload []byte, published domain.M
 
 	return storeDefaults(NormalizeMonitor(monitor)), nil
 }
+
+// NormalizeMonitor applies shared defaults used by both MemoryStore and PostgresStore.
+func NormalizeMonitor(monitor domain.Monitor) domain.Monitor {
+	if monitor.ScheduleCron == "" {
+		monitor.ScheduleCron = monitor.Cron
+	}
+	if monitor.Cron == "" {
+		monitor.Cron = monitor.ScheduleCron
+	}
+	if monitor.ScheduleLabel == "" && monitor.Cron != "" {
+		monitor.ScheduleLabel = "Custom cron"
+	}
+	if monitor.ScheduleMode == "" && monitor.Cron != "" {
+		monitor.ScheduleMode = "custom-cron"
+	}
+	if monitor.Timezone == "" {
+		monitor.Timezone = "UTC"
+	}
+	if monitor.TimeoutMS == 0 {
+		monitor.TimeoutMS = 30000
+	}
+	if monitor.FailureThreshold == 0 {
+		monitor.FailureThreshold = 3
+	}
+	if monitor.ResponseBodyLimitKB == 0 {
+		monitor.ResponseBodyLimitKB = 32
+	}
+	if monitor.Status == "" {
+		monitor.Status = domain.StatusSkipped
+	}
+	if monitor.Variables == nil {
+		monitor.Variables = map[string]string{}
+	}
+	if monitor.Steps == nil {
+		monitor.Steps = []domain.MonitorStep{}
+	}
+	if monitor.AlertPolicy.Threshold == 0 {
+		monitor.AlertPolicy.Threshold = monitor.FailureThreshold
+	}
+
+	return monitor
+}

@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pulse-api
+  labels:
+    app: pulse-api
+    app.kubernetes.io/part-of: pulse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pulse-api
+  template:
+    metadata:
+      labels:
+        app: pulse-api
+    spec:
+      containers:
+        - name: api
+          image: pulse-api:latest
+          imagePullPolicy: Always
+          command: ["/app/pulse-api"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PULSE_API_ADDR
+              value: ":8080"
+            - name: PULSE_SCHEDULER_ENABLED
+              value: "true"
+            - name: PULSE_WORKER_ENABLED
+              value: "false"
+            - name: PULSE_RETENTION_PURGE_ENABLED
+              value: "true"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pulse-backend
+                  key: DATABASE_URL
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pulse-backend
+                  key: REDIS_URL
+            - name: PULSE_SECRET_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pulse-backend
+                  key: PULSE_SECRET_ENCRYPTION_KEY
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulse-api
+  labels:
+    app: pulse-api
+    app.kubernetes.io/part-of: pulse
+spec:
+  selector:
+    app: pulse-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

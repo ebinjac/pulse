@@ -1,0 +1,44 @@
+---
+title: Running deployment validation
+description: Create a validation, run pre/post sampling, and read the report.
+---
+
+## Create a validation
+
+1. Go to **Deployments** → **Create**.
+2. Name the validation and link the **application**.
+3. Select **monitors** to sample (representative smoke and critical-path checks).
+4. Optionally attach **ELF queries** for post-deploy log checks.
+5. Enable **auto-run log check** if log queries should run automatically after post-deploy sampling completes.
+
+## Run pre-deploy phase
+
+1. Open the validation detail page.
+2. Choose **Run pre-deploy** (or equivalent pre-phase action).
+3. Wait for linked monitors to complete.
+4. Confirm pre-phase results look healthy before deploying your service.
+
+## Deploy your application
+
+Perform the actual release using your team’s deployment tooling. Rythm does not deploy code — it waits for you to mark deploy complete or trigger the post phase.
+
+## Run post-deploy phase
+
+1. After deploy, run **post-deploy** sampling from the validation page.
+2. Rythm compares results to pre-phase and baseline history.
+3. If ELF queries are attached, run or review **log check** results.
+
+## Read the report
+
+The validation **report** summarizes:
+
+- Pre vs post monitor outcomes
+- Baseline comparisons (latency, failure rate)
+- ELF query results with pass/fail per query
+- Overall gate result (pass, fail, or advisory warnings)
+
+<Callout type="warn">
+  **Blocking** ELF gates fail the validation when pass criteria are not met. **Advisory** gates surface warnings without failing the overall validation.
+</Callout>
+
+See [Deployment validation](/docs/concepts/deployment-validation) and [ELF log checks](/docs/concepts/elf-log-checks).

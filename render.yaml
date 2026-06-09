@@ -1,0 +1,43 @@
+# Render blueprint: split API + worker from apps/api/Dockerfile
+# https://render.com/docs/blueprint-spec
+#
+# Set sync: false on secrets in the Render dashboard after first deploy.
+# Web deploys separately on Vercel — see docs/deploy/free-tier-vercel-render.md
+
+envVarGroups:
+  - name: pulse-backend
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: PULSE_SECRET_ENCRYPTION_KEY
+        sync: false
+
+services:
+  - type: web
+    name: pulse-api
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    dockerCommand: /app/pulse-api
+    healthCheckPath: /healthz
+    envVars:
+      - fromGroup: pulse-backend
+      - key: PULSE_API_ADDR
+        value: ":8080"
+      - key: PULSE_SCHEDULER_ENABLED
+        value: "true"
+      - key: PULSE_WORKER_ENABLED
+        value: "false"
+      - key: PULSE_RETENTION_PURGE_ENABLED
+        value: "true"
+
+  - type: worker
+    name: pulse-worker
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    dockerCommand: /app/pulse-worker
+    envVars:
+      - fromGroup: pulse-backend

@@ -19,6 +19,7 @@ type AppShellContextValue = {
   mobileOpen: boolean
   setMobileOpen: (open: boolean) => void
   desktopOpen: boolean
+  setDesktopOpen: (open: boolean) => void
   toggleSidebar: () => void
 }
 
@@ -69,6 +70,7 @@ export function AppShellProvider({
       mobileOpen,
       setMobileOpen,
       desktopOpen,
+      setDesktopOpen,
       toggleSidebar,
     }),
     [isMobile, mobileOpen, desktopOpen, toggleSidebar]

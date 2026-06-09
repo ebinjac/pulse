@@ -1,0 +1,25 @@
+/* Scoped fixes when Fumadocs styles are active (loaded only on /docs routes). */
+body.rythm-docs-active {
+  background-color: var(--color-fd-background) !important;
+  color: var(--color-fd-foreground) !important;
+}
+
+body.rythm-docs-active #nd-docs-layout,
+body.rythm-docs-active #nd-page {
+  background-color: var(--color-fd-background);
+  color: var(--color-fd-foreground);
+}
+
+body.rythm-docs-active .prose {
+  color: var(--color-fd-foreground);
+}
+
+body[data-rythm-route="console"] {
+  background-color: var(--background) !important;
+  color: var(--foreground) !important;
+}
+
+/* Fumadocs search footer can leak onto console routes when its stylesheet is absent. */
+body[data-rythm-route="console"] .bg-fd-secondary\/50.p-3.empty\:hidden {
+  display: none !important;
+}

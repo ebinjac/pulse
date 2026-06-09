@@ -115,21 +115,56 @@ type MonitorDetail struct {
 	HasUnpublishedDraft bool     `json:"hasUnpublishedDraft"`
 }
 
+type LogFieldMapping struct {
+	Timestamp         string `json:"timestamp,omitempty"`
+	Level             string `json:"level,omitempty"`
+	Service           string `json:"service,omitempty"`
+	Endpoint          string `json:"endpoint,omitempty"`
+	StatusCode        string `json:"statusCode,omitempty"`
+	ResponseTimeMs    string `json:"responseTimeMs,omitempty"`
+	ExceptionType     string `json:"exceptionType,omitempty"`
+	DownstreamService string `json:"downstreamService,omitempty"`
+	TraceID           string `json:"traceId,omitempty"`
+	Environment       string `json:"environment,omitempty"`
+	Message           string `json:"message,omitempty"`
+	Tags              string `json:"tags,omitempty"`
+}
+
+type ApplicationService struct {
+	ID                string          `json:"id"`
+	ApplicationID     string          `json:"applicationId"`
+	Name              string          `json:"name"`
+	LogServiceName    string          `json:"logServiceName"`
+	Squad             string          `json:"squad,omitempty"`
+	Owner             string          `json:"owner,omitempty"`
+	Environment       string          `json:"environment,omitempty"`
+	ElfAppID          string          `json:"elfAppId,omitempty"`
+	IndexPathTemplate string          `json:"indexPathTemplate,omitempty"`
+	LogFieldMapping   LogFieldMapping `json:"logFieldMapping,omitempty"`
+	IsActive          bool            `json:"isActive"`
+	CreatedAt         time.Time       `json:"createdAt"`
+	UpdatedAt         time.Time       `json:"updatedAt"`
+}
+
 type Application struct {
-	ID           string       `json:"id"`
-	Name         string       `json:"name"`
-	CarID        string       `json:"carId"`
-	Description  string       `json:"description,omitempty"`
-	Owner        string       `json:"owner,omitempty"`
-	Environment  string       `json:"environment,omitempty"`
-	Tags         []string     `json:"tags,omitempty"`
-	AlertRouting AlertRouting `json:"alertRouting,omitempty"`
-	CreatedAt    time.Time    `json:"createdAt"`
-	UpdatedAt    time.Time    `json:"updatedAt"`
+	ID                string          `json:"id"`
+	Name              string          `json:"name"`
+	CarID             string          `json:"carId"`
+	ElfAppID          string          `json:"elfAppId,omitempty"`
+	IndexPathTemplate string          `json:"indexPathTemplate,omitempty"`
+	LogFieldMapping   LogFieldMapping `json:"logFieldMapping,omitempty"`
+	Description       string          `json:"description,omitempty"`
+	Owner             string          `json:"owner,omitempty"`
+	Environment       string          `json:"environment,omitempty"`
+	Tags              []string        `json:"tags,omitempty"`
+	AlertRouting      AlertRouting    `json:"alertRouting,omitempty"`
+	CreatedAt         time.Time       `json:"createdAt"`
+	UpdatedAt         time.Time       `json:"updatedAt"`
 }
 
 type ApplicationRunSummary struct {
 	ApplicationID string   `json:"applicationId"`
+	BatchID       string   `json:"batchId,omitempty"`
 	Queued        int      `json:"queued"`
 	Skipped       int      `json:"skipped"`
 	MonitorIDs    []string `json:"monitorIds"`
@@ -142,6 +177,7 @@ const (
 	DeploymentValidationPreRunning  DeploymentValidationStatus = "pre_running"
 	DeploymentValidationPreComplete DeploymentValidationStatus = "pre_complete"
 	DeploymentValidationPostRunning DeploymentValidationStatus = "post_running"
+	DeploymentValidationLogRunning  DeploymentValidationStatus = "log_running"
 	DeploymentValidationReportReady DeploymentValidationStatus = "report_ready"
 	DeploymentValidationIncomplete  DeploymentValidationStatus = "incomplete"
 )
@@ -154,29 +190,230 @@ const (
 )
 
 type DeploymentValidation struct {
-	ID                  string                       `json:"id"`
-	ApplicationID       string                       `json:"applicationId"`
-	ApplicationName     string                       `json:"applicationName"`
-	CarID               string                       `json:"carId"`
-	Name                string                       `json:"name"`
-	Version             string                       `json:"version,omitempty"`
-	BuildID             string                       `json:"buildId,omitempty"`
-	Environment         string                       `json:"environment,omitempty"`
-	Status              DeploymentValidationStatus   `json:"status"`
-	MonitorIDs          []string                     `json:"monitorIds"`
-	Report              DeploymentValidationReport   `json:"report,omitempty"`
-	AIReport            DeploymentValidationAIReport `json:"aiReport,omitempty"`
-	SampleCount         int                          `json:"sampleCount"`
-	IntervalSeconds     int                          `json:"intervalSeconds"`
-	DeploymentStartedAt *time.Time                   `json:"deploymentStartedAt,omitempty"`
-	BaselineWindowHours int                          `json:"baselineWindowHours"`
-	BaselineRunCount    int                          `json:"baselineRunCount"`
-	CreatedAt           time.Time                    `json:"createdAt"`
-	UpdatedAt           time.Time                    `json:"updatedAt"`
-	PreStartedAt        *time.Time                   `json:"preStartedAt,omitempty"`
-	PreCompletedAt      *time.Time                   `json:"preCompletedAt,omitempty"`
-	PostStartedAt       *time.Time                   `json:"postStartedAt,omitempty"`
-	PostCompletedAt     *time.Time                   `json:"postCompletedAt,omitempty"`
+	ID                   string                       `json:"id"`
+	ApplicationID        string                       `json:"applicationId"`
+	ApplicationName      string                       `json:"applicationName"`
+	CarID                string                       `json:"carId"`
+	Name                 string                       `json:"name"`
+	Version              string                       `json:"version,omitempty"`
+	BuildID              string                       `json:"buildId,omitempty"`
+	Environment          string                       `json:"environment,omitempty"`
+	Status               DeploymentValidationStatus   `json:"status"`
+	MonitorIDs           []string                     `json:"monitorIds"`
+	Report               DeploymentValidationReport   `json:"report,omitempty"`
+	AIReport             DeploymentValidationAIReport `json:"aiReport,omitempty"`
+	SampleCount          int                          `json:"sampleCount"`
+	IntervalSeconds      int                          `json:"intervalSeconds"`
+	DeploymentStartedAt  *time.Time                   `json:"deploymentStartedAt,omitempty"`
+	BaselineWindowHours  int                          `json:"baselineWindowHours"`
+	BaselineRunCount     int                          `json:"baselineRunCount"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	UpdatedAt            time.Time                    `json:"updatedAt"`
+	PreStartedAt         *time.Time                   `json:"preStartedAt,omitempty"`
+	PreCompletedAt       *time.Time                   `json:"preCompletedAt,omitempty"`
+	PostStartedAt        *time.Time                   `json:"postStartedAt,omitempty"`
+	PostCompletedAt      *time.Time                   `json:"postCompletedAt,omitempty"`
+	ElfQueryIDs          []string                     `json:"elfQueryIds,omitempty"`
+	AutoRunLogCheck      bool                         `json:"autoRunLogCheck,omitempty"`
+	ServiceIDs           []string                     `json:"serviceIds,omitempty"`
+	ObservabilityProfile string                       `json:"observabilityProfile,omitempty"` // legacy; log checks use elfQueryIds only
+	SignalPackIDs        []string                     `json:"signalPackIds,omitempty"`        // legacy
+	ElfResults           []ElfQueryRunResult          `json:"elfResults,omitempty"`
+	LogStartedAt         *time.Time                   `json:"logStartedAt,omitempty"`
+	LogCompletedAt       *time.Time                   `json:"logCompletedAt,omitempty"`
+}
+
+type ElfProxySettings struct {
+	BaseURL           string `json:"baseUrl"`
+	IndexPathTemplate string `json:"indexPathTemplate"`
+	Pretty            bool   `json:"pretty"`
+	TimeoutSeconds    int    `json:"timeoutSeconds"`
+}
+
+type ElfPassCriteria struct {
+	Type      string  `json:"type"`
+	Threshold float64 `json:"threshold"`
+	Operator  string  `json:"operator,omitempty"`
+	Path      string  `json:"path,omitempty"`
+	Name      string  `json:"name,omitempty"`
+}
+
+type ElfComparisonConfig struct {
+	BaselineMetric string  `json:"baselineMetric,omitempty"`
+	PostMetric     string  `json:"postMetric,omitempty"`
+	DeltaPctMax    float64 `json:"deltaPctMax,omitempty"`
+	DeltaAbsMax    float64 `json:"deltaAbsMax,omitempty"`
+	MultiplierMax  float64 `json:"multiplierMax,omitempty"`
+	MinNewTermHits int     `json:"minNewTermHits,omitempty"`
+}
+
+type ElfProbeConfig struct {
+	TimeField      string `json:"timeField,omitempty"`
+	DefaultGte     string `json:"defaultGte,omitempty"`
+	DefaultLte     string `json:"defaultLte,omitempty"`
+	RelativePreset string `json:"relativePreset,omitempty"`
+}
+
+type ElfFieldDescriptor struct {
+	Path          string   `json:"path"`
+	Label         string   `json:"label,omitempty"`
+	ValueType     string   `json:"valueType,omitempty"`
+	SampleValues  []string `json:"sampleValues,omitempty"`
+	SuggestedRole string   `json:"suggestedRole,omitempty"`
+	IsTimeField   bool     `json:"isTimeField,omitempty"`
+	Source        string   `json:"source,omitempty"`
+}
+
+type ElfFieldSchema struct {
+	TimeField    string               `json:"timeField,omitempty"`
+	Fields       []ElfFieldDescriptor `json:"fields,omitempty"`
+	DiscoveredAt time.Time            `json:"discoveredAt,omitempty"`
+}
+
+type ElfCheckRule struct {
+	ID       string `json:"id,omitempty"`
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	Value    any    `json:"value,omitempty"`
+}
+
+type ElfCheckConfig struct {
+	Mode               string         `json:"mode,omitempty"`
+	Logic              string         `json:"logic,omitempty"`
+	Rules              []ElfCheckRule `json:"rules,omitempty"`
+	PassWhen           string         `json:"passWhen,omitempty"`
+	PassThreshold      float64        `json:"passThreshold,omitempty"`
+	FacetField         string         `json:"facetField,omitempty"`
+	Pattern            string         `json:"pattern,omitempty"`
+	BaselineOffsetMins int            `json:"baselineOffsetMins,omitempty"`
+	DeltaPctMax        float64        `json:"deltaPctMax,omitempty"`
+	Percentile         float64        `json:"percentile,omitempty"`
+	Threshold          float64        `json:"threshold,omitempty"`
+	MaxHits            float64        `json:"maxHits,omitempty"`
+}
+
+type ElfDetectedRole struct {
+	Role       string   `json:"role"`
+	Path       string   `json:"path"`
+	Label      string   `json:"label,omitempty"`
+	ValueType  string   `json:"valueType,omitempty"`
+	Confidence string   `json:"confidence,omitempty"`
+	Samples    []string `json:"samples,omitempty"`
+}
+
+type ElfSuggestedCheck struct {
+	ID              string          `json:"id"`
+	Label           string          `json:"label"`
+	Description     string          `json:"description"`
+	GateMode        string          `json:"gateMode"`
+	CheckKind       string          `json:"checkKind"`
+	CheckConfig     ElfCheckConfig  `json:"checkConfig"`
+	PassCriteria    ElfPassCriteria `json:"passCriteria"`
+	MatchCount      int             `json:"matchCount"`
+	Severity        string          `json:"severity,omitempty"`
+	DeploymentFocus string          `json:"deploymentFocus,omitempty"`
+}
+
+type ElfProbeSummary struct {
+	HitCount      int    `json:"hitCount,omitempty"`
+	Gte           string `json:"gte,omitempty"`
+	Lte           string `json:"lte,omitempty"`
+	ResolvedIndex string `json:"resolvedIndex,omitempty"`
+	DurationMS    int    `json:"durationMs,omitempty"`
+	Truncated     bool   `json:"truncated,omitempty"`
+	ErrorMessage  string `json:"errorMessage,omitempty"`
+}
+
+type ElfQueryRunMeta struct {
+	CheckKind            string          `json:"checkKind,omitempty"`
+	PostWindow           ElfTimeWindow   `json:"postWindow,omitempty"`
+	BaselineWindow       ElfTimeWindow   `json:"baselineWindow,omitempty"`
+	Curl                 string          `json:"curl,omitempty"`
+	FieldMappingUsed     LogFieldMapping `json:"fieldMappingUsed,omitempty"`
+	FieldSchemaUsed      ElfFieldSchema  `json:"fieldSchemaUsed,omitempty"`
+	CheckConfig          ElfCheckConfig  `json:"checkConfig,omitempty"`
+	PassCriteria         ElfPassCriteria `json:"passCriteria,omitempty"`
+	ResolvedIndexPattern string          `json:"resolvedIndexPattern,omitempty"`
+}
+
+type ElfTimeWindow struct {
+	Gte   string `json:"gte,omitempty"`
+	Lte   string `json:"lte,omitempty"`
+	Field string `json:"field,omitempty"`
+}
+
+type ElfQuery struct {
+	ID                  string              `json:"id"`
+	Name                string              `json:"name"`
+	Description         string              `json:"description,omitempty"`
+	ElfAppID            string              `json:"elfAppId,omitempty"`
+	IndexPathTemplate   string              `json:"indexPathTemplate,omitempty"`
+	SearchBody          json.RawMessage     `json:"searchBody"`
+	GateMode            string              `json:"gateMode"`
+	PassCriteria        ElfPassCriteria     `json:"passCriteria"`
+	ComparisonConfig    ElfComparisonConfig `json:"comparisonConfig,omitempty"`
+	SignalType          string              `json:"signalType,omitempty"`
+	ApplicationID       string              `json:"applicationId,omitempty"`
+	ServiceID           string              `json:"serviceId,omitempty"`
+	ProbeConfig         ElfProbeConfig      `json:"probeConfig,omitempty"`
+	FieldMapping        LogFieldMapping     `json:"fieldMapping,omitempty"`
+	FieldSchema         ElfFieldSchema      `json:"fieldSchema,omitempty"`
+	CheckKind           string              `json:"checkKind,omitempty"`
+	CheckConfig         ElfCheckConfig      `json:"checkConfig,omitempty"`
+	GeneratedSearchBody json.RawMessage     `json:"generatedSearchBody,omitempty"`
+	LastProbeAt         *time.Time          `json:"lastProbeAt,omitempty"`
+	LastProbeSummary    ElfProbeSummary     `json:"lastProbeSummary,omitempty"`
+	Tags                []string            `json:"tags,omitempty"`
+	IsActive            bool                `json:"isActive"`
+	CreatedAt           time.Time           `json:"createdAt"`
+	UpdatedAt           time.Time           `json:"updatedAt"`
+}
+
+type ElfFacetBucket struct {
+	Key   string `json:"key"`
+	Count int    `json:"count"`
+}
+
+type ElfSignalFacets struct {
+	TopServices    []ElfFacetBucket `json:"topServices,omitempty"`
+	TopExceptions  []ElfFacetBucket `json:"topExceptions,omitempty"`
+	TopEndpoints   []ElfFacetBucket `json:"topEndpoints,omitempty"`
+	TopDownstreams []ElfFacetBucket `json:"topDownstreams,omitempty"`
+	NewTerms       []ElfFacetBucket `json:"newTerms,omitempty"`
+}
+
+type ElfStructuredSampleHit struct {
+	Service       string `json:"service,omitempty"`
+	Endpoint      string `json:"endpoint,omitempty"`
+	ExceptionType string `json:"exceptionType,omitempty"`
+	TraceID       string `json:"traceId,omitempty"`
+	Level         string `json:"level,omitempty"`
+	StatusCode    string `json:"statusCode,omitempty"`
+	Message       string `json:"message,omitempty"`
+}
+
+type ElfQueryRunResult struct {
+	QueryID           string                   `json:"queryId"`
+	QueryName         string                   `json:"queryName,omitempty"`
+	GateMode          string                   `json:"gateMode,omitempty"`
+	ElfAppID          string                   `json:"elfAppId,omitempty"`
+	ServiceID         string                   `json:"serviceId,omitempty"`
+	ServiceName       string                   `json:"serviceName,omitempty"`
+	SignalType        string                   `json:"signalType,omitempty"`
+	ResolvedURL       string                   `json:"resolvedUrl,omitempty"`
+	Result            string                   `json:"result"`
+	HitCount          int                      `json:"hitCount"`
+	BaselineValue     float64                  `json:"baselineValue,omitempty"`
+	PostValue         float64                  `json:"postValue,omitempty"`
+	DeltaPct          float64                  `json:"deltaPct,omitempty"`
+	Reason            string                   `json:"reason,omitempty"`
+	SampleHits        []string                 `json:"sampleHits,omitempty"`
+	StructuredSamples []ElfStructuredSampleHit `json:"structuredSamples,omitempty"`
+	Facets            ElfSignalFacets          `json:"facets,omitempty"`
+	DurationMS        int                      `json:"durationMs"`
+	ErrorMessage      string                   `json:"errorMessage,omitempty"`
+	RunMeta           ElfQueryRunMeta          `json:"runMeta,omitempty"`
+	RanAt             time.Time                `json:"ranAt"`
 }
 
 type DeploymentValidationRunLink struct {
@@ -187,11 +424,42 @@ type DeploymentValidationRunLink struct {
 	CreatedAt    time.Time                 `json:"createdAt"`
 }
 
+type ElfQueryComparison struct {
+	QueryID           string                   `json:"queryId"`
+	QueryName         string                   `json:"queryName"`
+	GateMode          string                   `json:"gateMode"`
+	ServiceID         string                   `json:"serviceId,omitempty"`
+	ServiceName       string                   `json:"serviceName,omitempty"`
+	SignalType        string                   `json:"signalType,omitempty"`
+	Result            string                   `json:"result"`
+	HitCount          int                      `json:"hitCount"`
+	BaselineValue     float64                  `json:"baselineValue,omitempty"`
+	PostValue         float64                  `json:"postValue,omitempty"`
+	DeltaPct          float64                  `json:"deltaPct,omitempty"`
+	Reason            string                   `json:"reason,omitempty"`
+	SampleHits        []string                 `json:"sampleHits,omitempty"`
+	StructuredSamples []ElfStructuredSampleHit `json:"structuredSamples,omitempty"`
+	Facets            ElfSignalFacets          `json:"facets,omitempty"`
+	RunMeta           ElfQueryRunMeta          `json:"runMeta,omitempty"`
+}
+
+type ElfObservabilityFindings struct {
+	ByService map[string][]ElfQueryComparison `json:"byService,omitempty"`
+}
+
+type ElfReportSummary struct {
+	BlockingFails    int `json:"blockingFails"`
+	AdvisoryWarnings int `json:"advisoryWarnings"`
+}
+
 type DeploymentValidationReport struct {
 	Status             string                        `json:"status"`
 	Summary            DeploymentValidationSummary   `json:"summary"`
 	Regressions        []string                      `json:"regressions"`
 	MonitorComparisons []MonitorValidationComparison `json:"monitorComparisons"`
+	ElfComparisons     []ElfQueryComparison          `json:"elfComparisons,omitempty"`
+	ElfObservability   ElfObservabilityFindings      `json:"elfObservability,omitempty"`
+	ElfSummary         ElfReportSummary              `json:"elfSummary,omitempty"`
 	GeneratedAt        time.Time                     `json:"generatedAt,omitempty"`
 	IncompleteReason   string                        `json:"incompleteReason,omitempty"`
 }
@@ -215,6 +483,14 @@ type DeploymentValidationSummary struct {
 	PostP95LatencyMS   int     `json:"postP95LatencyMs"`
 	P95LatencyDeltaMS  int     `json:"p95LatencyDeltaMs"`
 	P95LatencyDeltaPct float64 `json:"p95LatencyDeltaPct"`
+	PreP99LatencyMS    int     `json:"preP99LatencyMs"`
+	PostP99LatencyMS   int     `json:"postP99LatencyMs"`
+	PreMaxLatencyMS    int     `json:"preMaxLatencyMs"`
+	PostMaxLatencyMS   int     `json:"postMaxLatencyMs"`
+	PreMeanLatencyMS   int     `json:"preMeanLatencyMs"`
+	PostMeanLatencyMS  int     `json:"postMeanLatencyMs"`
+	PreFailureCount    int     `json:"preFailureCount"`
+	PostFailureCount   int     `json:"postFailureCount"`
 	NewFailures        int     `json:"newFailures"`
 	ResolvedFailures   int     `json:"resolvedFailures"`
 }
