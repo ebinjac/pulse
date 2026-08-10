@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react"
 import { PanelLeft } from "lucide-react"
-import { Button } from "@heroui/react"
+import { Button } from "@workspace/ui/components/ui"
 import { useIsMobile } from "@workspace/ui/hooks/use-mobile"
 import { cn } from "@workspace/ui/lib/utils"
 

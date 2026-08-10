@@ -19,7 +19,7 @@ import {
   SearchField,
   Select,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { AlertStatusPill, channelIcon, DeliveryStatusPill, formatDate, PageShell } from "../layout"
 import { RunTimeline } from "./run-views"
 

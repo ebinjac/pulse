@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { History, Loader2, RotateCcw } from "lucide-react"
 
-import { Button } from "@heroui/react"
+import { Button } from "@workspace/ui/components/ui"
 import { diffMonitors, formatDiffValue } from "@/lib/monitor-diff"
 import { pulseMonitorApiPath } from "@/lib/pulse-api-paths"
 import type { Monitor, MonitorConfigChange, MonitorVersionSummary } from "@/lib/pulse-types"

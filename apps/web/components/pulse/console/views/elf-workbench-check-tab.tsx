@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { ClipboardCheck, RotateCw, Save } from "lucide-react"
-import { Button, Card, Description, EmptyState } from "@heroui/react"
+import { Button, Card, Description, EmptyState } from "@workspace/ui/components/ui"
 import type { ElfCopilotResultExplanation, ElfFieldDescriptor, ElfQueryProbeResult, ElfQueryValidateCheckResult, ElfSuggestedCheck } from "@/lib/pulse-types"
 import { ElfCheckDraftBuilder, type DraftCheck, hasCheckCondition, naturalLanguagePreview } from "./elf-check-draft-builder"
 import { ElfCheckTestResultModal } from "./elf-check-test-result-modal"

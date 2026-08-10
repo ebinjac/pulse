@@ -15,7 +15,7 @@ import {
   Select,
   Separator,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { DeploymentCheckTimelineCollapsible } from "./deployment-check-timeline"
 import type { DeploymentCheckDraft } from "./types"
 

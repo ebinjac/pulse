@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react"
 import type { Application, ElfQuery, Monitor } from "@/lib/pulse-types"
-import { Alert, Button, Card, Description, Input, Label, TextField } from "@heroui/react"
+import { Alert, Button, Card, Description, Input, Label, TextField } from "@workspace/ui/components/ui"
 import { formatDate } from "@/components/pulse/console-shared"
 import { dateTimeLocalToISOString } from "../utils/console-utils"
 import type { DeploymentCheckDraft } from "./types"

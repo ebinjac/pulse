@@ -31,7 +31,7 @@ import {
 } from "@/components/pulse/console-shared"
 import { RunTimeline } from "./run-views"
 import type { Monitor, MonitorRun } from "@/lib/pulse-types"
-import { Button, Card as HeroCard, Chip, Description, EmptyState, SearchField, Tabs } from "@heroui/react"
+import { Button, Card as HeroCard, Chip, Description, EmptyState, SearchField, Tabs } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 
 import { HistoryPatternAnalysis } from "../components/history-pattern-analysis"

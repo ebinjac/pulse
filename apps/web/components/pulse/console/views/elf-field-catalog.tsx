@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { Plus, Trash2 } from "lucide-react"
-import { Button, Chip, Description, Input, Label, ListBox, Select, TextField } from "@heroui/react"
+import { Button, Chip, Description, Input, Label, ListBox, Select, TextField } from "@workspace/ui/components/ui"
 import type { ElfFieldDescriptor, ElfFieldSchema } from "@/lib/pulse-types"
 
 function mergeSchemas(base: ElfFieldSchema, discovered?: ElfFieldSchema): ElfFieldSchema {

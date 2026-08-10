@@ -45,15 +45,17 @@ func PrepareSearch(
 		body = []byte(`{"query":{"match_all":{}},"size":0}`)
 	}
 
-	token := ""
-	if secrets != nil {
-		token, _ = secrets.GetRawSecretValue("elfProxyBearerToken")
+	curl := ""
+	if auth, err := ResolveProxyAuth(secrets, settings); err == nil {
+		curl = BuildEquivalentCurlWithAuth(searchURL, auth, body)
+	} else {
+		curl = BuildEquivalentCurlWithAuth(searchURL, ProxyAuth{Kind: "bearer"}, body)
 	}
 
 	return PreparedSearch{
 		SearchURL: searchURL,
 		Body:      body,
-		Curl:      BuildEquivalentCurl(searchURL, token, body),
+		Curl:      curl,
 		ElfAppID:  elfAppID,
 		IndexPath: indexPath,
 	}, nil

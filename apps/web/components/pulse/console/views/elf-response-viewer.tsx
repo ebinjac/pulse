@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { Copy, Download, Plus, Search } from "lucide-react"
-import { Button, Card, Chip, Description, Input, Label, Table, Tabs, TextField } from "@heroui/react"
+import { Button, Card, Chip, Description, Input, Label, Table, Tabs, TextField } from "@workspace/ui/components/ui"
 import type { ElfInferredField, ElfQueryProbeResult } from "@/lib/pulse-types"
 
 const PINNED_ROLE_ORDER = [

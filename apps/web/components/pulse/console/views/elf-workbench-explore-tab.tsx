@@ -1,7 +1,7 @@
 "use client"
 
 import { RotateCw, Save } from "lucide-react"
-import { Button, Card, Description, Label, ListBox, Select } from "@heroui/react"
+import { Button, Card, Description, Label, ListBox, Select } from "@workspace/ui/components/ui"
 import type { Application, ApplicationService, ElfCopilotQueryRepair, ElfCopilotSummary, ElfQuery, ElfQueryProbeResult } from "@/lib/pulse-types"
 import { Field } from "@/components/pulse/console-shared"
 import { ElfProbeTimeRange } from "./elf-probe-time-range"

@@ -1,6 +1,6 @@
 "use client"
 
-import { Card, Description } from "@heroui/react"
+import { Card, Description } from "@workspace/ui/components/ui"
 import type { Monitor } from "@/lib/pulse-types"
 
 export function SchedulerStatusCard({ monitors }: { monitors: Monitor[] }) {

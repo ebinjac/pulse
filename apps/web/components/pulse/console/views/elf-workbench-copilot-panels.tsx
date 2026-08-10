@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Brain, ChevronDown, ChevronRight, Sparkles, Wand2 } from "lucide-react"
-import { Button, Card, Description, Label, TextArea, TextField } from "@heroui/react"
+import { Button, Card, Description, Label, TextArea, TextField } from "@workspace/ui/components/ui"
 import type { ElfCopilotQueryRepair, ElfCopilotResultExplanation, ElfCopilotSummary } from "@/lib/pulse-types"
 import { Field } from "@/components/pulse/console-shared"
 

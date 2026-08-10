@@ -64,7 +64,7 @@ import type {
 } from "@/lib/pulse-types"
 import { applicationSLOMap, formatUptimePct, monitorSLOMap } from "@/lib/pulse-slo"
 import { ErrorBudgetWidget } from "@/components/pulse/slo-widgets"
-import { Button, Card as HeroCard, Chip, Description, Input, Label, ListBox, Select, TextField } from "@heroui/react"
+import { Button, Card as HeroCard, Chip, Description, Input, Label, ListBox, Select, TextField } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 
 import { applicationHealth, dateTimeLocalToISOString, toDateTimeLocalInput, validationStatusLabel } from "../utils/console-utils"
@@ -215,7 +215,7 @@ export function ApplicationDetailView({
                 <Input
                   variant="secondary"
                   value={(routing.emailTo || []).join(", ")}
-                  onChange={(e) => setRouting({ ...routing, emailTo: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                  onChange={(e) => setRouting({ ...routing, emailTo: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })}
                   className="text-xs"
                 />
               </TextField>
@@ -224,7 +224,7 @@ export function ApplicationDetailView({
                 <Input
                   variant="secondary"
                   value={(routing.onCallTargets || []).join(", ")}
-                  onChange={(e) => setRouting({ ...routing, onCallTargets: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                  onChange={(e) => setRouting({ ...routing, onCallTargets: e.target.value.split(",").map((s: string) => s.trim()).filter(Boolean) })}
                   className="text-xs"
                 />
               </TextField>

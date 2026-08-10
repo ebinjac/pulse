@@ -23,7 +23,7 @@ import {
   Tabs,
   TextArea,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
 import type { Application, Monitor, MonitorStep } from "@/lib/pulse-types"

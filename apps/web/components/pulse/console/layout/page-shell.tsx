@@ -2,7 +2,7 @@
 
 import { Activity } from "lucide-react"
 import { cn } from "@workspace/ui/lib/utils"
-import { Card as HeroCard, Description, Header, Separator } from "@heroui/react"
+import { Card as HeroCard, Description, Header, Separator } from "@workspace/ui/components/ui"
 import { AppShellTrigger } from "@/components/pulse/app-shell"
 
 export function PageShell({

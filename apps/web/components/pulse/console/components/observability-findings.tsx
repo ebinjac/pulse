@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { ChevronDown, ChevronRight } from "lucide-react"
-import { Card as HeroCard, Chip, Description, Table } from "@heroui/react"
+import { Card as HeroCard, Chip, Description, Table } from "@workspace/ui/components/ui"
 import type { DeploymentValidationReport, ElfFacetBucket, ElfQueryComparison } from "@/lib/pulse-types"
 import { ValidationResultPill } from "./validation-result-pill"
 import { checkKindLabel } from "../views/elf-expression-builder"

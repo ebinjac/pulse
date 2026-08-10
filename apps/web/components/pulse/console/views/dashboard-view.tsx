@@ -20,7 +20,7 @@ import { formatDate, isFailedStatus, Metric, PageShell, StatusPill } from "@/com
 import { LatencyChart } from "@/components/pulse/console/charts"
 import type { Application, AlertEvent, Monitor, MonitorRun, SLOSummary } from "@/lib/pulse-types"
 import { ErrorBudgetWidget } from "@/components/pulse/slo-widgets"
-import { Button, Card, Description, EmptyState } from "@heroui/react"
+import { Button, Card, Description, EmptyState } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 
 import { AlertFeed } from "../components/alert-feed"

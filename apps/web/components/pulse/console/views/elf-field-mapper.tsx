@@ -1,6 +1,6 @@
 "use client"
 
-import { Description, Input, Label, TextField } from "@heroui/react"
+import { Description, Input, Label, TextField } from "@workspace/ui/components/ui"
 import type { ElfInferredField, LogFieldMapping } from "@/lib/pulse-types"
 
 const FIELD_ROLES: Array<{ key: keyof LogFieldMapping; label: string }> = [

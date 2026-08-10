@@ -145,16 +145,16 @@ func (c *ComparativeRunner) executeSearch(
 		return ParsedResponse{}, "", err
 	}
 
-	token, ok := c.Runner.Secrets.GetRawSecretValue("elfProxyBearerToken")
-	if !ok || strings.TrimSpace(token) == "" {
-		return ParsedResponse{}, searchURL, fmt.Errorf("elf proxy bearer token is not configured")
+	auth, err := elfsearch.ResolveProxyAuth(c.Runner.Secrets, settings)
+	if err != nil {
+		return ParsedResponse{}, searchURL, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, searchURL, bytes.NewReader([]byte(body)))
 	if err != nil {
 		return ParsedResponse{}, searchURL, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	elfsearch.ApplyProxyAuth(req, auth)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := c.Runner.Client

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { ArrowLeft, Play, RotateCw, Save, Search, ShieldCheck } from "lucide-react"
-import { Button, Tabs } from "@heroui/react"
+import { Button, Tabs } from "@workspace/ui/components/ui"
 import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
 import { elfCopilotClient } from "@/lib/elf-copilot-client"
 import { pulseClient } from "@/lib/pulse-client"

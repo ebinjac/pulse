@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { ChevronDown } from "lucide-react"
-import { Button, Disclosure } from "@heroui/react"
+import { Button, Disclosure } from "@workspace/ui/components/ui"
 
 const PHASES = [
   {

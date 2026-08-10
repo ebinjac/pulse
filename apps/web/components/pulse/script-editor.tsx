@@ -11,11 +11,12 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  CheckCircle2,
 } from "lucide-react"
 import Editor from "@monaco-editor/react"
 import { useTheme } from "next-themes"
 
-import { Button } from "@heroui/react"
+import { Button } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import type { TemplateSuggestion } from "./template-intelligence"
 
@@ -157,6 +158,7 @@ export function ScriptEditor({ value, onChange, stepName, suggestions = [] }: Sc
   const suggestionsRef = useRef<TemplateSuggestion[]>(suggestions)
   const completionProviderRef = useRef<{ dispose: () => void } | null>(null)
   const [showHelp, setShowHelp] = useState(false)
+  const [syntaxResult, setSyntaxResult] = useState<{ ok: boolean; message: string } | null>(null)
   const { resolvedTheme } = useTheme()
   suggestionsRef.current = suggestions
 
@@ -218,6 +220,15 @@ export function ScriptEditor({ value, onChange, stepName, suggestions = [] }: Sc
     editor.focus()
   }
 
+  function validateSyntax() {
+    try {
+      new Function(value || "")
+      setSyntaxResult({ ok: true, message: "Script syntax is valid." })
+    } catch (error) {
+      setSyntaxResult({ ok: false, message: error instanceof Error ? error.message : "Invalid JavaScript" })
+    }
+  }
+
   return (
     <div className="space-y-3">
       {/* Header */}
@@ -249,7 +260,49 @@ export function ScriptEditor({ value, onChange, stepName, suggestions = [] }: Sc
             </Button>
           )
         })}
+        <Button
+          variant="secondary"
+          size="sm"
+          type="button"
+          onPress={validateSyntax}
+          className="h-7 px-2 text-[11px]"
+        >
+          <CheckCircle2 className="size-3" />
+          Validate script
+        </Button>
       </div>
+
+      {suggestions.length > 0 ? (
+        <div className="grid gap-2 rounded-lg border border-border/40 bg-muted/5 p-3 text-xs lg:grid-cols-3">
+          <div className="font-semibold text-muted-foreground">Available tokens</div>
+          <div className="flex flex-wrap gap-1.5 lg:col-span-2">
+            {suggestions.slice(0, 12).map((suggestion) => (
+              <button
+                key={`${suggestion.kind}-${suggestion.key}`}
+                type="button"
+                onClick={() => insertSnippet(suggestion.scriptAccessor)}
+                className="rounded border border-border/40 bg-background px-2 py-1 font-mono text-[10px] text-foreground hover:border-primary/40"
+                title={suggestion.detail}
+              >
+                {suggestion.scriptAccessor}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {syntaxResult ? (
+        <div
+          className={cn(
+            "rounded-md border px-3 py-2 text-xs",
+            syntaxResult.ok
+              ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+              : "border-rose-500/20 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+          )}
+        >
+          {syntaxResult.message}
+        </div>
+      ) : null}
 
       {/* Monaco Code Editor container */}
       <div className="min-h-[220px] w-full rounded-md border border-border/50 overflow-hidden bg-[#1e1e1e] dark:bg-[#1e1e1e] light:bg-[#fffffe] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2">

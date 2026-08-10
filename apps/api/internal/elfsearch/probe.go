@@ -91,14 +91,13 @@ func (r *Runner) ProbeQuery(
 	result.ResolvedIndexPattern = prepared.IndexPath
 	result.SearchURL = prepared.SearchURL
 
-	token, ok := r.Secrets.GetRawSecretValue("elfProxyBearerToken")
-	if !ok || strings.TrimSpace(token) == "" {
-		err = fmt.Errorf("elf proxy bearer token is not configured")
+	auth, err := ResolveProxyAuth(r.Secrets, settings)
+	if err != nil {
 		result.ErrorMessage = err.Error()
 		result.DurationMS = int(time.Since(started).Milliseconds())
 		return result, err
 	}
-	result.Curl = BuildEquivalentCurl(prepared.SearchURL, token, body)
+	result.Curl = BuildEquivalentCurlWithAuth(prepared.SearchURL, auth, body)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, prepared.SearchURL, bytes.NewReader(body))
 	if err != nil {
@@ -106,7 +105,7 @@ func (r *Runner) ProbeQuery(
 		result.DurationMS = int(time.Since(started).Milliseconds())
 		return result, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	ApplyProxyAuth(req, auth)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := r.Client
@@ -120,7 +119,7 @@ func (r *Runner) ProbeQuery(
 
 	resp, err := client.Do(req)
 	if err != nil {
-		result.ErrorMessage = redactToken(err.Error(), token)
+		result.ErrorMessage = RedactProxyAuth(err.Error(), auth)
 		result.DurationMS = int(time.Since(started).Milliseconds())
 		return result, err
 	}
@@ -141,7 +140,7 @@ func (r *Runner) ProbeQuery(
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		err = fmt.Errorf("elf proxy returned status %d: %s", resp.StatusCode, truncate(string(respBody), 512))
-		result.ErrorMessage = redactToken(err.Error(), token)
+		result.ErrorMessage = RedactProxyAuth(err.Error(), auth)
 		return result, err
 	}
 

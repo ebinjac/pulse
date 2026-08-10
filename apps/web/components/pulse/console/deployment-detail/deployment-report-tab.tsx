@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { AlertTriangle, Check, Copy, Gauge, RotateCw, Sparkles, TrendingUp } from "lucide-react"
 import type { DeploymentValidation } from "@/lib/pulse-types"
-import { Button, Card as HeroCard, Chip, Description, EmptyState, Table } from "@heroui/react"
+import { Button, Card as HeroCard, Chip, Description, EmptyState, Table } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { Metric, StatusPill } from "@/components/pulse/console-shared"
 import { ValidationResultPill } from "../components/validation-result-pill"

@@ -1,7 +1,7 @@
 "use client"
 
 import { Brain, ClipboardCheck, Gauge, RotateCw, Search, ShieldAlert } from "lucide-react"
-import { Alert, Button, Description, Modal } from "@heroui/react"
+import { Alert, Button, Description, Modal } from "@workspace/ui/components/ui"
 import type { ElfCopilotResultExplanation, ElfQueryValidateCheckResult } from "@/lib/pulse-types"
 import { Metric } from "@/components/pulse/console-shared"
 import { displayAIValue } from "./elf-workbench-copilot-panels"

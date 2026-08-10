@@ -34,7 +34,7 @@ import {
   Select,
   Table,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 
 import { validationStatusLabel } from "../utils/console-utils"

@@ -473,7 +473,9 @@ export interface ElfProxySettings {
   indexPathTemplate: string
   pretty: boolean
   timeoutSeconds: number
+  basicAuthUsername?: string
   bearerTokenConfigured?: boolean
+  basicAuthPasswordConfigured?: boolean
 }
 
 export interface ElfProxySettingsInput {
@@ -482,6 +484,8 @@ export interface ElfProxySettingsInput {
   pretty?: boolean
   timeoutSeconds?: number
   bearerToken?: string
+  basicAuthUsername?: string
+  basicAuthPassword?: string
 }
 
 export interface ElfPassCriteria {

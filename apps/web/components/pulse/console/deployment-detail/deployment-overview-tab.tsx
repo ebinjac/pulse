@@ -6,7 +6,7 @@ import type {
   MonitorRun,
 } from "@/lib/pulse-types"
 import { Metric } from "@/components/pulse/console-shared"
-import { Card } from "@heroui/react"
+import { Card } from "@workspace/ui/components/ui"
 import { Activity, AlertTriangle, Braces, CheckCircle2 } from "lucide-react"
 import { logsConfigured, type PhaseRow } from "./deployment-detail-utils"
 import {

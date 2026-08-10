@@ -5,7 +5,7 @@ import { Plus, Upload } from "lucide-react"
 import type { Monitor } from "@/lib/pulse-types"
 import type { MonitorScheduleFilter, MonitorStatusFilter } from "@/lib/filter-monitors"
 import { PageShell } from "@/components/pulse/console/layout"
-import { Button, Card, Description } from "@heroui/react"
+import { Button, Card, Description } from "@workspace/ui/components/ui"
 import { MonitorFiltersToolbar } from "../components/monitor-filters-toolbar"
 import { MonitorTable } from "../components/monitor-table"
 

@@ -32,6 +32,43 @@ func TestRunMonitorDraftEndpoint(t *testing.T) {
 	}
 }
 
+func TestMonitorFixtureEndpoints(t *testing.T) {
+	handler := testServer()
+
+	t.Run("health", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/api/qa/monitor-fixtures/health", nil)
+		response := httptest.NewRecorder()
+
+		handler.ServeHTTP(response, request)
+
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		if !strings.Contains(response.Body.String(), `"ok":true`) {
+			t.Fatalf("expected ok fixture payload: %s", response.Body.String())
+		}
+	})
+
+	t.Run("echo", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/api/qa/monitor-fixtures/echo?mode=qa", bytes.NewBufferString(`{"hello":"world"}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Pulse-QA", "fixture")
+		response := httptest.NewRecorder()
+
+		handler.ServeHTTP(response, request)
+
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+		}
+		body := response.Body.String()
+		for _, expected := range []string{`"method":"POST"`, `"query":"mode=qa"`, `"X-Pulse-Qa":"fixture"`, `"hello":"world"`} {
+			if !strings.Contains(body, expected) {
+				t.Fatalf("expected %q in echo payload: %s", expected, body)
+			}
+		}
+	})
+}
+
 func TestListMonitorVersionsEndpoint(t *testing.T) {
 	handler := testServer()
 	request := httptest.NewRequest(http.MethodGet, "/api/monitors/mon-protected-api/versions", nil)

@@ -4,7 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { AlertTriangle, ChevronDown, ChevronRight, Info, Network, TerminalSquare, Sparkles, Loader2, Copy, Check, FileText } from "lucide-react"
 import type { HttpTiming, MonitorRun, StepRun } from "@/lib/pulse-types"
-import { Button, Card as HeroCard, Tooltip } from "@heroui/react"
+import { Button, Card as HeroCard, Tooltip } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { Field, formatDate, isFailedStatus, PageShell, Section, StatusPill } from "../layout"
 

@@ -1,7 +1,7 @@
 "use client"
 
 import type { ApplicationService, ElfQuery } from "@/lib/pulse-types"
-import { Button, Card, Checkbox, CheckboxGroup, Chip, Description, EmptyState, Label } from "@heroui/react"
+import { Button, Card, Checkbox, CheckboxGroup, Chip, Description, EmptyState, Label } from "@workspace/ui/components/ui"
 import Link from "next/link"
 import { AlertTriangle, ExternalLink, Info } from "lucide-react"
 import type { DeploymentCheckDraft } from "./types"

@@ -1,26 +1,12 @@
 "use client"
 
-import { ToastQueue } from "@heroui/react"
-
-export const pulseToastQueue = new ToastQueue({ maxVisibleToasts: 3 })
+import { toast } from "@workspace/ui/components/sonner"
 
 export function notifyPulseToast(
   status: "success" | "danger" | "warning" | "info",
   message: string,
   description?: string,
 ) {
-  const variant =
-    status === "success"
-      ? "success"
-      : status === "danger"
-        ? "danger"
-        : status === "warning"
-          ? "warning"
-          : "accent"
-
-  pulseToastQueue.add({
-    title: message,
-    description,
-    variant,
-  })
+  const method = status === "danger" ? toast.error : status === "warning" ? toast.warning : status === "success" ? toast.success : toast.info
+  method(message, { description })
 }

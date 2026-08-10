@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Plus, Server, Trash2 } from "lucide-react"
-import { Button, Card as HeroCard, Checkbox, Description, Input, Label, Modal, Table, TextField } from "@heroui/react"
+import { Button, Card as HeroCard, Checkbox, Description, Input, Label, Modal, Table, TextField } from "@workspace/ui/components/ui"
 import { pulseClient } from "@/lib/pulse-client/http-client"
 import type { Application, ApplicationService, ApplicationServiceInput } from "@/lib/pulse-types"
 

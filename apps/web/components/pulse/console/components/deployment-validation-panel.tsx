@@ -4,7 +4,7 @@ import Link from "next/link"
 import { Eye, Plus } from "lucide-react"
 import type { Application, DeploymentValidation, Monitor } from "@/lib/pulse-types"
 import { formatDate } from "@/components/pulse/console-shared"
-import { Button, Card, EmptyState, Table } from "@heroui/react"
+import { Button, Card, EmptyState, Table } from "@workspace/ui/components/ui"
 import { validationStatusLabel } from "../utils/console-utils"
 import { ValidationResultPill } from "./validation-result-pill"
 

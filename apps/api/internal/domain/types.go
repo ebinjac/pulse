@@ -228,6 +228,7 @@ type ElfProxySettings struct {
 	IndexPathTemplate string `json:"indexPathTemplate"`
 	Pretty            bool   `json:"pretty"`
 	TimeoutSeconds    int    `json:"timeoutSeconds"`
+	BasicAuthUsername string `json:"basicAuthUsername,omitempty"`
 }
 
 type ElfPassCriteria struct {

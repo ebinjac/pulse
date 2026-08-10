@@ -28,7 +28,7 @@ import {
   Label,
   Modal,
   Table,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 
 import { usePulseConsoleData } from "./hooks/use-pulse-console-data"
@@ -331,7 +331,9 @@ export function PulseConsole({
       failureThreshold: 3,
       responseBodyLimitKb: 32,
       isActive: true,
-      variables: {},
+      variables: {
+        fixtureBaseUrl: "http://localhost:8080/api/qa/monitor-fixtures",
+      },
       secretAliases: [],
       steps: [
         {
@@ -340,7 +342,7 @@ export function PulseConsole({
           name: "Fetch Health Check",
           type: "http",
           method: "GET",
-          url: "https://api.example.com/health",
+          url: "{{variables.fixtureBaseUrl}}/health",
           timeoutMs: 10000,
           retryCount: 1,
           continueOnFailure: false,
@@ -353,8 +355,31 @@ export function PulseConsole({
               operator: "equals",
               expected: "200",
             },
+            {
+              id: "assert-2",
+              type: "jsonPath",
+              label: "Fixture reports ok",
+              target: "$.ok",
+              operator: "equals",
+              expected: "true",
+            },
           ],
-          extractors: [],
+          extractors: [
+            {
+              id: "extract-fixture-version",
+              name: "fixtureVersion",
+              type: "jsonPath",
+              source: "$.version",
+            },
+          ],
+          config: {
+            headers: {},
+            body: "",
+            auth: { type: "noAuth" },
+            cookies: { enabled: true, mode: "jar", manual: [] },
+            mtls: { mode: "global", enabled: false, insecureSkipVerify: false },
+            proxy: { enabled: false },
+          },
         },
       ],
       alertPolicy: {
@@ -478,7 +503,7 @@ export function PulseConsole({
       >
         <AlertDialog.Container>
           <AlertDialog.Dialog className="sm:max-w-md">
-            {({ close }) => (
+            {({ close }: { close: () => void }) => (
               <>
                 <AlertDialog.CloseTrigger />
                 <AlertDialog.Header>

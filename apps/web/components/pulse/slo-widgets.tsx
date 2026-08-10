@@ -3,7 +3,7 @@
 import { Cell, Pie, PieChart } from "recharts"
 import type { SLOSummary } from "@/lib/pulse-types"
 import { formatUptimePct } from "@/lib/pulse-slo"
-import { Card as HeroCard, Chip, Description } from "@heroui/react"
+import { Card as HeroCard, Chip, Description } from "@workspace/ui/components/ui"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@workspace/ui/components/chart"
 
 const budgetChartConfig = {

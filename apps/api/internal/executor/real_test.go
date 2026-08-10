@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -139,6 +140,65 @@ func TestRealExecutorTracksSendRequestAsDiagnosticStep(t *testing.T) {
 	}
 	if nested.Timing.TotalMS <= 0 {
 		t.Fatalf("nested timing total = %d, want > 0", nested.Timing.TotalMS)
+	}
+}
+
+func TestRealExecutorAppliesHTTPRequestScriptOverrides(t *testing.T) {
+	var method string
+	var tokenHeader string
+	var body string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		tokenHeader = r.Header.Get("X-Test-Token")
+		bytes, _ := io.ReadAll(r.Body)
+		body = string(bytes)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"mode":"script"}`))
+	}))
+	defer target.Close()
+
+	executor := NewRealExecutor(store.NewMemoryStore(), nil)
+	run := executor.Test(domain.Monitor{
+		ID:                  "mon-script-override",
+		Name:                "Script Override Monitor",
+		ResponseBodyLimitKB: 32,
+		Variables:           map[string]string{"baseUrl": target.URL, "token": "token-123"},
+		Steps: []domain.MonitorStep{
+			{
+				ID:        "step-script",
+				Name:      "Scripted request",
+				Type:      "http",
+				Method:    http.MethodGet,
+				URL:       "{{variables.baseUrl}}/missing",
+				Config:    map[string]any{"headers": map[string]any{}, "body": ""},
+				TimeoutMS: 5000,
+				PreRequestScript: `
+					pm.request.url = pm.variables.get("baseUrl") + "/echo";
+					pm.request.method = "POST";
+					pm.request.body = JSON.stringify({from:"script"});
+					pm.request.headers.add("Content-Type", "application/json");
+					pm.request.headers.add("X-Test-Token", pm.variables.get("token"));
+				`,
+				Assertions: []domain.Assertion{{ID: "assert-mode", Type: "jsonPath", Target: "$.mode", Operator: "equals", Expected: "script"}},
+				Extractors: []domain.Extractor{{ID: "extract-ok", Name: "okFlag", Type: "jsonPath", Source: "$.ok"}},
+			},
+		},
+	})
+
+	if run.Status != domain.StatusSuccess {
+		t.Fatalf("run status = %s, want success: %+v", run.Status, run)
+	}
+	if method != http.MethodPost {
+		t.Fatalf("method = %q, want POST", method)
+	}
+	if tokenHeader != "token-123" {
+		t.Fatalf("X-Test-Token = %q", tokenHeader)
+	}
+	if !strings.Contains(body, `"from":"script"`) {
+		t.Fatalf("body = %q", body)
+	}
+	if got := run.Steps[0].ExtractedVars["okFlag"]; got != "true" {
+		t.Fatalf("okFlag = %q, want true", got)
 	}
 }
 

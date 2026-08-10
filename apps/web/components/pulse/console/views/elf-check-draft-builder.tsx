@@ -1,7 +1,7 @@
 "use client"
 
 import { Plus, Sparkles } from "lucide-react"
-import { Button, Description, Input, Label, ListBox, Select, TextField } from "@heroui/react"
+import { Button, Description, Input, Label, ListBox, Select, TextField } from "@workspace/ui/components/ui"
 import type { ElfCheckConfig, ElfCheckRule, ElfFieldDescriptor, ElfPassCriteria, ElfQuery, ElfSuggestedCheck } from "@/lib/pulse-types"
 import { defaultOperator, operatorNeedsValue, operatorsForType } from "@/lib/pulse-elf-rules"
 

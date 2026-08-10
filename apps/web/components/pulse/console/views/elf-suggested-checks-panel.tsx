@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Brain, Lightbulb, RotateCw } from "lucide-react"
-import { Button, Chip, Description, Drawer, EmptyState } from "@heroui/react"
+import { Button, Chip, Description, Drawer, EmptyState } from "@workspace/ui/components/ui"
 import type { ElfSuggestedCheck } from "@/lib/pulse-types"
 import { displayAIValue } from "./elf-workbench-copilot-panels"
 

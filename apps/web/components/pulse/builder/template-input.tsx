@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react"
 import Editor from "@monaco-editor/react"
 import type { TemplateSuggestion } from "../template-intelligence"
-import { Card, Chip, Input, ListBox } from "@heroui/react"
+import { Card, Chip, Input, ListBox } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { BuilderField, builderControlClass } from "./builder-controls"
 

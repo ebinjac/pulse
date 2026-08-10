@@ -22,7 +22,7 @@ import {
   Switch,
   Table,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { PageShell } from "@/components/pulse/console-shared"
 import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"

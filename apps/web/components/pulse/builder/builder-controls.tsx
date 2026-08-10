@@ -3,7 +3,7 @@
 import type { ComponentProps, ComponentType } from "react"
 import { CheckCircle2, SlidersHorizontal, XCircle } from "lucide-react"
 import type { MonitorStatus } from "@/lib/pulse-types"
-import { Alert, Card, Checkbox, Input, Label, Select, TextArea, TextField } from "@heroui/react"
+import { Alert, Card, Checkbox, Input, Label, Select, TextArea, TextField } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 
 export const builderControlClass = "h-9 text-xs"

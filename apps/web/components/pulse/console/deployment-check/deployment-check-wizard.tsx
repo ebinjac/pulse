@@ -7,7 +7,7 @@ import { ArrowLeft, Check, ChevronLeft, ChevronRight, Minus, Pencil, Plus } from
 import type { Application, DeploymentValidation, ElfQuery, Monitor } from "@/lib/pulse-types"
 import { PageShell } from "@/components/pulse/console-shared"
 import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
-import { Alert, Button, Card, Spinner } from "@heroui/react"
+import { Alert, Button, Card, Spinner } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import type { DeploymentValidationCreateInput, DeploymentValidationUpdateInput } from "../types"
 import {

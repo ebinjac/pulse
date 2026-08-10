@@ -45,7 +45,7 @@ import {
   Label,
   ListBox,
   Tabs,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { suggestAssertions, suggestExtractors } from "./builder-copilot"
 import {
@@ -419,6 +419,15 @@ export function StepCard({ step, index, totalSteps, mockRun, suggestions, certif
       actions: (step.actions || []).filter((a) => a.id !== id),
     })
   }
+
+  const syntheticActualKeys =
+    step.type === "dns"
+      ? ["records", "cname", "responseTime"]
+      : step.type === "tcp"
+        ? ["port", "responseTime"]
+        : step.type === "tls"
+          ? ["certExpiryDays", "certExpiresAt", "tlsVersion", "responseTime"]
+          : ["responseTime"]
 
   return (
     <div className="p-4 space-y-5">
@@ -1601,11 +1610,121 @@ export function StepCard({ step, index, totalSteps, mockRun, suggestions, certif
         <div className="space-y-4">
           <SyntheticStepEditor step={step} onUpdate={onUpdate} />
           {step.type !== "delay" ? (
-            <div className="rounded-lg border border-border/50 bg-background/50 p-4 space-y-3">
-              <div className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Assertions</div>
-              <p className="text-xs text-muted-foreground">
-                Use the Tests tab on HTTP steps for full assertion tooling, or add assertions in the JSON editor for synthetic steps.
-              </p>
+            <div className="rounded-lg border border-border/50 bg-background/50 p-4 space-y-4">
+              <div className="space-y-2">
+                <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Synthetic assertions</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {syntheticActualKeys.map((key) => (
+                    <Chip key={key} size="sm" variant="soft" className="font-mono text-[10px]">
+                      <Chip.Label>{key}</Chip.Label>
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
+                {step.assertions.length ? (
+                  step.assertions.map((assertion) => (
+                    <div key={assertion.id} className="flex items-center justify-between gap-2 rounded-md border border-border/30 bg-muted/5 px-2.5 py-1.5 text-xs">
+                      <div className="min-w-0 truncate">
+                        <span className="font-semibold uppercase text-primary">{assertion.type}</span>
+                        <span className="mx-1 text-muted-foreground/60">·</span>
+                        <span className="font-mono text-muted-foreground">{assertion.target}</span>
+                        <span className="mx-1 text-[10px] font-semibold uppercase text-muted-foreground/70">{assertion.operator}</span>
+                        <span className="rounded bg-accent px-1 font-mono text-white">{assertion.expected}</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        isIconOnly
+                        type="button"
+                        onPress={() => handleDeleteAssertion(assertion.id)}
+                        className="size-6 shrink-0 text-rose-500"
+                        aria-label={`Delete assertion ${assertion.label}`}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-xs italic text-muted-foreground">No synthetic assertions added yet.</div>
+                )}
+              </div>
+              <div className="grid grid-cols-1 items-start gap-3 border-t border-border/30 pt-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_3.5rem]">
+                <BuilderSelect
+                  label="Assert type"
+                  ariaLabel="Synthetic assert type"
+                  selectedKey={assertType}
+                  onSelectionChange={setAssertType}
+                >
+                  <ListBox>
+                    <ListBox.Item id="responseTime" textValue="Response Time">
+                      Response Time
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="dnsRecords" textValue="DNS records">
+                      DNS records
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="certExpiryDays" textValue="TLS cert expiry days">
+                      TLS cert expiry days
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                    <ListBox.Item id="header" textValue="Actual key">
+                      Actual key
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  </ListBox>
+                </BuilderSelect>
+                <BuilderSelect
+                  label="Target"
+                  ariaLabel="Synthetic assertion target"
+                  selectedKey={assertTarget || syntheticActualKeys[0] || "responseTime"}
+                  onSelectionChange={setAssertTarget}
+                >
+                  <ListBox>
+                    {syntheticActualKeys.map((key) => (
+                      <ListBox.Item key={key} id={key} textValue={key}>
+                        {key}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </BuilderSelect>
+                <BuilderSelect
+                  label="Operator"
+                  ariaLabel="Synthetic assertion operator"
+                  selectedKey={assertOperator}
+                  onSelectionChange={setAssertOperator}
+                >
+                  <ListBox>
+                    {["equals", "contains", "greaterThan", "lessThan", "exists", "matchesRegex"].map((operator) => (
+                      <ListBox.Item key={operator} id={operator} textValue={operator}>
+                        {operator}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </BuilderSelect>
+                <BuilderField label="Expected">
+                  <BuilderInput
+                    placeholder={step.type === "tls" ? "30" : "expected value"}
+                    className={builderControlClass}
+                    value={assertExpected}
+                    onChange={(event) => setAssertExpected(event.target.value)}
+                  />
+                </BuilderField>
+                <div className="flex h-full items-end">
+                  <Button
+                    variant="secondary"
+                    isIconOnly
+                    type="button"
+                    onPress={handleAddAssertion}
+                    className="size-9"
+                    aria-label="Add synthetic assertion"
+                  >
+                    <PlusCircle className="size-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
           ) : null}
         </div>

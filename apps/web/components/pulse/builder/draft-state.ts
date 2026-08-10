@@ -59,6 +59,127 @@ export function validateMonitor(draft: Monitor) {
   return errors
 }
 
+export interface ScriptDiagnostic {
+  stepId: string
+  stepName: string
+  severity: "warning" | "danger"
+  message: string
+}
+
+export function analyzeMonitorScripts(draft: Monitor): ScriptDiagnostic[] {
+  const diagnostics: ScriptDiagnostic[] = []
+  const knownVariables = new Set(Object.keys(draft.variables || {}))
+  const knownSecrets = new Set((draft.secretAliases || []).map((alias) => alias.trim()).filter(Boolean))
+
+  for (const step of draft.steps) {
+    for (const action of step.actions || []) {
+      if (action.output) knownVariables.add(action.output)
+    }
+    for (const extractor of step.extractors || []) {
+      if (extractor.name) knownVariables.add(extractor.name)
+    }
+    for (const variable of scriptAssignedVariables(step.preRequestScript || "")) {
+      knownVariables.add(variable)
+    }
+  }
+
+  for (const step of draft.steps) {
+    const script = step.preRequestScript || ""
+    if (!script.trim()) continue
+
+    const syntaxError = syntaxErrorForScript(script)
+    if (syntaxError) {
+      diagnostics.push({
+        stepId: step.id,
+        stepName: step.name,
+        severity: "danger",
+        message: `Script syntax error: ${syntaxError}`,
+      })
+    }
+
+    for (const variable of scriptReadVariables(script)) {
+      if (!knownVariables.has(variable)) {
+        diagnostics.push({
+          stepId: step.id,
+          stepName: step.name,
+          severity: "warning",
+          message: `References unknown variable "${variable}". Add it in Variables or extract/set it in an earlier step.`,
+        })
+      }
+    }
+
+    for (const secret of scriptReadSecrets(script)) {
+      if (!knownSecrets.has(secret)) {
+        diagnostics.push({
+          stepId: step.id,
+          stepName: step.name,
+          severity: "warning",
+          message: `References unbound secret alias "${secret}". Bind it in Variables & secrets before running.`,
+        })
+      }
+    }
+  }
+
+  return diagnostics
+}
+
+export function validateJsonConfig(raw: string): string[] {
+  let parsed: any
+  try {
+    parsed = JSON.parse(raw)
+  } catch (error) {
+    return [error instanceof Error ? error.message : "Invalid JSON."]
+  }
+
+  const errors: string[] = []
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return ["JSON config must be an object."]
+  }
+  if (typeof parsed.name !== "string" || !parsed.name.trim()) {
+    errors.push("name must be a non-empty string.")
+  }
+  if (!Array.isArray(parsed.steps)) {
+    errors.push("steps must be an array.")
+  }
+  if (parsed.lastRunAt === "") {
+    errors.push("lastRunAt is runtime metadata and cannot be an empty string. Remove it from JSON config.")
+  }
+  if (parsed.createdAt === "") {
+    errors.push("createdAt is runtime metadata and cannot be an empty string. Remove it from JSON config.")
+  }
+  if (parsed.updatedAt === "") {
+    errors.push("updatedAt is runtime metadata and cannot be an empty string. Remove it from JSON config.")
+  }
+  if (parsed.timeoutMs !== undefined && (!Number.isFinite(Number(parsed.timeoutMs)) || Number(parsed.timeoutMs) < 1000)) {
+    errors.push("timeoutMs must be at least 1000.")
+  }
+  if (
+    parsed.responseBodyLimitKb !== undefined &&
+    (!Number.isFinite(Number(parsed.responseBodyLimitKb)) || Number(parsed.responseBodyLimitKb) < 1)
+  ) {
+    errors.push("responseBodyLimitKb must be at least 1.")
+  }
+
+  if (Array.isArray(parsed.steps)) {
+    parsed.steps.forEach((step: any, index: number) => {
+      const prefix = `steps[${index}]`
+      if (!step || typeof step !== "object") {
+        errors.push(`${prefix} must be an object.`)
+        return
+      }
+      if (typeof step.name !== "string" || !step.name.trim()) errors.push(`${prefix}.name is required.`)
+      if (typeof step.type !== "string" || !step.type.trim()) errors.push(`${prefix}.type is required.`)
+      if (step.type === "http" && (typeof step.url !== "string" || !step.url.trim())) {
+        errors.push(`${prefix}.url is required for HTTP steps.`)
+      }
+      if (!Array.isArray(step.assertions)) errors.push(`${prefix}.assertions must be an array.`)
+      if (!Array.isArray(step.extractors)) errors.push(`${prefix}.extractors must be an array.`)
+    })
+  }
+
+  return errors
+}
+
 export function checkAssertionFailed(assertion: PulseAssertion) {
   if (assertion.actual === undefined || assertion.actual === null) return true
 
@@ -150,6 +271,11 @@ function encodeParamPart(value: string) {
 
 export function applyJsonToMonitor(current: Monitor, raw: string): { draft?: Monitor; error?: string } {
   try {
+    const validationErrors = validateJsonConfig(raw)
+    if (validationErrors.length) {
+      return { error: validationErrors.join(" ") }
+    }
+
     const parsed = JSON.parse(raw) as Partial<Monitor> & {
       schedule?: string
       secrets?: Array<{ alias?: string }>
@@ -192,4 +318,35 @@ export function defaultHttpConfig(): NonNullable<MonitorStep["config"]> {
     mtls: { mode: "global" as const, enabled: false, insecureSkipVerify: false },
     proxy: { enabled: false },
   }
+}
+
+function syntaxErrorForScript(script: string) {
+  try {
+    new Function(script)
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : "Invalid JavaScript"
+  }
+}
+
+function scriptAssignedVariables(script: string) {
+  return captureStringArguments(script, /pm\.(?:variables|environment)\.set\(\s*(["'`])([^"'`]+)\1/g)
+}
+
+function scriptReadVariables(script: string) {
+  return captureStringArguments(script, /pm\.(?:variables|environment)\.get\(\s*(["'`])([^"'`]+)\1/g)
+}
+
+function scriptReadSecrets(script: string) {
+  return captureStringArguments(script, /pm\.secrets\.get\(\s*(["'`])([^"'`]+)\1/g)
+}
+
+function captureStringArguments(script: string, pattern: RegExp) {
+  const values = new Set<string>()
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(script)) !== null) {
+    const value = match[2]?.trim()
+    if (value) values.add(value)
+  }
+  return values
 }

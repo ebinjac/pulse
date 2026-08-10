@@ -10,7 +10,7 @@ import {
   ListBox,
   Select,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import type {
   ElfCheckConfig,
   ElfCheckRule,

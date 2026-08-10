@@ -1,7 +1,7 @@
 "use client"
 
 import { formatDate } from "@/components/pulse/console-shared"
-import { Card, Chip, Description } from "@heroui/react"
+import { Card, Chip, Description } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, FileCheck2, Loader2, PauseCircle, TimerReset } from "lucide-react"
 import type { PhaseRow, PhaseStatus } from "./deployment-detail-utils"

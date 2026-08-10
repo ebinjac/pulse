@@ -16,7 +16,7 @@ import {
   Select,
   Spinner,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { aggregateMonitorStats, monitorHealthFilter } from "./deployment-check-wizard-models"
 
 type HealthFilter = "all" | "healthy" | "failing"

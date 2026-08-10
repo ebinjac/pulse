@@ -4,7 +4,7 @@ import Link from "next/link"
 import { Bell } from "lucide-react"
 import type { AlertEvent } from "@/lib/pulse-types"
 import { formatDate } from "@/components/pulse/console-shared"
-import { Card, Chip, Description, EmptyState } from "@heroui/react"
+import { Card, Chip, Description, EmptyState } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 
 const STATUS_TONE: Record<string, { color: "default" | "warning" | "success" | "danger"; label: string }> = {

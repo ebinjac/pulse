@@ -1,7 +1,7 @@
 "use client"
 
 import type { MonitorStep } from "@/lib/pulse-types"
-import { Input, ListBox, Select } from "@heroui/react"
+import { Input, ListBox, Select } from "@workspace/ui/components/ui"
 
 const labelClass = "text-xs font-semibold uppercase text-muted-foreground"
 

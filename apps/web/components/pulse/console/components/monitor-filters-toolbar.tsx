@@ -1,6 +1,6 @@
 "use client"
 
-import { Label, ListBox, SearchField, Select } from "@heroui/react"
+import { Label, ListBox, SearchField, Select } from "@workspace/ui/components/ui"
 import type { MonitorScheduleFilter, MonitorStatusFilter } from "@/lib/filter-monitors"
 
 const STATUS_FILTER_OPTIONS = [

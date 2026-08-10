@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Loader2, Sparkles } from "lucide-react"
 import type { Monitor, MonitorRun } from "@/lib/pulse-types"
 import { isFailedStatus } from "@/components/pulse/console-shared"
-import { Button, Card, Description } from "@heroui/react"
+import { Button, Card, Description } from "@workspace/ui/components/ui"
 
 export function HistoryPatternAnalysis({ monitor, runs }: { monitor: Monitor; runs: MonitorRun[] }) {
   const [loading, setLoading] = useState(false)

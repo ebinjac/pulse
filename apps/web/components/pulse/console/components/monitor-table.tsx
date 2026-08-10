@@ -17,7 +17,7 @@ import {
   Dropdown,
   EmptyState,
   Table,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 
 export interface MonitorTableProps {
   monitors: Monitor[]

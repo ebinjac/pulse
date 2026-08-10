@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Clock, Plus, Trash2 } from "lucide-react"
 import type { Application, MaintenanceWindow, Monitor } from "@/lib/pulse-types"
-import { Button, Card, Label, ListBox, Select, Table, TextField, Input, Calendar, DateField, DatePicker, TimeField, type TimeValue } from "@heroui/react"
+import { Button, Card, Label, ListBox, Select, Table, TextField, Input, Calendar, DateField, DatePicker, TimeField, type TimeValue } from "@workspace/ui/components/ui"
 import { formatDate } from "./console-shared"
 import { cn } from "@workspace/ui/lib/utils"
 import { parseAbsoluteToLocal, getLocalTimeZone } from "@internationalized/date"
@@ -192,7 +192,7 @@ export function MaintenanceWindowsPanel({
                   <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Ends at</Label>
                   <DateField.Group variant="secondary" className="h-10">
                     <DateField.Input>
-                      {(segment) => <DateField.Segment segment={segment} />}
+                      {(segment: any) => <DateField.Segment segment={segment} />}
                     </DateField.Input>
                     <DateField.Suffix>
                       <DatePicker.Trigger>
@@ -213,13 +213,13 @@ export function MaintenanceWindowsPanel({
                       </Calendar.Header>
                       <Calendar.Grid>
                         <Calendar.GridHeader>
-                          {(day) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
+                          {(day: any) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
                         </Calendar.GridHeader>
-                        <Calendar.GridBody>{(date) => <Calendar.Cell date={date} />}</Calendar.GridBody>
+                        <Calendar.GridBody>{(date: any) => <Calendar.Cell date={date} />}</Calendar.GridBody>
                       </Calendar.Grid>
                       <Calendar.YearPickerGrid>
                         <Calendar.YearPickerGridBody>
-                          {({year}) => <Calendar.YearPickerCell year={year} />}
+                          {({ year }: { year: any }) => <Calendar.YearPickerCell year={year} />}
                         </Calendar.YearPickerGridBody>
                       </Calendar.YearPickerGrid>
                     </Calendar>
@@ -234,7 +234,7 @@ export function MaintenanceWindowsPanel({
                       >
                         <TimeField.Group variant="secondary" className="w-full h-10">
                           <TimeField.Input className="w-full">
-                            {(segment) => <TimeField.Segment segment={segment} />}
+                            {(segment: any) => <TimeField.Segment segment={segment} />}
                           </TimeField.Input>
                         </TimeField.Group>
                       </TimeField>

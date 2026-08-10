@@ -1,0 +1,665 @@
+---
+title: ELF Queries — Product Requirements Document
+description: Reusable log-based deployment gates powered by ELF, the organization's internal OpenSearch log platform.
+---
+
+# ELF Queries
+
+## 1. What is ELF?
+
+**ELF** is the organization's internal name for its log search and analytics platform. Under the hood it is **OpenSearch** — log indices, search queries, aggregations, and a Dashboard UI for manual exploration. Engineers refer to all of this collectively as **ELF**.
+
+| Term | Meaning |
+|------|---------|
+| **ELF** | Internal OpenSearch-based log platform |
+| **ELF Dashboard** | UI for browsing logs (OpenSearch Dashboards) |
+| **ELF Proxy** | Authenticated HTTP gateway to execute searches against ELF |
+| **ELF Query** | A saved, reusable log search used as a deployment gate |
+
+Pulse never talks to OpenSearch directly. Every search goes through the **ELF Proxy**.
+
+---
+
+## 2. How the ELF Proxy Works
+
+The ELF Proxy is a thin HTTP gateway in front of the ELF (OpenSearch) cluster. Pulse sends it a search body; the proxy authenticates, resolves the correct log index for the target application, and executes the query.
+
+### Request flow
+
+```
+Pulse                          ELF Proxy                    ELF (OpenSearch)
+  │                                │                                │
+  │  1. Resolve index pattern      │                                │
+  │     for application/service    │                                │
+  │                                │                                │
+  │  2. Build search URL           │                                │
+  │     {baseUrl}/{index}/_search  │                                │
+  │                                │                                │
+  │  3. Inject time range filter   │                                │
+  │     into search body           │                                │
+  │                                │                                │
+  │  4. POST search body ──────────▶│  5. Authenticate + forward ────▶│
+  │                                │                                │  6. Execute query
+  │  8. Parse response ◀───────────│  7. Return hits ◀───────────────│
+  │     (hits, fields, aggs)       │                                │
+```
+
+### URL construction
+
+Every search resolves to:
+
+```
+POST {baseUrl}/{indexPattern}/_search
+```
+
+| Component | Description |
+|-----------|-------------|
+| `baseUrl` | Configured ELF Proxy host (platform-level setting) |
+| `indexPattern` | Resolved log index for the target application or service |
+| `_search` | Standard OpenSearch search endpoint |
+
+An optional `?pretty` query parameter can be appended for human-readable responses.
+
+### Index resolution
+
+The index pattern is **not fixed globally**. It is resolved dynamically using a priority chain:
+
+1. **Query-level override** — if the ELF query defines its own index pattern
+2. **Service-level override** — if a specific service under the application defines one
+3. **Application-level default** — the application's configured index pattern
+4. **Platform default** — the global index template from ELF Proxy settings
+
+Different applications can point to completely different indices. The product must support this without assuming a shared index naming convention.
+
+### Authentication
+
+The proxy requires credentials. Pulse attaches one of:
+
+| Method | How it is sent |
+|--------|----------------|
+| Bearer token | `Authorization: Bearer {token}` |
+| Basic auth | `Authorization: Basic {base64(username:password)}` |
+
+Credentials are stored securely and never returned in API responses. Debug output (curl equivalents) redacts tokens and passwords.
+
+If authentication is missing or invalid, all probes and query runs fail with a clear error.
+
+### Search body
+
+Requests use standard **OpenSearch search JSON** sent as `Content-Type: application/json`.
+
+For probes and checks, Pulse **injects a time-range filter** into the search body before sending:
+
+```json
+{
+  "query": {
+    "bool": {
+      "filter": [
+        { "range": { "{timeField}": { "gte": "...", "lte": "..." } } }
+      ]
+    }
+  }
+}
+```
+
+The time field is discovered from probe results or configured per query. It defaults to `@timestamp` when not known.
+
+### Two search modes
+
+| Mode | When | Which search body is used |
+|------|------|---------------------------|
+| **Probe** | Exploring logs in the workbench | The query's saved inquiry search body |
+| **Check run** | Testing or executing a deployment gate | The compiled check search body (if a check is configured), otherwise the inquiry body |
+
+### Response handling
+
+On success, Pulse extracts:
+
+- Total hit count
+- Sample documents (capped, for discovery and triage)
+- Aggregations (if present in the search body)
+- Inferred field list from sample `_source` documents
+- Suggested deployment checks based on discovered fields
+
+On failure:
+
+- HTTP status and error message from the proxy
+- Debug curl output (credentials redacted)
+- Connectivity hints when the proxy is unreachable
+
+Large responses may be truncated with a flag indicating truncation.
+
+### Pass criteria evaluation
+
+After a check run, hit count (and optional aggregations) are evaluated against the query's **pass criteria**:
+
+| Criteria type | Pass condition |
+|---------------|----------------|
+| Max hits | Hit count ≤ threshold |
+| Min hits | Hit count ≥ threshold |
+| Hit count with operator | Direct comparison (≤, ≥, =, >, <) |
+| Aggregation | Named aggregation value vs threshold |
+
+The result is combined with **gate mode** to produce a final outcome: pass, warning (advisory), or fail (blocking).
+
+---
+
+## 3. Local Reference Environment
+
+For local development and testing, OpenSearch runs directly on the developer machine and acts as ELF. There is no separate ELF Proxy service — Pulse points at the OpenSearch API endpoint directly.
+
+### Local endpoints
+
+| Service | URL | Role |
+|---------|-----|------|
+| **ELF Proxy (Pulse setting)** | `http://localhost:9200` | Where Pulse sends search requests |
+| **ELF Dashboard** | `http://localhost:5601` | Browse logs manually (OpenSearch Dashboards) |
+| **Search API** | `http://localhost:9200/{indexPattern}/_search` | Resolved query endpoint |
+
+Example resolved search URL:
+
+```
+POST http://localhost:9200/app-logs-*/_search
+```
+
+### Pulse ELF Proxy settings (local)
+
+Configure under **Settings → ELF Proxy**:
+
+| Setting | Local value |
+|---------|-------------|
+| Base URL | `http://localhost:9200` |
+| Index path template | `app-logs-*` |
+| Pretty | `true` (optional) |
+| Timeout | `30` seconds |
+| Authentication | None (security disabled for local dev) |
+
+### When Pulse API runs in Docker
+
+If the Pulse API runs inside a container, `localhost:9200` will not reach OpenSearch on the host machine. Use:
+
+| Setting | Value |
+|---------|-------|
+| Base URL | `http://host.docker.internal:9200` |
+
+Do not use bind addresses such as `0.0.0.0` as the base URL — they are not valid outbound HTTP targets.
+
+### Available local indices
+
+| Index | Purpose |
+|-------|---------|
+| `app-logs-demo-2026.07.22` | Primary demo dataset (~1,500 documents, last 24 hours) |
+| `app-logs-2026.07.22` | Smaller sample dataset (~200 documents) |
+| `app-logs-*` | Wildcard index pattern covering all local app-logs indices |
+
+### ELF Dashboard setup (local)
+
+1. Open `http://localhost:5601`
+2. Go to **Stack Management → Index Patterns**
+3. Create or select index pattern: `app-logs-*`
+4. Set time field: `@timestamp`
+5. Open **Discover**, set time range to **Last 24 hours**
+6. To view only the demo dataset, filter: `_index: app-logs-demo-2026.07.22`
+
+### Connectivity checks
+
+List indices:
+
+```bash
+curl -s http://localhost:9200/_cat/indices/app-logs*?v
+```
+
+Run a sample search:
+
+```bash
+curl -s -X POST "http://localhost:9200/app-logs-*/_search" \
+  -H "Content-Type: application/json" \
+  -d '{"query":{"match_all":{}},"size":1}'
+```
+
+Test via Pulse proxy settings API:
+
+```json
+POST /api/settings/elf-proxy/test
+{
+  "baseUrl": "http://localhost:9200",
+  "indexPathTemplate": "app-logs-*",
+  "pretty": true
+}
+```
+
+### Local vs production
+
+| | Local | Production |
+|-|-------|------------|
+| ELF Proxy base URL | `http://localhost:9200` | Corporate ELF Proxy host |
+| Authentication | None | Bearer token or basic auth (required) |
+| Index resolution | Literal patterns (e.g. `app-logs-*`) | Per-application patterns resolved via platform config |
+| ELF Dashboard | `http://localhost:5601` | Corporate ELF Dashboard URL |
+
+---
+
+## 4. Dynamic Log Schemas
+
+Log structure varies by application, service, and logging framework. The product must not assume a fixed schema.
+
+- Fields are **discovered at probe time** from actual sample documents
+- Semantic roles (log level, error type, latency, service name) are **inferred or mapped dynamically**
+- Expression checks are built from whatever fields exist in the probed data
+- Index patterns differ per application — resolution is contextual, not global
+
+---
+
+## 5. API
+
+### 5.1 ELF Proxy Settings
+
+Platform-level configuration for connecting to ELF.
+
+#### `GET /api/settings/elf-proxy`
+
+Returns current proxy configuration.
+
+**Response:**
+
+```json
+{
+  "settings": {
+    "baseUrl": "https://elfproxy.company.com",
+    "indexPathTemplate": "app-logs-*",
+    "pretty": true,
+    "timeoutSeconds": 30,
+    "basicAuthUsername": "user",
+    "bearerTokenConfigured": true,
+    "basicAuthPasswordConfigured": false
+  }
+}
+```
+
+Secrets are never returned — only whether they are configured.
+
+---
+
+#### `PUT /api/settings/elf-proxy`
+
+Update proxy configuration.
+
+**Request:**
+
+```json
+{
+  "baseUrl": "https://elfproxy.company.com",
+  "indexPathTemplate": "app-logs-*",
+  "pretty": true,
+  "timeoutSeconds": 30,
+  "bearerToken": "new-token",
+  "basicAuthUsername": "user",
+  "basicAuthPassword": "password"
+}
+```
+
+Only provided fields are updated. Token and password are stored as secrets.
+
+---
+
+#### `POST /api/settings/elf-proxy/test`
+
+Test connectivity to the ELF Proxy.
+
+**Request:**
+
+```json
+{
+  "baseUrl": "https://elfproxy.company.com",
+  "indexPathTemplate": "app-logs-*",
+  "pretty": true
+}
+```
+
+Runs a minimal `match_all` search (`size: 0`) against the resolved index.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "searchUrl": "https://elfproxy.company.com/app-logs-*/_search?pretty",
+  "indexPath": "app-logs-*",
+  "curl": "curl -X POST '...' -H 'Authorization: Bearer ***' ...",
+  "result": { "hitCount": 0, "durationMs": 120 },
+  "error": null
+}
+```
+
+---
+
+### 5.2 ELF Query Library
+
+CRUD and execution for saved log gate definitions.
+
+#### `GET /api/elf-queries`
+
+List all ELF queries. Optional filter: `?applicationId={id}`.
+
+**Response:**
+
+```json
+{
+  "queries": [
+    {
+      "id": "...",
+      "name": "No error logs after deploy",
+      "description": "...",
+      "gateMode": "blocking",
+      "checkKind": "expression",
+      "applicationId": "...",
+      "indexPathTemplate": "app-logs-*",
+      "searchBody": { "query": { "match_all": {} }, "size": 10 },
+      "passCriteria": { "type": "max_hits", "threshold": 0 },
+      "isActive": true,
+      "lastProbeAt": "...",
+      "lastProbeSummary": { "hitCount": 42, "durationMs": 180 }
+    }
+  ]
+}
+```
+
+---
+
+#### `POST /api/elf-queries`
+
+Create a new ELF query.
+
+**Request:**
+
+```json
+{
+  "name": "No error logs after deploy",
+  "description": "Fails if any error-level logs appear post-deploy",
+  "gateMode": "blocking",
+  "applicationId": "...",
+  "indexPathTemplate": "app-logs-*",
+  "searchBody": { "query": { "match_all": {} }, "size": 10 },
+  "passCriteria": { "type": "max_hits", "threshold": 0 }
+}
+```
+
+---
+
+#### `GET /api/elf-queries/{queryId}`
+
+Get a single ELF query by ID.
+
+---
+
+#### `PUT /api/elf-queries/{queryId}`
+
+Update an existing ELF query.
+
+---
+
+#### `DELETE /api/elf-queries/{queryId}`
+
+Delete an ELF query.
+
+---
+
+#### `POST /api/elf-queries/{queryId}/test`
+
+Execute the query against ELF Proxy and evaluate pass criteria. Used for quick pass/fail from the library.
+
+**Request (optional):**
+
+```json
+{
+  "applicationId": "..."
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "result": {
+    "queryId": "...",
+    "result": "pass",
+    "hitCount": 0,
+    "gateMode": "blocking",
+    "durationMs": 145,
+    "resolvedUrl": "https://elfproxy.company.com/app-logs-*/_search"
+  }
+}
+```
+
+---
+
+#### `POST /api/elf-queries/{queryId}/probe`
+
+Run an exploratory search for log discovery in the workbench.
+
+**Request:**
+
+```json
+{
+  "applicationId": "...",
+  "serviceId": "...",
+  "timeRange": {
+    "field": "@timestamp",
+    "gte": "2026-07-22T00:00:00Z",
+    "lte": "2026-07-22T23:59:59Z"
+  },
+  "searchBodyOverride": null,
+  "maxResponseBytes": 524288,
+  "saveProbeSummary": true
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "probe": {
+    "searchUrl": "...",
+    "curl": "...",
+    "durationMs": 230,
+    "hitCount": 1500,
+    "sampleHits": [ { "...": "..." } ],
+    "aggregations": {},
+    "resolvedIndexPattern": "app-logs-*",
+    "fieldSchema": {
+      "timeField": "@timestamp",
+      "fields": [
+        { "path": "level", "valueType": "string", "sampleValues": ["ERROR", "INFO"] }
+      ]
+    },
+    "inferredFields": [],
+    "detectedRoles": [
+      { "role": "level", "path": "level", "confidence": "high" }
+    ],
+    "suggestedChecks": [
+      {
+        "id": "no-error-logs",
+        "label": "No ERROR logs",
+        "gateMode": "blocking",
+        "matchCount": 12
+      }
+    ],
+    "injectedTimeRange": { "field": "@timestamp", "gte": "...", "lte": "..." },
+    "truncated": false
+  },
+  "query": { "...updated with lastProbeSummary and fieldSchema if saveProbeSummary=true..." }
+}
+```
+
+---
+
+#### `POST /api/elf-queries/{queryId}/validate-check`
+
+Compile and test a deployment check draft against ELF Proxy.
+
+**Request:**
+
+```json
+{
+  "applicationId": "...",
+  "serviceId": "...",
+  "timeRange": { "field": "@timestamp", "gte": "...", "lte": "..." },
+  "checkKind": "expression",
+  "checkConfig": {
+    "mode": "expression",
+    "logic": "all",
+    "rules": [
+      { "field": "level", "operator": "eq", "value": "ERROR" }
+    ],
+    "passWhen": "no_matching_hits"
+  },
+  "passCriteria": { "type": "max_hits", "threshold": 0 },
+  "fieldSchema": {},
+  "fieldMapping": {}
+}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "compiledSearchBody": { "query": { "bool": { "filter": [...] } } },
+  "probe": { "hitCount": 12, "sampleHits": [...] },
+  "criteriaResult": "fail",
+  "gateResult": "fail",
+  "reason": "hit count 12 exceeds max_hits threshold 0",
+  "passCriteria": { "type": "max_hits", "threshold": 0 }
+}
+```
+
+---
+
+## 6. Views
+
+### 6.1 Query Library
+
+Registry of all saved ELF queries.
+
+| Shows | Actions |
+|-------|---------|
+| Name, description, gate mode, check type | Create |
+| Linked application, last probe summary | Edit |
+| Active/disabled status | Test (calls `/test`) |
+| | Open in workbench |
+| | Enable / disable |
+
+---
+
+### 6.2 Log Inquiry Workbench
+
+Opened from a query in the library. Two tabs.
+
+#### Explore Logs
+
+| Area | API used | Purpose |
+|------|----------|---------|
+| Context panel | — | Select application, service, time range |
+| Run Probe | `POST .../probe` | Search ELF, discover fields |
+| Logs tab | (probe response) | Sample hits; click cell to pre-fill a rule |
+| Fields tab | (probe response) | Discovered field paths and types |
+| Aggregations tab | (probe response) | Aggregation output |
+| Raw tab | (probe response) | Full response payload |
+| Debug tab | (probe response) | Reproducible curl (credentials redacted) |
+| Save context | `PUT .../probe` with `saveProbeSummary: true` | Persist probe window and field schema |
+| Copilot | AI endpoints | Explain probe; fix failed query |
+
+#### Deployment Check
+
+Requires a successful probe first.
+
+| Area | API used | Purpose |
+|------|----------|---------|
+| Suggested checks | (probe response) | One-click load into builder |
+| Natural language input | AI endpoint | Generate check draft from plain language |
+| Check builder | — | Field rules, pass semantics, gate mode |
+| Compiled preview | — | Read-only view of generated search body |
+| Test check | `POST .../validate-check` | Run compiled search, evaluate criteria |
+| Test result modal | (validate response) | Pass/fail, hits, gate result, samples |
+| Save check | `PUT /api/elf-queries/{id}` | Persist check config |
+| Copilot | AI endpoint | Explain result; recommend gate mode |
+
+---
+
+### 6.3 ELF Proxy Settings
+
+| Area | API used | Purpose |
+|------|----------|---------|
+| Base URL | `GET/PUT /api/settings/elf-proxy` | Proxy host |
+| Index template | `GET/PUT /api/settings/elf-proxy` | Default index resolution |
+| Timeout | `GET/PUT /api/settings/elf-proxy` | Request timeout |
+| Authentication | `PUT /api/settings/elf-proxy` | Bearer token or basic credentials |
+| Test connection | `POST /api/settings/elf-proxy/test` | Validate reachability |
+
+---
+
+### 6.4 Deployment Validation — Log Checks Step
+
+| Element | Purpose |
+|---------|---------|
+| Query multi-select | Attach saved ELF queries to this validation |
+| Service scope | Limit which services' logs are searched |
+| Auto-run toggle | Run log checks after post-deploy monitor sampling |
+| Skip option | Monitor-only validation |
+
+Blocking ELF failures can fail the deployment even when all monitors pass.
+
+---
+
+### 6.5 Deployment Detail — Log Checks Tab
+
+| Element | Purpose |
+|---------|---------|
+| Per-query status | Pass, warning, or fail |
+| Hit counts | Matching log entries |
+| Sample hits | Representative entries for triage |
+| Facets | Top services, exceptions, endpoints |
+| Run details | Compiled rules, time windows, resolved index |
+
+---
+
+### 6.6 Deployment Report
+
+Summary ELF findings alongside monitor comparisons: blocking failure count, advisory warning count, per-query results, observability findings by service.
+
+---
+
+## 7. Core Concepts
+
+| Concept | Definition |
+|---------|------------|
+| **ELF Query** | Saved search + pass criteria + gate mode |
+| **Probe** | Exploratory search for discovery; does not gate deployments |
+| **Expression Check** | Visual field rules compiled into a search body |
+| **Pass Criteria** | Rules that determine pass/fail from hit count or aggregations |
+| **Gate Mode** | `blocking` (fails deployment) or `advisory` (warns only) |
+| **Suggested Checks** | Auto-generated check drafts from probe field analysis |
+
+---
+
+## 8. ELF vs Monitors
+
+| | Monitors | ELF Queries |
+|-|----------|-------------|
+| Tests | Synthetic API steps | Real logs via ELF Proxy |
+| Runs | Pre and post deploy | After post-deploy (optional) |
+| Manual exploration | Monitor builder | ELF Dashboard + workbench |
+| Integration | Direct HTTP | ELF Proxy `POST /{index}/_search` |
+| Failure impact | Monitor comparison | ELF comparison; blocking gates fail validation |
+
+---
+
+## 9. Out of Scope
+
+- Log ingestion or index management
+- Replacing ELF Dashboard for ad-hoc browsing
+- Real-time log streaming
+- Ongoing alerting (monitors handle that)
+- Fixed or enforced log schema across applications

@@ -17,7 +17,7 @@ import {
   Table,
   TextArea,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
 import { PageShell } from "./console-shared"

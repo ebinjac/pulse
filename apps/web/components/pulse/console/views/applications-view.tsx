@@ -21,7 +21,7 @@ import {
   Table,
   TextArea,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { isFailedStatus, PageShell } from "@/components/pulse/console-shared"
 import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"

@@ -75,9 +75,8 @@ func (r *Runner) RunQuery(ctx context.Context, query domain.ElfQuery, applicatio
 	}
 	result.ResolvedURL = searchURL
 
-	token, ok := r.Secrets.GetRawSecretValue("elfProxyBearerToken")
-	if !ok || strings.TrimSpace(token) == "" {
-		err = fmt.Errorf("elf proxy bearer token is not configured")
+	auth, err := ResolveProxyAuth(r.Secrets, settings)
+	if err != nil {
 		result.Result = "fail"
 		result.ErrorMessage = err.Error()
 		result.DurationMS = int(time.Since(started).Milliseconds())
@@ -96,7 +95,7 @@ func (r *Runner) RunQuery(ctx context.Context, query domain.ElfQuery, applicatio
 		result.DurationMS = int(time.Since(started).Milliseconds())
 		return result, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	ApplyProxyAuth(req, auth)
 	req.Header.Set("Content-Type", "application/json")
 
 	client := r.Client
@@ -111,7 +110,7 @@ func (r *Runner) RunQuery(ctx context.Context, query domain.ElfQuery, applicatio
 	resp, err := client.Do(req)
 	if err != nil {
 		result.Result = "fail"
-		result.ErrorMessage = redactToken(err.Error(), token)
+		result.ErrorMessage = RedactProxyAuth(err.Error(), auth)
 		result.DurationMS = int(time.Since(started).Milliseconds())
 		return result, err
 	}
@@ -128,7 +127,7 @@ func (r *Runner) RunQuery(ctx context.Context, query domain.ElfQuery, applicatio
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		err = fmt.Errorf("elf proxy returned status %d: %s", resp.StatusCode, truncate(string(respBody), 512))
 		result.Result = "fail"
-		result.ErrorMessage = redactToken(err.Error(), token)
+		result.ErrorMessage = RedactProxyAuth(err.Error(), auth)
 		result.DurationMS = int(time.Since(started).Milliseconds())
 		return result, err
 	}

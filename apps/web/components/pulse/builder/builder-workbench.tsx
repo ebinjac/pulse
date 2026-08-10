@@ -8,6 +8,7 @@ import {
   Clock,
   Code2,
   FileJson,
+  FlaskConical,
   KeyRound,
   Play,
   Plus,
@@ -65,7 +66,7 @@ import {
   Tabs,
   TextArea,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { notifyPulseToast } from "@/components/pulse/pulse-toast-queue"
 import {
@@ -88,15 +89,18 @@ import {
   methodColors,
 } from "./builder-controls"
 import {
+  analyzeMonitorScripts,
   applyJsonToMonitor,
   checkAssertionFailed,
   configFromMonitor,
   defaultHttpConfig,
   normalizeStepOrder,
+  validateJsonConfig,
   validateMonitor,
 } from "./draft-state"
 import { StepCard } from "./step-card"
 import { BuilderTemplateField, TemplateBodyEditor } from "./template-input"
+import { builderTestScenarios } from "./test-lab"
 
 export interface BuilderWorkbenchProps {
   monitor: Monitor
@@ -105,6 +109,7 @@ export interface BuilderWorkbenchProps {
 }
 
 type ExecutionState = "idle" | "running" | "complete"
+type ExecutionMode = "unsaved" | "draft" | "published"
 type SaveState = "idle" | "saving" | "saved" | "error"
 
 export function BuilderWorkbench({ monitor, applications = [], certificateProfiles = [] }: BuilderWorkbenchProps) {
@@ -114,6 +119,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
   const [jsonText, setJsonText] = useState(() => JSON.stringify(configFromMonitor(monitor), null, 2))
   const [parseError, setParseError] = useState<string | null>(null)
   const [executionState, setExecutionState] = useState<ExecutionState>("idle")
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("unsaved")
   const [executionError, setExecutionError] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>("idle")
   const [mockRun, setMockRun] = useState<MonitorRun | null>(null)
@@ -122,7 +128,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
   const [publishedVersion, setPublishedVersion] = useState(monitor.publishedVersion ?? 1)
   const [hasUnpublishedDraft, setHasUnpublishedDraft] = useState(monitor.hasUnpublishedDraft ?? false)
   const [publishNote, setPublishNote] = useState("")
-  const [builderTab, setBuilderTab] = useState<"steps" | "variables" | "settings" | "json" | "copilot" | "versions">("steps")
+  const [builderTab, setBuilderTab] = useState<"steps" | "testlab" | "variables" | "settings" | "json" | "copilot" | "versions">("steps")
   const [selectedStepId, setSelectedStepId] = useState<string | null>(() => {
     return monitor.steps.length > 0 ? (monitor.steps[0]?.id ?? null) : null
   })
@@ -178,6 +184,8 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
   const [newSecretAlias, setNewSecretAlias] = useState("")
 
   const validationErrors = useMemo(() => validateMonitor(draft), [draft])
+  const scriptDiagnostics = useMemo(() => analyzeMonitorScripts(draft), [draft])
+  const jsonValidationErrors = useMemo(() => validateJsonConfig(jsonText), [jsonText])
 
   function updateDraft(next: Monitor) {
     setDraft(next)
@@ -438,6 +446,28 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
     }
   }
 
+  async function handleApplyJsonAndRun() {
+    handleApplyJson()
+    const result = applyJsonToMonitor(draft, jsonText)
+    if (result.error || !result.draft) return
+    setDraft(result.draft)
+    setJsonText(JSON.stringify(configFromMonitor(result.draft), null, 2))
+    await testMonitorRealData(result.draft)
+  }
+
+  function validateScriptsWithToast() {
+    if (!scriptDiagnostics.length) {
+      notifyPulseToast("success", "Scripts validated", "No syntax, variable, or secret reference warnings found.")
+      return
+    }
+    const dangerCount = scriptDiagnostics.filter((item) => item.severity === "danger").length
+    notifyPulseToast(
+      dangerCount ? "danger" : "warning",
+      dangerCount ? "Script validation failed" : "Script validation warnings",
+      `${scriptDiagnostics.length} issue${scriptDiagnostics.length === 1 ? "" : "s"} found. Review the Pre-request diagnostics panel.`,
+    )
+  }
+
   async function saveDraft(): Promise<string | null> {
     const errors = validateMonitor(draft)
     if (errors.length) {
@@ -561,6 +591,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
 
   async function runPublishedMonitor() {
     if (!draft.id) return
+    setExecutionMode("published")
     setExecutionState("running")
     setExecutionError(null)
     setMockRun(null)
@@ -650,28 +681,40 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
     notifyPulseToast("success", "Step imported", "Added a new step from the cURL command.")
   }
 
-  async function testMonitorRealData() {
-    const errors = validateMonitor(draft)
+  async function testMonitorRealData(overrideDraft = draft) {
+    const errors = validateMonitor(overrideDraft)
     if (errors.length) {
       notifyPulseToast("warning", "Fix validation errors", errors[0])
       return
     }
 
+    const diagnostics = analyzeMonitorScripts(overrideDraft)
+    if (diagnostics.length) {
+      const dangerCount = diagnostics.filter((item) => item.severity === "danger").length
+      notifyPulseToast(
+        dangerCount ? "danger" : "warning",
+        dangerCount ? "Script validation failed" : "Script validation warnings",
+        `${diagnostics.length} script issue${diagnostics.length === 1 ? "" : "s"} found before execution.`,
+      )
+      if (dangerCount) return
+    }
+
+    setExecutionMode(overrideDraft.id ? "draft" : "unsaved")
     setExecutionState("running")
     setExecutionError(null)
     setMockRun(null)
     setIsConsoleOpen(true)
 
     try {
-      const endpoint = draft.id
-        ? `/api/monitors/${draft.id}/run/draft`
+      const endpoint = overrideDraft.id
+        ? `/api/monitors/${overrideDraft.id}/run/draft`
         : `/api/monitors/test`
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(draft),
+        body: JSON.stringify(overrideDraft),
       })
 
       const payload = (await response.json().catch(() => null)) as
@@ -707,6 +750,35 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
       setExecutionState("idle")
       notifyPulseToast("danger", "Draft test failed", message)
     }
+  }
+
+  function executionModeLabel() {
+    if (executionMode === "published") return "Published run"
+    if (executionMode === "draft") return "Draft test"
+    return "Unsaved test"
+  }
+
+  function executionModeDescription() {
+    if (executionMode === "published") return "Executed against the published monitor and saved to run history."
+    if (executionMode === "draft") return "Executed against the saved draft configuration and saved as a draft run."
+    return "Executed from the unsaved builder state without saving monitor history."
+  }
+
+  function copyToClipboard(label: string, value: unknown) {
+    const text = typeof value === "string" ? value : JSON.stringify(value, null, 2)
+    void navigator.clipboard
+      ?.writeText(text)
+      .then(() => notifyPulseToast("success", "Copied", `${label} copied to clipboard.`))
+      .catch(() => notifyPulseToast("danger", "Copy failed", `Could not copy ${label}.`))
+  }
+
+  function childSendRequestsFor(stepId: string) {
+    if (!mockRun) return []
+    return mockRun.steps.filter((candidate) => candidate.id.includes(`-${stepId}-send-request-`))
+  }
+
+  function topLevelRunSteps() {
+    return mockRun?.steps.filter((step) => !step.id.includes("-send-request-")) ?? []
   }
 
   return (
@@ -801,7 +873,16 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
           <Button
             size="sm"
             variant="secondary"
-            onPress={testMonitorRealData}
+            onPress={validateScriptsWithToast}
+            className="h-9 gap-1.5"
+          >
+            <ShieldCheck className="size-3.5" />
+            Validate scripts
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() => void testMonitorRealData()}
             isDisabled={executionState === "running" || validationErrors.length > 0}
             className="h-9 gap-1.5"
           >
@@ -835,9 +916,10 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
           className="w-full gap-5"
         >
           <Tabs.ListContainer>
-            <Tabs.List aria-label="Monitor builder sections" className="w-full overflow-x-auto">
+            <Tabs.List aria-label="Monitor builder sections" className="w-full justify-start overflow-x-auto">
               {([
                 { key: "steps", label: "Steps list", icon: Workflow },
+                { key: "testlab", label: "Test Lab", icon: FlaskConical },
                 { key: "variables", label: "Variables & secrets", icon: KeyRound },
                 { key: "settings", label: "Monitor settings", icon: SlidersHorizontal },
                 { key: "json", label: "Raw JSON config", icon: FileJson },
@@ -976,7 +1058,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                       )}
                     </div>
 
-                    <Card.Footer className="flex flex-col gap-1 border-t border-border/40 bg-muted/5 p-2">
+                    <Card.Footer className="sticky bottom-0 flex flex-col gap-1 border-t border-border/40 bg-background/95 p-2 shadow-[0_-8px_18px_rgba(0,0,0,0.06)] backdrop-blur">
                       <Button
                         type="button"
                         variant="secondary"
@@ -1084,6 +1166,71 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                   )}
                 </div>
               </Card>
+            </Section>
+          </Tabs.Panel>
+
+          <Tabs.Panel id="testlab" className="pt-0">
+            <Section title="Builder Test Lab" icon={FlaskConical}>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {builderTestScenarios.map((scenario) => (
+                  <Card key={scenario.id} variant="secondary" className="p-3">
+                    <Card.Content className="flex h-full flex-col gap-3 p-0">
+                      <div className="space-y-1">
+                        <Card.Title className="text-sm font-semibold">{scenario.title}</Card.Title>
+                        <Description className="text-xs">{scenario.summary}</Description>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {scenario.covers.map((item) => (
+                          <Chip key={item} size="sm" variant="soft" className="text-[10px]">
+                            <Chip.Label>{item}</Chip.Label>
+                          </Chip>
+                        ))}
+                      </div>
+                      <div className="mt-auto flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="h-8 flex-1 gap-1 text-xs"
+                          onPress={() => {
+                            const next = scenario.apply(draft)
+                            updateDraft(next)
+                            setSelectedStepId(next.steps[0]?.id ?? null)
+                            setBuilderTab("steps")
+                            notifyPulseToast("success", "Scenario applied", `${scenario.title} is ready to run.`)
+                          }}
+                        >
+                          <PlusCircle className="size-3.5" />
+                          Apply
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-8 flex-1 gap-1 text-xs"
+                          onPress={() => {
+                            const next = scenario.apply(draft)
+                            updateDraft(next)
+                            setSelectedStepId(next.steps[0]?.id ?? null)
+                            void testMonitorRealData(next)
+                          }}
+                          isDisabled={executionState === "running"}
+                        >
+                          <Play className="size-3.5" />
+                          Apply & run
+                        </Button>
+                      </div>
+                    </Card.Content>
+                  </Card>
+                ))}
+              </div>
+              <Alert status="accent">
+                <Alert.Indicator />
+                <Alert.Content>
+                  <Alert.Description>
+                    Scenarios target <code>http://localhost:8080/api/qa/monitor-fixtures</code> so QA runs stay local and deterministic.
+                  </Alert.Description>
+                </Alert.Content>
+              </Alert>
             </Section>
           </Tabs.Panel>
 
@@ -1453,7 +1600,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                                   ...draft.alertPolicy,
                                   emailTo: event.target.value
                                     .split(",")
-                                    .map((s) => s.trim())
+                                    .map((s: string) => s.trim())
                                     .filter(Boolean),
                                 },
                               })
@@ -1471,7 +1618,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                                   ...draft.alertPolicy,
                                   onCallTargets: event.target.value
                                     .split(",")
-                                    .map((s) => s.trim())
+                                    .map((s: string) => s.trim())
                                     .filter(Boolean),
                                 },
                               })
@@ -1526,12 +1673,21 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                     <Save className="size-4" />
                     Apply JSON changes
                   </Button>
+                  <Button
+                    size="sm"
+                    onPress={() => void handleApplyJsonAndRun()}
+                    isDisabled={jsonValidationErrors.length > 0 || executionState === "running"}
+                    className="gap-1.5"
+                  >
+                    <Play className="size-4" />
+                    Apply and run draft
+                  </Button>
                 </div>
-                {parseError ? (
+                {parseError || jsonValidationErrors.length > 0 ? (
                   <Alert status="danger">
                     <Alert.Indicator />
                     <Alert.Content>
-                      <Alert.Description>{parseError}</Alert.Description>
+                      <Alert.Description>{parseError || jsonValidationErrors.join(" ")}</Alert.Description>
                     </Alert.Content>
                   </Alert>
                 ) : null}
@@ -1787,6 +1943,22 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
             </Alert>
           ) : null}
 
+          {scriptDiagnostics.length > 0 ? (
+            <Alert status={scriptDiagnostics.some((item) => item.severity === "danger") ? "danger" : "warning"}>
+              <Alert.Indicator />
+              <Alert.Content>
+                <Alert.Title>Pre-request diagnostics</Alert.Title>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+                  {scriptDiagnostics.slice(0, 5).map((item, index) => (
+                    <li key={`${item.stepId}-${index}`}>
+                      <span className="font-semibold">{item.stepName}:</span> {item.message}
+                    </li>
+                  ))}
+                </ul>
+              </Alert.Content>
+            </Alert>
+          ) : null}
+
           {saveState === "saved" ? (
             <Alert status="success">
               <Alert.Indicator />
@@ -1816,9 +1988,9 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                   <div className="flex items-center gap-3">
                     <TerminalSquare className="size-5 text-primary" />
                     <div className="text-left">
-                      <Modal.Heading className="text-sm font-bold tracking-tight">Test Execution Console</Modal.Heading>
+                      <Modal.Heading className="text-sm font-bold tracking-tight">{executionModeLabel()} console</Modal.Heading>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Live dry-run of the current monitor draft — nothing is saved to history.
+                        {executionModeDescription()}
                       </p>
                     </div>
                     {mockRun && (
@@ -1837,6 +2009,17 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                       </div>
                     )}
                   </div>
+                  {mockRun ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onPress={() => copyToClipboard("raw run JSON", mockRun)}
+                      className="h-8 gap-1.5 text-xs"
+                    >
+                      <Copy className="size-3.5" />
+                      Copy raw run
+                    </Button>
+                  ) : null}
                 </div>
               </Modal.Header>
 
@@ -1845,7 +2028,7 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
               {executionState === "running" && (
                 <div className="text-muted-foreground flex items-center gap-3 text-sm py-16 justify-center font-medium bg-muted/5 rounded-xl border border-border/20">
                   <RotateCw className="size-5 animate-spin text-primary" />
-                  Executing monitor draft steps live...
+                  Executing {executionModeLabel().toLowerCase()} steps live...
                 </div>
               )}
 
@@ -1873,7 +2056,8 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                     </div>
                   )}
 
-                  {mockRun.steps.map((step, idx) => {
+                  {topLevelRunSteps().map((step, idx) => {
+                    const childRequests = childSendRequestsFor(step.stepId)
                     const method = step.requestSummary?.split(" ")[0]
                     const url = step.requestSummary?.includes(" ")
                       ? step.requestSummary.substring(step.requestSummary.indexOf(" ") + 1)
@@ -1948,6 +2132,16 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                             <div className="flex items-center gap-2 bg-muted/30 px-3 py-2 rounded-lg border border-border/20">
                               <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider shrink-0">URL</span>
                               <span className="font-mono text-xs text-foreground select-all break-all">{url}</span>
+                              <Button
+                                variant="ghost"
+                                isIconOnly
+                                size="sm"
+                                onPress={() => copyToClipboard("resolved URL", url)}
+                                className="ml-auto size-7 shrink-0"
+                                aria-label="Copy resolved URL"
+                              >
+                                <Copy className="size-3.5" />
+                              </Button>
                             </div>
                           )}
 
@@ -1977,6 +2171,16 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                                         <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
                                           <Code2 className="size-3" />
                                           Request Headers
+                                          <Button
+                                            variant="ghost"
+                                            isIconOnly
+                                            size="sm"
+                                            onPress={() => copyToClipboard("request headers", step.requestHeaders)}
+                                            className="ml-auto size-6"
+                                            aria-label="Copy request headers"
+                                          >
+                                            <Copy className="size-3" />
+                                          </Button>
                                         </div>
                                         <div className="rounded-lg border border-border/30 overflow-hidden">
                                           {Object.entries(step.requestHeaders).map(([key, value], i) => (
@@ -1995,6 +2199,16 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                                         <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
                                           <FileJson className="size-3" />
                                           Request Body
+                                          <Button
+                                            variant="ghost"
+                                            isIconOnly
+                                            size="sm"
+                                            onPress={() => copyToClipboard("request body", prettyRequestBody)}
+                                            className="ml-auto size-6"
+                                            aria-label="Copy request body"
+                                          >
+                                            <Copy className="size-3" />
+                                          </Button>
                                         </div>
                                         <pre className="text-[11px] font-mono bg-zinc-950 text-zinc-200 p-3 rounded-lg border border-zinc-800 max-h-52 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed select-all">
                                           {prettyRequestBody}
@@ -2013,6 +2227,16 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                                   <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
                                     <FileJson className="size-3" />
                                     Response Body
+                                    <Button
+                                      variant="ghost"
+                                      isIconOnly
+                                      size="sm"
+                                      onPress={() => copyToClipboard("response body", prettyBody)}
+                                      className="ml-auto size-6"
+                                      aria-label="Copy response body"
+                                    >
+                                      <Copy className="size-3" />
+                                    </Button>
                                   </div>
                                   <pre className="text-[11px] font-mono bg-zinc-950 text-zinc-200 p-3 rounded-lg border border-zinc-800 max-h-64 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed select-all">
                                     {prettyBody}
@@ -2026,6 +2250,16 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                                   <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
                                     <Code2 className="size-3" />
                                     Response Headers
+                                    <Button
+                                      variant="ghost"
+                                      isIconOnly
+                                      size="sm"
+                                      onPress={() => copyToClipboard("response headers", step.responseHeaders)}
+                                      className="ml-auto size-6"
+                                      aria-label="Copy response headers"
+                                    >
+                                      <Copy className="size-3" />
+                                    </Button>
                                   </div>
                                   <div className="rounded-lg border border-border/30 overflow-hidden max-h-52 overflow-y-auto">
                                     {Object.entries(step.responseHeaders).map(([key, value], i) => (
@@ -2111,6 +2345,16 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                                 <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
                                   <Terminal className="size-3" />
                                   Console Output ({step.consoleOutput.length} lines)
+                                  <Button
+                                    variant="ghost"
+                                    isIconOnly
+                                    size="sm"
+                                    onPress={() => copyToClipboard("console output", step.consoleOutput?.join("\n") ?? "")}
+                                    className="ml-auto size-6"
+                                    aria-label="Copy console output"
+                                  >
+                                    <Copy className="size-3" />
+                                  </Button>
                                 </div>
                                 <div className="bg-zinc-950 rounded-lg px-4 py-3 text-[11px] font-mono text-zinc-300 space-y-1 max-h-48 overflow-auto border border-zinc-800">
                                   {step.consoleOutput.map((line, i) => (
@@ -2122,6 +2366,45 @@ export function BuilderWorkbench({ monitor, applications = [], certificateProfil
                                 </div>
                               </div>
                             )}
+
+                            {childRequests.length > 0 ? (
+                              <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3">
+                                <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-primary">
+                                  <TerminalSquare className="size-3" />
+                                  pm.sendRequest diagnostics ({childRequests.length})
+                                </div>
+                                <div className="space-y-2">
+                                  {childRequests.map((child) => (
+                                    <div key={child.id} className="rounded-md border border-border/30 bg-background/80 p-3 text-xs">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <StatusPill status={child.status} />
+                                        {child.statusCode ? <span className="font-mono text-[11px]">HTTP {child.statusCode}</span> : null}
+                                        <span className="font-mono text-[11px] text-muted-foreground">{child.latencyMs}ms</span>
+                                        <Button
+                                          variant="ghost"
+                                          isIconOnly
+                                          size="sm"
+                                          onPress={() => copyToClipboard("sendRequest diagnostic", child)}
+                                          className="ml-auto size-6"
+                                          aria-label="Copy sendRequest diagnostic"
+                                        >
+                                          <Copy className="size-3" />
+                                        </Button>
+                                      </div>
+                                      <div className="mt-2 break-all font-mono text-[11px] text-foreground">{child.requestSummary}</div>
+                                      {child.responseBody ? (
+                                        <pre className="mt-2 max-h-32 overflow-auto rounded bg-zinc-950 p-2 font-mono text-[11px] text-zinc-200">
+                                          {child.responseBody}
+                                        </pre>
+                                      ) : null}
+                                      {child.errorMessage ? (
+                                        <div className="mt-2 text-rose-600 dark:text-rose-300">{child.errorMessage}</div>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       </div>

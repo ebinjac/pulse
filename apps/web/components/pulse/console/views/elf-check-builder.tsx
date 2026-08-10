@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Button, Description, Input, Label, ListBox, Select, TextField } from "@heroui/react"
+import { Button, Description, Input, Label, ListBox, Select, TextField } from "@workspace/ui/components/ui"
 import type {
   ElfCheckConfig,
   ElfInferredField,

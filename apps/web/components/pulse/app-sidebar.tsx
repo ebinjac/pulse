@@ -18,7 +18,7 @@ import {
   Sun,
   Moon,
 } from "lucide-react"
-import { Button, Description, Drawer, Separator } from "@heroui/react"
+import { Button, Description, Drawer, Separator } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import rythmLogo from "@/assets/amexlogo.svg"
 import { useAppShell } from "./app-shell"

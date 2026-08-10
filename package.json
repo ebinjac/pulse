@@ -24,9 +24,5 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ],
-  "dependencies": {
-    "@heroui/react": "^3.1.0",
-    "@heroui/styles": "^3.1.0"
-  }
+  ]
 }

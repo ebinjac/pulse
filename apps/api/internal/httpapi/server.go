@@ -34,6 +34,7 @@ func NewServerWithDeps(store store.Store, executor executor.Executor, queue jobq
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("/api/qa/monitor-fixtures/", s.monitorFixtureRoutes)
 	mux.HandleFunc("GET /api/applications", s.listApplications)
 	mux.HandleFunc("POST /api/applications", s.createApplication)
 	mux.HandleFunc("/api/applications/", s.applicationRoutes)
@@ -79,4 +80,3 @@ func (s *Server) Routes() http.Handler {
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
-

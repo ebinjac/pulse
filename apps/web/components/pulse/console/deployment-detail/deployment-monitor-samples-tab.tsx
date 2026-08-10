@@ -5,7 +5,7 @@ import Link from "next/link"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { formatDate, Metric, StatusPill } from "@/components/pulse/console-shared"
 import type { DeploymentValidation, MonitorRun } from "@/lib/pulse-types"
-import { Button, Card, Description, EmptyState, Table } from "@heroui/react"
+import { Button, Card, Description, EmptyState, Table } from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { ValidationResultPill } from "../components/validation-result-pill"
 import {

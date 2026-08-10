@@ -8,7 +8,7 @@ import {
   RotateCw,
 } from "lucide-react"
 import type { DeploymentValidation } from "@/lib/pulse-types"
-import { Button, Dropdown } from "@heroui/react"
+import { Button, Dropdown } from "@workspace/ui/components/ui"
 import { logsConfigured } from "./deployment-detail-utils"
 
 export function DeploymentDetailActions({

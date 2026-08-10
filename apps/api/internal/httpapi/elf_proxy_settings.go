@@ -15,6 +15,8 @@ type elfProxySettingsPayload struct {
 	Pretty            *bool  `json:"pretty"`
 	TimeoutSeconds    int    `json:"timeoutSeconds"`
 	BearerToken       string `json:"bearerToken"`
+	BasicAuthUsername string `json:"basicAuthUsername"`
+	BasicAuthPassword string `json:"basicAuthPassword"`
 }
 
 type elfProxyTestPayload struct {
@@ -28,11 +30,13 @@ func (s *Server) getElfProxySettings(w http.ResponseWriter, _ *http.Request) {
 	settings := s.store.GetElfProxySettings()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settings": map[string]any{
-			"baseUrl":               settings.BaseURL,
-			"indexPathTemplate":     settings.IndexPathTemplate,
-			"pretty":                settings.Pretty,
-			"timeoutSeconds":        settings.TimeoutSeconds,
-			"bearerTokenConfigured": s.settingConfigured("elfProxyBearerToken"),
+			"baseUrl":                    settings.BaseURL,
+			"indexPathTemplate":          settings.IndexPathTemplate,
+			"pretty":                     settings.Pretty,
+			"timeoutSeconds":             settings.TimeoutSeconds,
+			"basicAuthUsername":          settings.BasicAuthUsername,
+			"bearerTokenConfigured":      s.settingConfigured("elfProxyBearerToken"),
+			"basicAuthPasswordConfigured": s.settingConfigured("elfProxyBasicAuthPassword"),
 		},
 	})
 }
@@ -49,6 +53,7 @@ func (s *Server) updateElfProxySettings(w http.ResponseWriter, r *http.Request) 
 		updated.BaseURL = strings.TrimSpace(payload.BaseURL)
 	}
 	updated.IndexPathTemplate = strings.TrimSpace(payload.IndexPathTemplate)
+	updated.BasicAuthUsername = strings.TrimSpace(payload.BasicAuthUsername)
 	if payload.Pretty != nil {
 		updated.Pretty = *payload.Pretty
 	}
@@ -58,6 +63,12 @@ func (s *Server) updateElfProxySettings(w http.ResponseWriter, r *http.Request) 
 	updated = s.store.UpdateElfProxySettings(updated)
 	if strings.TrimSpace(payload.BearerToken) != "" {
 		if err := s.upsertSettingSecret("elf-proxy-bearer-token", "elfProxyBearerToken", "ELF proxy bearer token", payload.BearerToken); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if strings.TrimSpace(payload.BasicAuthPassword) != "" {
+		if err := s.upsertSettingSecret("elf-proxy-basic-auth-password", "elfProxyBasicAuthPassword", "ELF proxy basic auth password", payload.BasicAuthPassword); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

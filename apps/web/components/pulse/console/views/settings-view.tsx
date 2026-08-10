@@ -47,7 +47,7 @@ import {
   Switch,
   Tabs,
   TextField,
-} from "@heroui/react"
+} from "@workspace/ui/components/ui"
 import { cn } from "@workspace/ui/lib/utils"
 import { Field, PageShell, Section } from "../layout"
 
@@ -528,6 +528,8 @@ export function SettingsView({
     pretty: elfProxySettings?.pretty ?? true,
     timeoutSeconds: elfProxySettings?.timeoutSeconds || 30,
     bearerToken: "",
+    basicAuthUsername: elfProxySettings?.basicAuthUsername || "",
+    basicAuthPassword: "",
   })
   const [elfTestIndexPattern, setElfTestIndexPattern] = useState("")
   const [elfTestAppId, setElfTestAppId] = useState("")
@@ -553,6 +555,7 @@ export function SettingsView({
       indexPathTemplate: elfProxySettings.indexPathTemplate,
       pretty: elfProxySettings.pretty,
       timeoutSeconds: elfProxySettings.timeoutSeconds,
+      basicAuthUsername: elfProxySettings.basicAuthUsername || "",
     }))
   }, [elfProxySettings])
 
@@ -565,7 +568,7 @@ export function SettingsView({
       const successMessage = "ELF proxy settings saved."
       setMessage(successMessage)
       notifyPulseToast("success", "ELF proxy settings saved", successMessage)
-      setElfForm((current) => ({ ...current, bearerToken: "" }))
+      setElfForm((current) => ({ ...current, bearerToken: "", basicAuthPassword: "" }))
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to save ELF proxy settings."
       setError(message)
@@ -1278,7 +1281,8 @@ export function SettingsView({
                   ELF proxy
                 </Card.Title>
                 <Card.Description>
-                  Base URL, bearer token, and default OpenSearch index pattern for log queries (e.g. <code>app-logs-*/_search</code>).
+                  Base URL, authentication, and default OpenSearch index pattern for log queries (e.g.{" "}
+                  <code>app-logs-*/_search</code>). Use bearer token or basic auth.
                 </Card.Description>
               </Card.Header>
               <Card.Content className="space-y-5 pt-6">
@@ -1296,19 +1300,73 @@ export function SettingsView({
                     description="OpenSearch index pattern, e.g. app-logs-*. Optional {{elfAppId}} placeholder only if needed."
                   />
                   <SettingsTextField
-                    label="Bearer token"
-                    type="password"
-                    value={elfForm.bearerToken || ""}
-                    onChange={(event) => setElfForm((current) => ({ ...current, bearerToken: event.target.value }))}
-                    description={elfProxySettings?.bearerTokenConfigured ? "Token configured. Leave blank to keep existing." : "Required for log checks."}
-                  />
-                  <SettingsTextField
                     label="Timeout (seconds)"
                     type="number"
                     value={String(elfForm.timeoutSeconds || 30)}
                     onChange={(event) => setElfForm((current) => ({ ...current, timeoutSeconds: Number(event.target.value) }))}
                   />
                 </div>
+
+                <section className="space-y-4 rounded-2xl border border-border/30 bg-background p-5 shadow-xs">
+                  <div className="border-b border-border/20 pb-3">
+                    <h3 className="text-sm font-semibold text-foreground">Authentication</h3>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Configure bearer token or HTTP basic auth. Bearer is used when both are set.
+                    </p>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <SettingsTextField
+                      label="Bearer token"
+                      type="password"
+                      value={elfForm.bearerToken || ""}
+                      onChange={(event) => setElfForm((current) => ({ ...current, bearerToken: event.target.value }))}
+                      description={
+                        elfProxySettings?.bearerTokenConfigured
+                          ? "Token configured. Leave blank to keep existing."
+                          : "Optional if basic auth is configured."
+                      }
+                    />
+                    <div className="hidden md:block" />
+                    <SettingsTextField
+                      label="Basic auth username"
+                      value={elfForm.basicAuthUsername || ""}
+                      onChange={(event) =>
+                        setElfForm((current) => ({ ...current, basicAuthUsername: event.target.value }))
+                      }
+                      placeholder="proxy-user"
+                      description="Username for HTTP basic authentication."
+                    />
+                    <SettingsTextField
+                      label="Basic auth password"
+                      type="password"
+                      value={elfForm.basicAuthPassword || ""}
+                      onChange={(event) =>
+                        setElfForm((current) => ({ ...current, basicAuthPassword: event.target.value }))
+                      }
+                      placeholder={
+                        elfProxySettings?.basicAuthPasswordConfigured ? "Configured" : "Required with username"
+                      }
+                      description={
+                        elfProxySettings?.basicAuthPasswordConfigured
+                          ? "Password configured. Leave blank to keep existing."
+                          : "Stored encrypted; not returned by the API."
+                      }
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Bearer token:{" "}
+                    <span className="font-semibold text-foreground">
+                      {elfProxySettings?.bearerTokenConfigured ? "configured" : "not set"}
+                    </span>
+                    {" · "}
+                    Basic auth:{" "}
+                    <span className="font-semibold text-foreground">
+                      {elfProxySettings?.basicAuthUsername && elfProxySettings?.basicAuthPasswordConfigured
+                        ? "configured"
+                        : "not set"}
+                    </span>
+                  </p>
+                </section>
                 <Switch
                   isSelected={elfForm.pretty ?? true}
                   onChange={(checked) => setElfForm((current) => ({ ...current, pretty: checked }))}
